@@ -1,0 +1,80 @@
+// ─── 赛博科技风配色方案 ──────────────────────────
+$primary: #00f5ff;          // 霓虹青
+$primary-dark: #00c8d6;
+$secondary: #7c3aed;        // 紫罗兰
+$accent: #f97316;           // 警示橙
+$success: #22c55e;
+$danger: #ef4444;
+$warning: #eab308;
+
+// 背景色
+$bg-primary: #0a0e27;       // 主背景
+$bg-secondary: #111640;     // 卡片背景
+$bg-card: #1a1f4a;          // 悬浮卡片
+$bg-input: #151a3a;         // 输入框背景
+
+// 文字色
+$text-primary: #e8eaf0;
+$text-secondary: #8890b0;
+$text-dim: #5a6080;
+
+// 边框
+$border-color: #1e2550;
+$border-glow: rgba(0, 245, 255, 0.3);
+
+// 圆角
+$radius-sm: 8rpx;
+$radius-md: 16rpx;
+$radius-lg: 24rpx;
+
+// 阴影
+$shadow-glow: 0 0 20rpx rgba(0, 245, 255, 0.15);
+$shadow-card: 0 4rpx 24rpx rgba(0, 0, 0, 0.4);
+
+// 间距
+$spacing-xs: 8rpx;
+$spacing-sm: 16rpx;
+$spacing-md: 24rpx;
+$spacing-lg: 32rpx;
+$spacing-xl: 48rpx;
+
+// 字体大小
+$font-xs: 22rpx;
+$font-sm: 26rpx;
+$font-md: 28rpx;
+$font-lg: 32rpx;
+$font-xl: 36rpx;
+$font-xxl: 48rpx;
+
+// ─── 混入 ──────────────────────────────────────────
+@mixin card {
+  background: $bg-card;
+  border-radius: $radius-md;
+  border: 1rpx solid $border-color;
+  box-shadow: $shadow-card;
+}
+
+@mixin glow-border {
+  border: 1rpx solid $border-glow;
+  box-shadow: $shadow-glow;
+}
+
+@mixin gradient-text {
+  background: linear-gradient(135deg, $primary, $secondary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@mixin gradient-btn {
+  background: linear-gradient(135deg, $primary-dark, $secondary);
+  color: #fff;
+  border: none;
+  border-radius: $radius-md;
+}
+
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

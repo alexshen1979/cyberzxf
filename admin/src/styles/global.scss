@@ -1,0 +1,21 @@
+html, body, #app {
+  margin: 0;
+  padding: 0;
+  background: #0a0e27;
+  color: #e8eaf0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+// Override Element Plus dark theme
+.el-card { background: #1a1f4a !important; border-color: #1e2550 !important; color: #e8eaf0 !important; }
+.el-table { background: transparent !important; --el-table-bg-color: #1a1f4a !important; --el-table-tr-bg-color: #1a1f4a !important; --el-table-header-bg-color: #111640 !important; --el-table-border-color: #1e2550 !important; --el-table-text-color: #e8eaf0 !important; --el-table-header-text-color: #8890b0 !important; }
+.el-descriptions { --el-descriptions-item-bordered-label-background: #111640 !important; }
+.el-pagination { --el-pagination-bg-color: transparent !important; --el-pagination-text-color: #8890b0 !important; }
+.el-input__wrapper { background: #151a3a !important; box-shadow: 0 0 0 1px #1e2550 !important; }
+.el-input__inner { color: #e8eaf0 !important; }
+.el-select .el-input__wrapper { background: #151a3a !important; }
+.el-dialog { background: #1a1f4a !important; border: 1px solid #1e2550 !important; }
+.el-dialog__title { color: #e8eaf0 !important; }
+.el-form-item__label { color: #8890b0 !important; }
+.el-radio__label { color: #e8eaf0 !important; }
+.el-slider__runway { background: #1e2550 !important; }

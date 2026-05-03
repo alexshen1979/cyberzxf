@@ -1,0 +1,62 @@
+@import './variables.scss';
+
+page {
+  background-color: $bg-primary;
+  color: $text-primary;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: $font-md;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+// ─── 全局工具类 ────────────────────────────────────
+.text-primary { color: $primary; }
+.text-secondary { color: $text-secondary; }
+.text-dim { color: $text-dim; }
+.text-gradient { @include gradient-text; }
+
+.bg-primary { background: $bg-primary; }
+.bg-card { background: $bg-card; }
+
+.card {
+  @include card;
+  padding: $spacing-md;
+  margin: $spacing-sm $spacing-md;
+}
+
+.glow-card {
+  @include card;
+  @include glow-border;
+  padding: $spacing-md;
+  margin: $spacing-sm $spacing-md;
+}
+
+.btn-primary {
+  @include gradient-btn;
+  @include flex-center;
+  padding: $spacing-sm $spacing-lg;
+  font-size: $font-md;
+  font-weight: 600;
+}
+
+.btn-glow {
+  @include gradient-btn;
+  @include glow-border;
+  padding: $spacing-sm $spacing-lg;
+  font-size: $font-md;
+  font-weight: 600;
+  @include flex-center;
+}
+
+// ─── 安全区域 ──────────────────────────────────────
+.safe-area-bottom {
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+// ─── ScrollView 隐藏滚动条 ─────────────────────────
+::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── 用户 ───────────────────────────────────────────
+
+model User {
+  id            String   @id @default(uuid())
+  unionId       String?  @unique @map("union_id")  // 微信开放平台 UnionID
+  mpOpenId      String?  @unique @map("mp_open_id")   // 公众号 OpenID
+  miniOpenId    String?  @unique @map("mini_open_id") // 小程序 OpenID
+  nickname      String?
+  avatar        String?
+  phone         String?
+  status        Int      @default(1)  // 1:正常 0:禁用
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  pointsAccount    PointsAccount?
+  pointsTransactions PointsTransaction[]
+  orders           Order[]
+  consultationRecords ConsultationRecord[]
+
+  @@map("users")
+}
+
+// ─── 点数账户 ───────────────────────────────────────
+
+model PointsAccount {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String   @unique @map("user_id")
+  balance   Int      @default(0)  // 当前可用余额
+  frozen    Int      @default(0)  // 冻结点数
+  expiredAt DateTime @map("expired_at")  // 点数过期时间
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("points_accounts")
+}
+
+// ─── 点数流水 ───────────────────────────────────────
+
+model PointsTransaction {
+  id           String   @id @default(uuid())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String   @map("user_id")
+  type         String   // gift(赠送) | charge(充值) | consume(消费) | refund(退款) | expire(过期)
+  amount       Int      // 变动数量（正数为增加，负数为扣减）
+  balanceAfter Int      @map("balance_after")  // 操作后余额
+  source       String?  // 来源：order / consultation / system
+  sourceId     String?  @map("source_id")  // 来源关联ID
+  remark       String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("points_transactions")
+}
+
+// ─── 订单 ───────────────────────────────────────────
+
+model Order {
+  id           String   @id @default(uuid())
+  orderNo      String   @unique @map("order_no")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String   @map("user_id")
+  productId    String   @map("product_id")     // 套餐ID
+  productName  String   @map("product_name")   // 套餐名称
+  amount       Int      // 实付金额（分）
+  points       Int      // 购买点数
+  bonusPoints  Int      @default(0) @map("bonus_points")  // 赠送点数
+  status       String   @default("pending")  // pending | paid | refunded | closed
+  paidAt       DateTime? @map("paid_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("orders")
+}
+
+// ─── 咨询记录 ───────────────────────────────────────
+
+model ConsultationRecord {
+  id          String   @id @default(uuid())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String   @map("user_id")
+  sessionId   String   @map("session_id")  // 会话ID，关联多轮对话
+  question    String   @db.Text
+  answer      String   @db.Text
+  model       String   // deepseek-chat / deepseek-flash
+  pointsCost  Int      @map("points_cost")  // 本次消耗点数
+  channel     String   @default("miniprogram")  // miniprogram | mp_public
+  type        String   @default("normal")  // normal(普通问答) | deep(深度分析)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId, sessionId])
+  @@map("consultation_records")
+}
+
+// ─── 干货文库 ───────────────────────────────────────
+
+model Article {
+  id        String   @id @default(uuid())
+  title     String
+  content   String   @db.Text
+  cover     String?
+  category  String   // gaokao | kaoyan | zhiye | bimian
+  status    String   @default("published")  // draft | published | archived
+  viewCount Int      @default(0) @map("view_count")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("articles")
+}
+
+// ─── AI 全局配置 ────────────────────────────────────
+
+model AiConfig {
+  id              String   @id @default(uuid())
+  model           String   @default("deepseek-chat")  // deepseek-chat | deepseek-flash
+  temperature     Float    @default(0.7)
+  maxTokens       Int      @default(2000) @map("max_tokens")
+  topP            Float    @default(0.9)  @map("top_p")
+  contextWindow   Int      @default(10)   @map("context_window")  // 对话上下文轮数
+  skillEnabled    Boolean  @default(true) @map("skill_enabled")
+  skillWeight     Float    @default(0.6)  @map("skill_weight")  // RAG 知识权重
+  pointsPerQuery  Int      @default(5)    @map("points_per_query")  // 单次问答扣点
+  pointsPerDeep   Int      @default(18)   @map("points_per_deep")   // 深度分析扣点
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("ai_config")
+}
+
+// ─── 系统公告 ───────────────────────────────────────
+
+model SystemNotice {
+  id        String   @id @default(uuid())
+  title     String
+  content   String   @db.Text
+  type      String   @default("notice")  // notice | popup | alert
+  status    String   @default("published")  // draft | published | archived
+  publishedAt DateTime? @map("published_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_notices")
+}
+
+// ─── 快捷提问模板 ───────────────────────────────────
+
+model QuickQuestion {
+  id         String   @id @default(uuid())
+  question   String   @db.Text
+  category   String   @default("general")  // general | gaokao | kaoyan | zhiye
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("quick_questions")
+}
+
+// ─── 公众号自动回复规则 ─────────────────────────────
+
+model AutoReplyRule {
+  id           String   @id @default(uuid())
+  keyword      String
+  matchMode    String   @default("exact") @map("match_mode")  // exact | contains | regex
+  replyType    String   @default("text")  @map("reply_type")  // text | image | news | card
+  replyContent String   @db.Text @map("reply_content")
+  status       String   @default("enabled")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("auto_reply_rules")
+}
+
+// ─── 公众号自定义菜单 ──────────────────────────────
+
+model WechatMenu {
+  id        String   @id @default(uuid())
+  name      String
+  type      String   // click | view | miniprogram | parent
+  key       String?  // click 类型的事件 key
+  url       String?  // view 类型的跳转 URL
+  appId     String?  @map("app_id")  // miniprogram 类型的小程序 appId
+  pagePath  String?  @map("page_path")  // miniprogram 页面路径
+  parentId  String?  @map("parent_id")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("wechat_menus")
+}
+
+// ─── 管理员 ─────────────────────────────────────────
+
+model Admin {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String   // bcrypt hash
+  role      String   @default("admin")  // admin | super_admin
+  status    Int      @default(1)
+  lastLogin DateTime? @map("last_login")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("admins")
+}
