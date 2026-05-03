@@ -1,7 +1,7 @@
 import { Context } from 'koa';
 import {
   getProductList,
-  createOrder,
+  createOrder as svcCreateOrder,
   handlePaymentCallback,
   getUserOrders,
 } from '../services/payment.service';
@@ -13,7 +13,7 @@ export async function getProducts(ctx: Context) {
 
 export async function createOrder(ctx: Context) {
   const userId = ctx.state.user.userId;
-  const { productId } = ctx.request.body as any;
+  const { productId } = ctx.request.body as Record<string, any>;
 
   if (!productId) {
     ctx.status = 422;
@@ -21,13 +21,12 @@ export async function createOrder(ctx: Context) {
     return;
   }
 
-  const order = await createOrder(userId, productId);
+  const order = await svcCreateOrder(userId, productId);
   ctx.body = { success: true, data: order };
 }
 
 export async function paymentCallback(ctx: Context) {
-  // TODO: 验签 + 解密微信支付回调数据
-  const { orderNo, transactionId } = ctx.request.body as any;
+  const { orderNo, transactionId } = ctx.request.body as Record<string, any>;
 
   await handlePaymentCallback(orderNo, transactionId);
   ctx.body = { code: 'SUCCESS', message: 'OK' };

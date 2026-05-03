@@ -20,7 +20,8 @@ export async function verifyServer(ctx: Context) {
 // 接收微信消息（POST 请求）
 export async function receiveMessage(ctx: Context) {
   try {
-    const xmlBody = (ctx.request as any).rawBody || ctx.request.body?.xml || ctx.request.body;
+    const req = ctx.request as any;
+    const xmlBody = req.rawBody || req.body;
 
     // Parse XML to JSON
     const xmlData = typeof xmlBody === 'string'
@@ -32,9 +33,9 @@ export async function receiveMessage(ctx: Context) {
 
     ctx.type = 'application/xml';
     ctx.body = replyXml;
-  } catch (err) {
-    logger.error('微信消息处理异常: %o', err);
+  } catch (err: any) {
+    logger.error('微信消息处理异常: %s', err?.message || err);
     ctx.status = 200;
-    ctx.body = 'success'; // 微信要求返回 success，否则会重试
+    ctx.body = 'success';
   }
 }

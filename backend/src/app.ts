@@ -22,7 +22,8 @@ app.use(errorHandler);
 app.use(rateLimiter);
 
 // Routes
-app.use(routes);
+app.use(routes.routes());
+app.use(routes.allowedMethods());
 
 // Start server
 const port = config.server.port;

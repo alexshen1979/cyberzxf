@@ -72,7 +72,7 @@ async function retrieveKnowledge(question: string, aiConfig: any): Promise<strin
 
     return `\n【参考知识库】\n${articles.map(a => `- ${a.title}: ${a.content.slice(0, 200)}`).join('\n')}`;
   } catch (err) {
-    logger.error('知识库检索失败: %o', err);
+    logger.error('知识库检索失败: %s', (err as Error)?.message || String(err));
     return '';
   }
 }

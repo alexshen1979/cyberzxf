@@ -1,10 +1,10 @@
 import { Context } from 'koa';
-import { consult, getUserHistory, getSessionHistory, getSessionHistory as getSession } from '../services/ai.service';
+import { consult as aiConsult, getUserHistory, getSessionHistory } from '../services/ai.service';
 import { prisma } from '../utils/prisma';
 
 export async function consult(ctx: Context) {
   const userId = ctx.state.user.userId;
-  const { question, channel, type, sessionId, context } = ctx.request.body as any;
+  const { question, channel, type, sessionId, context } = ctx.request.body as Record<string, any>;
 
   if (!question) {
     ctx.status = 422;
@@ -12,7 +12,7 @@ export async function consult(ctx: Context) {
     return;
   }
 
-  const result = await consult({
+  const result = await aiConsult({
     userId,
     question,
     channel: channel || 'miniprogram',
@@ -27,7 +27,7 @@ export async function consult(ctx: Context) {
 // SSE 流式响应（预留接口）
 export async function streamConsult(ctx: Context) {
   const userId = ctx.state.user.userId;
-  const { question, channel, type } = ctx.request.body as any;
+  const { question, channel, type } = ctx.request.body as Record<string, any>;
 
   if (!question) {
     ctx.status = 422;
@@ -35,15 +35,13 @@ export async function streamConsult(ctx: Context) {
     return;
   }
 
-  // Set SSE headers
   ctx.set({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
   });
 
-  // For now, fall back to non-streaming and send as single event
-  const result = await consult({
+  const result = await aiConsult({
     userId,
     question,
     channel: channel || 'miniprogram',

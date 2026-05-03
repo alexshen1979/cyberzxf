@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm -v)",
+      "Bash(git -v)",
+      "Bash(npm install *)",
+      "Bash(npx prisma *)",
+      "Bash(npm --prefix /Users/alexshen/00-CyberZhang/miniprogram install)"
+    ]
+  }
+}
