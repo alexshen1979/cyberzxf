@@ -72,7 +72,6 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
-@import '@/styles/variables.scss';
 
 .points-page {
   padding: $spacing-md;

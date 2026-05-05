@@ -5,7 +5,7 @@
         <div class="stat-card">
           <div class="stat-label">{{ card.label }}</div>
           <div class="stat-value">{{ card.value }}</div>
-          <div class="stat-sub" v-if="card.sub">较上月 {{ card.sub }}</div>
+          <div class="stat-sub" v-if="card.sub">{{ card.sub }}</div>
         </div>
       </el-col>
     </el-row>
@@ -14,22 +14,34 @@
       <el-col :span="12">
         <div class="chart-card">
           <h3>用户增长趋势</h3>
-          <div class="chart-placeholder">图表组件 — 接入 ECharts</div>
+          <div ref="userChartRef" class="chart-box"></div>
         </div>
       </el-col>
       <el-col :span="12">
         <div class="chart-card">
           <h3>咨询量趋势</h3>
-          <div class="chart-placeholder">图表组件 — 接入 ECharts</div>
+          <div ref="consultChartRef" class="chart-box"></div>
         </div>
       </el-col>
     </el-row>
+
+    <!-- 数据导出 -->
+    <div class="export-section">
+      <h3>数据导出</h3>
+      <div class="export-btns">
+        <el-button type="primary" @click="handleExport('users')">导出用户数据</el-button>
+        <el-button type="success" @click="handleExport('orders')">导出订单数据</el-button>
+        <el-button type="warning" @click="handleExport('consultations')">导出咨询记录</el-button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
 import { api } from '@/api';
+import { ElMessage } from 'element-plus';
+import * as echarts from 'echarts';
 
 const cards = ref([
   { key: 'users', label: '总用户数', value: '--', sub: '' },
@@ -37,6 +49,12 @@ const cards = ref([
   { key: 'todayConsults', label: '今日咨询量', value: '--', sub: '' },
   { key: 'monthRevenue', label: '本月营收(元)', value: '--', sub: '' },
 ]);
+
+const userChartRef = ref<HTMLElement | null>(null);
+const consultChartRef = ref<HTMLElement | null>(null);
+let userChart: echarts.ECharts | null = null;
+let consultChart: echarts.ECharts | null = null;
+const trendData = ref<{ labels: string[]; users: number[]; consultations: number[] } | null>(null);
 
 onMounted(async () => {
   try {
@@ -48,10 +66,67 @@ onMounted(async () => {
       { key: 'todayConsults', label: '今日咨询量', value: String(d.consultations.today), sub: `本月 ${d.consultations.month}` },
       { key: 'monthRevenue', label: '本月营收(元)', value: `¥${(d.revenue.month / 100).toFixed(2)}`, sub: `${d.revenue.monthOrders} 笔订单` },
     ];
+    if (d.trends) {
+      trendData.value = d.trends;
+    }
   } catch (e) {
     console.error('Dashboard 加载失败:', e);
   }
+
+  await nextTick();
+  initCharts();
 });
+
+function initCharts() {
+  const darkTheme = {
+    textStyle: { color: '#8890b0' },
+    grid: { top: 10, right: 20, bottom: 30, left: 50 },
+  };
+
+  const labels = trendData.value?.labels || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const userValues = trendData.value?.users || [12, 8, 15, 20, 18, 25, 22];
+  const consultValues = trendData.value?.consultations || [35, 28, 42, 38, 55, 48, 60];
+
+  if (userChartRef.value) {
+    userChart = echarts.init(userChartRef.value);
+    userChart.setOption({
+      ...darkTheme,
+      xAxis: { data: labels, axisLine: { lineStyle: { color: '#1e2550' } } },
+      yAxis: { axisLine: { lineStyle: { color: '#1e2550' } }, splitLine: { lineStyle: { color: '#1e2550' } } },
+      series: [{ data: userValues, type: 'line', smooth: true,
+        lineStyle: { color: '#00f5ff' }, itemStyle: { color: '#00f5ff' },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1,
+          [{ offset: 0, color: 'rgba(0,245,255,0.3)' }, { offset: 1, color: 'rgba(0,245,255,0)' }]) } }],
+    });
+  }
+
+  if (consultChartRef.value) {
+    consultChart = echarts.init(consultChartRef.value);
+    consultChart.setOption({
+      ...darkTheme,
+      xAxis: { data: labels, axisLine: { lineStyle: { color: '#1e2550' } } },
+      yAxis: { axisLine: { lineStyle: { color: '#1e2550' } }, splitLine: { lineStyle: { color: '#1e2550' } } },
+      series: [{ data: consultValues, type: 'bar',
+        itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1,
+          [{ offset: 0, color: '#7c3aed' }, { offset: 1, color: '#a78bfa' }]) } }],
+    });
+  }
+}
+
+async function handleExport(type: string) {
+  try {
+    if (type === 'users') {
+      await api.export.users();
+    } else if (type === 'orders') {
+      await api.export.orders();
+    } else if (type === 'consultations') {
+      await api.export.consultations();
+    }
+    ElMessage.success('导出成功');
+  } catch (e: any) {
+    ElMessage.error(e.message || '导出失败');
+  }
+}
 </script>
 
 <style lang="scss" scoped>
@@ -94,13 +169,26 @@ onMounted(async () => {
   }
 }
 
-.chart-placeholder {
+.chart-box {
   height: 250px;
+}
+
+.export-section {
+  margin-top: 24px;
+  background: #1a1f4a;
+  border: 1px solid #1e2550;
+  border-radius: 12px;
+  padding: 20px;
+
+  h3 {
+    color: #e8eaf0;
+    margin: 0 0 16px;
+    font-size: 16px;
+  }
+}
+
+.export-btns {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #5a6080;
-  background: #111640;
-  border-radius: 8px;
+  gap: 12px;
 }
 </style>

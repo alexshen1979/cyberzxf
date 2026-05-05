@@ -1,92 +1,192 @@
 <template>
-  <view class="home-page">
-    <!-- 顶部品牌区 -->
-    <view class="brand-section">
-      <view class="brand-slogan">
-        <text class="slogan-title">赛博张老师</text>
-        <text class="slogan-sub">AI 升学咨询 · 科学决策不踩坑</text>
+  <view class="page">
+    <!-- 顶部：头像 + 点数 -->
+    <view class="top-bar">
+      <view class="avatar" @click="goProfile">
+        <text>{{ (userStore.userInfo?.nickname || '张').charAt(0) }}</text>
       </view>
-      <!-- 点数展示条 -->
-      <view class="points-bar glow-card" @click="goRecharge">
-        <view class="points-left">
-          <text class="points-icon">⚡</text>
-          <text class="points-label">咨询点数</text>
+      <view class="points-chip" @click="goRecharge">
+        <text>⚡ {{ userStore.pointsBalance }} 点</text>
+      </view>
+    </view>
+
+    <!-- 问候语 -->
+    <view class="greeting-section">
+      <text class="greeting-hi">你好，{{ userStore.userInfo?.nickname || '同学' }}</text>
+    </view>
+
+    <!-- 未登录提示 -->
+    <view class="login-banner" v-if="!userStore.isLogin">
+      <text class="login-text">
+        剩余免费提问 {{ Math.max(0, freeAskLimit - freeCount) }} 次 · 登录后获得更多点数和深度分析
+      </text>
+      <text class="login-link" @click="handleLogin">登录 →</text>
+    </view>
+
+    <!-- 新对话入口 -->
+    <view class="prompt-area">
+      <text class="prompt-label">开始一个新问题</text>
+
+      <!-- 分类选择 -->
+      <view class="cat-row">
+        <view
+          v-for="cat in categories"
+          :key="cat.key"
+          class="cat-chip"
+          :class="{ active: activeCategory === cat.key }"
+          @click="activeCategory = cat.key"
+        >
+          <text>{{ cat.icon }} {{ cat.label }}</text>
         </view>
-        <view class="points-right">
-          <text class="points-value">{{ userStore.pointsBalance }}</text>
-          <text class="points-unit">点</text>
-          <text class="points-recharge">充值 →</text>
+      </view>
+
+      <!-- 输入框 -->
+      <textarea
+        class="prompt-input"
+        v-model="question"
+        placeholder="输入你的升学问题，例如：理科580分能上什么大学？"
+        :maxlength="500"
+        :auto-height="true"
+      />
+
+      <!-- 底部操作栏 -->
+      <view class="prompt-footer">
+        <text class="char-hint">{{ question.length }}/500</text>
+        <view class="send-btn" :class="{ disabled: !question.trim() }" @click="handleAsk">
+          <text>发送</text>
         </view>
       </view>
     </view>
 
-    <!-- 四大功能入口 -->
-    <view class="features-grid">
-      <view class="feature-card" v-for="item in features" :key="item.key" @click="goPage(item.path)">
-        <view class="feature-icon" :style="{ background: item.color }">
-          <text>{{ item.icon }}</text>
-        </view>
-        <text class="feature-title">{{ item.title }}</text>
-        <text class="feature-desc">{{ item.desc }}</text>
-      </view>
-    </view>
-
-    <!-- 快捷咨询入口 -->
-    <view class="quick-ask-section">
-      <view class="section-title">
-        <text class="title-icon">💬</text>
-        <text>快捷提问</text>
-      </view>
+    <!-- 快捷提问 -->
+    <view class="quick-section">
       <view class="quick-tags">
-        <view class="quick-tag" v-for="q in quickQuestions" :key="q.id" @click="quickAsk(q.question)">
-          <text>{{ q.question }}</text>
+        <text
+          class="quick-chip"
+          v-for="q in quickQuestions"
+          :key="q.id"
+          @click="question = q.question"
+        >{{ q.question }}</text>
+      </view>
+    </view>
+
+    <!-- 登录提醒弹窗 -->
+    <view class="modal-mask" v-if="showLoginModal" @click="showLoginModal = false">
+      <view class="modal-card" @click.stop>
+        <text class="modal-title">登录后可获得更多</text>
+        <text class="modal-desc">免费咨询点数和深度分析结果，AI 为你精准匹配院校和专业</text>
+        <view class="modal-btn" @click="handleLogin">
+          <text>微信一键登录</text>
         </view>
+        <text class="modal-close" @click="showLoginModal = false">暂不登录</text>
       </view>
     </view>
 
-    <!-- 系统公告 -->
-    <view class="notice-section" v-if="userStore.notices.length > 0">
-      <view class="notice-bar" @click="goNotices">
-        <text class="notice-icon">📢</text>
-        <swiper class="notice-swiper" vertical autoplay circular :interval="3000">
-          <swiper-item v-for="notice in userStore.notices" :key="notice.id">
-            <text class="notice-text">{{ notice.title }}</text>
-          </swiper-item>
-        </swiper>
-      </view>
-    </view>
-
-    <!-- 底部悬浮充值按钮 -->
-    <view class="float-recharge" @click="goRecharge">
-      <text class="float-icon">⚡</text>
-      <text>充值咨询点数</text>
+    <!-- 公告 -->
+    <view class="notice-strip" v-if="userStore.notices.length > 0" @click="goNotices">
+      <text class="notice-dot">●</text>
+      <swiper class="notice-swiper" vertical autoplay circular :interval="3000">
+        <swiper-item v-for="n in userStore.notices" :key="n.id">
+          <text class="notice-text">{{ n.title }}</text>
+        </swiper-item>
+      </swiper>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useUserStore } from '@/store/user';
+import { api } from '@/api';
 
 const userStore = useUserStore();
 
-const features = [
-  { key: 'gaokao', icon: '🎓', title: '志愿填报', desc: '高考择校分析', color: 'linear-gradient(135deg, #00f5ff, #0099ff)', path: '/pages/consult/index?type=gaokao' },
-  { key: 'kaoyan', icon: '📚', title: '考研规划', desc: '院校专业推荐', color: 'linear-gradient(135deg, #7c3aed, #a855f7)', path: '/pages/consult/index?type=kaoyan' },
-  { key: 'zhiye', icon: '💼', title: '职业规划', desc: '行业前景分析', color: 'linear-gradient(135deg, #f97316, #fb923c)', path: '/pages/consult/index?type=zhiye' },
-  { key: 'bimian', icon: '⚠️', title: '专业避坑', desc: '深度解析避雷', color: 'linear-gradient(135deg, #ef4444, #f87171)', path: '/pages/consult/index?type=bimian' },
+const categories = [
+  { key: 'gaokao', icon: '🎓', label: '智能选校' },
+  { key: 'kaoyan', icon: '📚', label: '考研规划' },
+  { key: 'zhiye', icon: '💼', label: '职业方向' },
+  { key: 'bimian', icon: '🔍', label: '专业避坑' },
 ];
 
-const quickQuestions = ref([
+const activeCategory = ref('gaokao');
+const question = ref('');
+const showLoginModal = ref(false);
+const freeCount = ref(0);
+const freeAskLimit = ref(100);
+
+const defaultQuestions = [
   { id: '1', question: '理科580分能上什么大学？' },
   { id: '2', question: '计算机专业就业前景如何？' },
   { id: '3', question: '土木工程还值得学吗？' },
   { id: '4', question: '考研二战划算吗？' },
   { id: '5', question: '金融学和经济学有什么区别？' },
-]);
+];
 
-function goPage(path: string) {
-  uni.navigateTo({ url: path });
+const quickQuestions = ref<Array<{ id: string; question: string }>>([]);
+
+onMounted(async () => {
+  freeCount.value = parseInt(uni.getStorageSync('free_ask_count') || '0');
+  // 从后台获取免费提问次数配置
+  try {
+    const cfg = await api.config.getPublic();
+    if (cfg.data?.freeAskLimit !== undefined) {
+      freeAskLimit.value = cfg.data.freeAskLimit;
+    }
+  } catch { /* 使用默认值 */ }
+  try {
+    const res = await api.ai.getQuickQuestions();
+    if ((res.data as any[])?.length > 0) {
+      quickQuestions.value = res.data as any[];
+    } else {
+      quickQuestions.value = defaultQuestions;
+    }
+  } catch {
+    quickQuestions.value = defaultQuestions;
+  }
+});
+
+// 登录后重置免费次数
+watch(() => userStore.isLogin, (val) => {
+  if (val) {
+    freeCount.value = 0;
+    uni.removeStorageSync('free_ask_count');
+    showLoginModal.value = false;
+  }
+});
+
+function handleLogin() {
+  userStore.silentLogin();
+}
+
+function handleAsk() {
+  if (!question.value.trim()) return;
+
+  // 已登录直接提问
+  if (userStore.isLogin) {
+    goAsk();
+    return;
+  }
+
+  // 未登录：检查免费次数
+  if (freeCount.value >= freeAskLimit.value) {
+    showLoginModal.value = true;
+    return;
+  }
+
+  freeCount.value++;
+  uni.setStorageSync('free_ask_count', String(freeCount.value));
+  goAsk();
+}
+
+function goAsk() {
+  userStore.consultType = activeCategory.value;
+  userStore.consultQuestion = question.value.trim();
+  userStore.pendingConsult = true;
+  uni.switchTab({ url: '/pages/consult/index' });
+}
+
+function goProfile() {
+  uni.switchTab({ url: '/pages/profile/index' });
 }
 
 function goRecharge() {
@@ -96,196 +196,252 @@ function goRecharge() {
 function goNotices() {
   uni.navigateTo({ url: '/pages/notices/index' });
 }
-
-function quickAsk(question: string) {
-  uni.navigateTo({ url: `/pages/consult/index?question=${encodeURIComponent(question)}` });
-}
 </script>
 
 <style lang="scss" scoped>
-@import '@/styles/variables.scss';
-
-.home-page {
-  padding-bottom: 120rpx;
-}
-
-.brand-section {
-  padding: $spacing-xl $spacing-md $spacing-md;
-  text-align: center;
-}
-
-.slogan-title {
-  font-size: $font-xxl;
-  font-weight: 800;
-  @include gradient-text;
-  display: block;
-}
-
-.slogan-sub {
-  font-size: $font-sm;
-  color: $text-secondary;
-  margin-top: $spacing-xs;
-  display: block;
-}
-
-.points-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: $spacing-lg;
-  padding: $spacing-sm $spacing-md;
-}
-
-.points-left {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-}
-
-.points-icon {
-  font-size: $font-lg;
-}
-
-.points-label {
-  font-size: $font-sm;
-  color: $text-secondary;
-}
-
-.points-right {
-  display: flex;
-  align-items: baseline;
-  gap: 4rpx;
-}
-
-.points-value {
-  font-size: $font-xl;
-  font-weight: 700;
-  color: $primary;
-}
-
-.points-unit {
-  font-size: $font-sm;
-  color: $text-secondary;
-}
-
-.points-recharge {
-  font-size: $font-xs;
-  color: $primary;
-  margin-left: $spacing-xs;
-}
-
-.features-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: $spacing-sm;
+.page {
+  min-height: 100vh;
+  background: #f8f9fa;
   padding: 0 $spacing-md;
 }
 
-.feature-card {
-  @include card;
-  padding: $spacing-md;
+// ─── Top bar ─────────────────────────────────
+.top-bar {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
   align-items: center;
-  gap: $spacing-xs;
+  padding-top: 24rpx;
+  margin-bottom: 48rpx;
 }
 
-.feature-icon {
-  width: 80rpx;
-  height: 80rpx;
-  border-radius: 50%;
+.avatar {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: $radius-full;
+  background: $brand;
+  color: #fff;
+  font-size: 28rpx;
+  font-weight: 600;
   @include flex-center;
-  font-size: $font-xl;
 }
 
-.feature-title {
-  font-size: $font-md;
-  font-weight: 600;
+.points-chip {
+  background: #fff;
+  border: 1rpx solid $border;
+  border-radius: 20rpx;
+  padding: 8rpx 20rpx;
+  font-size: 22rpx;
+  color: $text-secondary;
 }
 
-.feature-desc {
-  font-size: $font-xs;
-  color: $text-dim;
+// ─── Greeting ────────────────────────────────
+.greeting-section {
+  margin-bottom: 24rpx;
 }
 
-.quick-ask-section {
-  padding: $spacing-md;
+.greeting-hi {
+  font-size: 52rpx;
+  font-weight: 700;
+  color: $text-primary;
+  letter-spacing: -1rpx;
 }
 
-.section-title {
-  font-size: $font-lg;
-  font-weight: 600;
-  margin-bottom: $spacing-sm;
+// ─── Login banner ────────────────────────────
+.login-banner {
+  background: $brand-light;
+  border-radius: 12rpx;
+  padding: 16rpx 20rpx;
+  margin-bottom: 32rpx;
   display: flex;
   align-items: center;
-  gap: $spacing-xs;
+  justify-content: space-between;
 }
 
-.title-icon {
-  font-size: $font-lg;
+.login-text {
+  font-size: 24rpx;
+  color: $brand;
+}
+
+.login-link {
+  font-size: 24rpx;
+  color: $brand;
+  font-weight: 600;
+}
+
+// ─── Prompt area ─────────────────────────────
+.prompt-area {
+  background: #fff;
+  border: 1rpx solid $border;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.prompt-label {
+  font-size: 22rpx;
+  color: $text-tertiary;
+  display: block;
+  margin-bottom: 20rpx;
+}
+
+.cat-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12rpx;
+  margin-bottom: 24rpx;
+}
+
+.cat-chip {
+  padding: 16rpx 0;
+  border-radius: 16rpx;
+  font-size: 26rpx;
+  color: $text-secondary;
+  background: $bg-page;
+  border: 1rpx solid transparent;
+  text-align: center;
+
+  &.active {
+    background: $brand-light;
+    border-color: rgba($brand, 0.2);
+    color: $brand;
+    font-weight: 600;
+  }
+}
+
+.prompt-input {
+  width: 100%;
+  min-height: 200rpx;
+  font-size: 30rpx;
+  color: $text-primary;
+  line-height: 1.8;
+}
+
+.prompt-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 16rpx;
+  margin-top: 8rpx;
+  border-top: 1rpx solid $border-light;
+}
+
+.char-hint {
+  font-size: 22rpx;
+  color: $text-tertiary;
+}
+
+.send-btn {
+  background: $text-primary;
+  padding: 12rpx 32rpx;
+  border-radius: 20rpx;
+
+  text {
+    color: #fff;
+    font-size: 26rpx;
+    font-weight: 500;
+  }
+
+  &.disabled {
+    opacity: 0.3;
+  }
+}
+
+// ─── Quick questions ─────────────────────────
+.quick-section {
+  margin-bottom: 24rpx;
 }
 
 .quick-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: $spacing-sm;
+  gap: 12rpx;
 }
 
-.quick-tag {
-  background: $bg-card;
-  border: 1rpx solid $border-color;
-  border-radius: 32rpx;
-  padding: $spacing-xs $spacing-md;
-  font-size: $font-sm;
+.quick-chip {
+  background: #fff;
+  border: 1rpx solid $border;
+  border-radius: 20rpx;
+  padding: 10rpx 20rpx;
+  font-size: 24rpx;
   color: $text-secondary;
 }
 
-.notice-section {
-  padding: 0 $spacing-md;
-  margin-top: $spacing-sm;
+// ─── Modal ────────────────────────────────────
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 999;
+  @include flex-center;
+  padding: 48rpx;
 }
 
-.notice-bar {
-  @include card;
+.modal-card {
+  background: #fff;
+  border-radius: 24rpx;
+  padding: 48rpx 36rpx 36rpx;
+  text-align: center;
+  width: 100%;
+  max-width: 560rpx;
+}
+
+.modal-title {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: $text-primary;
+  display: block;
+  margin-bottom: 12rpx;
+}
+
+.modal-desc {
+  font-size: 26rpx;
+  color: $text-secondary;
+  line-height: 1.6;
+  display: block;
+  margin-bottom: 36rpx;
+}
+
+.modal-btn {
+  background: $brand;
+  border-radius: 16rpx;
+  padding: 20rpx 0;
+  margin-bottom: 20rpx;
+
+  text {
+    color: #fff;
+    font-size: 30rpx;
+    font-weight: 600;
+  }
+}
+
+.modal-close {
+  font-size: 24rpx;
+  color: $text-tertiary;
+}
+
+// ─── Notice ──────────────────────────────────
+.notice-strip {
   display: flex;
   align-items: center;
-  gap: $spacing-xs;
-  padding: $spacing-sm $spacing-md;
+  gap: 12rpx;
+  padding: 16rpx 0;
 }
 
-.notice-icon {
-  font-size: $font-md;
-  flex-shrink: 0;
+.notice-dot {
+  color: $brand;
+  font-size: 20rpx;
 }
 
 .notice-swiper {
   flex: 1;
-  height: 40rpx;
+  height: 36rpx;
 }
 
 .notice-text {
-  font-size: $font-sm;
-  color: $text-secondary;
-  line-height: 40rpx;
-}
-
-.float-recharge {
-  position: fixed;
-  bottom: 120rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  @include gradient-btn;
-  padding: $spacing-sm $spacing-lg;
-  border-radius: 48rpx;
-  font-size: $font-md;
-  font-weight: 600;
-  z-index: 100;
-  @include flex-center;
-  gap: $spacing-xs;
-  box-shadow: 0 4rpx 20rpx rgba(124, 58, 237, 0.4);
-}
-
-.float-icon {
-  font-size: $font-md;
+  font-size: 24rpx;
+  color: $text-tertiary;
+  line-height: 36rpx;
+  @include text-ellipsis;
 }
 </style>

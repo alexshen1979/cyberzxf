@@ -2,9 +2,16 @@ import { Context } from 'koa';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../utils/prisma';
 import { signToken } from '../middleware/auth';
+import { AppError } from '../middleware/errorHandler';
 import { syncMenu as syncWechatMenuService } from '../services/wechat.service';
 import { getBalance } from '../services/points.service';
 import { getRevenueStats } from '../services/payment.service';
+import { transformSkillContent } from '../utils/skillTransform';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('admin-ctrl');
+
+const GITHUB_SKILL_URL = 'https://raw.githubusercontent.com/alchaincyf/zhangxuefeng-skill/main/SKILL.md';
 
 // ─── 管理员登录 ─────────────────────────────────────
 
@@ -94,11 +101,20 @@ export async function getUserDetail(ctx: Context) {
 
 export async function updateUser(ctx: Context) {
   const { nickname, phone, status } = ctx.request.body as any;
-  const user = await prisma.user.update({
-    where: { id: ctx.params.id },
-    data: { nickname, phone, status },
-  });
-  ctx.body = { success: true, data: user };
+  try {
+    const user = await prisma.user.update({
+      where: { id: ctx.params.id },
+      data: { nickname, phone, status },
+    });
+    ctx.body = { success: true, data: user };
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      ctx.status = 404;
+      ctx.body = { success: false, message: '用户不存在' };
+      return;
+    }
+    throw err;
+  }
 }
 
 // ─── 点数管理 ───────────────────────────────────────
@@ -111,9 +127,21 @@ export async function getUserPoints(ctx: Context) {
 export async function adjustPoints(ctx: Context) {
   const { userId, amount, remark } = ctx.request.body as any;
 
+  // Input validation
+  if (!userId || typeof amount !== 'number' || !Number.isFinite(amount) || !Number.isInteger(amount)) {
+    ctx.status = 422;
+    ctx.body = { success: false, message: '参数错误：userId 和 amount（整数）为必填项' };
+    return;
+  }
+  if (amount > 10000 || amount < -10000) {
+    ctx.status = 422;
+    ctx.body = { success: false, message: '单次调整不得超过 ±10000 点' };
+    return;
+  }
+
   await prisma.$transaction(async (tx) => {
     const account = await tx.pointsAccount.findUnique({ where: { userId } });
-    if (!account) throw new Error('用户点数账户不存在');
+    if (!account) throw new AppError(404, '用户点数账户不存在', 'POINTS_ACCOUNT_NOT_FOUND');
 
     const updated = await tx.pointsAccount.update({
       where: { userId },
@@ -193,16 +221,34 @@ export async function updateNotice(ctx: Context) {
   const { title, content, type, status } = ctx.request.body as any;
   const data: any = { title, content, type, status };
   if (status === 'published') data.publishedAt = new Date();
-  const notice = await prisma.systemNotice.update({
-    where: { id: ctx.params.id },
-    data,
-  });
-  ctx.body = { success: true, data: notice };
+  try {
+    const notice = await prisma.systemNotice.update({
+      where: { id: ctx.params.id },
+      data,
+    });
+    ctx.body = { success: true, data: notice };
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      ctx.status = 404;
+      ctx.body = { success: false, message: '公告不存在' };
+      return;
+    }
+    throw err;
+  }
 }
 
 export async function deleteNotice(ctx: Context) {
-  await prisma.systemNotice.delete({ where: { id: ctx.params.id } });
-  ctx.body = { success: true, message: '删除成功' };
+  try {
+    await prisma.systemNotice.delete({ where: { id: ctx.params.id } });
+    ctx.body = { success: true, message: '删除成功' };
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      ctx.status = 404;
+      ctx.body = { success: false, message: '公告不存在' };
+      return;
+    }
+    throw err;
+  }
 }
 
 // ─── 快捷提问管理 ──────────────────────────────────
@@ -224,16 +270,34 @@ export async function createQuickQuestion(ctx: Context) {
 
 export async function updateQuickQuestion(ctx: Context) {
   const { question, category, sortOrder } = ctx.request.body as any;
-  const q = await prisma.quickQuestion.update({
-    where: { id: ctx.params.id },
-    data: { question, category, sortOrder },
-  });
-  ctx.body = { success: true, data: q };
+  try {
+    const q = await prisma.quickQuestion.update({
+      where: { id: ctx.params.id },
+      data: { question, category, sortOrder },
+    });
+    ctx.body = { success: true, data: q };
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      ctx.status = 404;
+      ctx.body = { success: false, message: '快捷提问不存在' };
+      return;
+    }
+    throw err;
+  }
 }
 
 export async function deleteQuickQuestion(ctx: Context) {
-  await prisma.quickQuestion.delete({ where: { id: ctx.params.id } });
-  ctx.body = { success: true, message: '删除成功' };
+  try {
+    await prisma.quickQuestion.delete({ where: { id: ctx.params.id } });
+    ctx.body = { success: true, message: '删除成功' };
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      ctx.status = 404;
+      ctx.body = { success: false, message: '快捷提问不存在' };
+      return;
+    }
+    throw err;
+  }
 }
 
 // ─── 自动回复规则 ──────────────────────────────────
@@ -261,13 +325,20 @@ export async function updateAutoReplyRule(ctx: Context) {
 }
 
 export async function deleteAutoReplyRule(ctx: Context) {
-  await prisma.autoReplyRule.delete({ where: { id: ctx.params.id } });
-  ctx.body = { success: true, message: '删除成功' };
+  try {
+    await prisma.autoReplyRule.delete({ where: { id: ctx.params.id } });
+    ctx.body = { success: true, message: '删除成功' };
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      ctx.status = 404;
+      ctx.body = { success: false, message: '自动回复规则不存在' };
+      return;
+    }
+    throw err;
+  }
 }
 
 // ─── AI 配置 ────────────────────────────────────────
-
-let cachedAiConfig: any = null;
 
 export async function getAiConfig(ctx: Context) {
   let aiConfig = await prisma.aiConfig.findFirst();
@@ -278,18 +349,158 @@ export async function getAiConfig(ctx: Context) {
 }
 
 export async function updateAiConfig(ctx: Context) {
-  const { model, temperature, maxTokens, topP, contextWindow, skillEnabled, skillWeight, pointsPerQuery, pointsPerDeep } = ctx.request.body as any;
+  const { model, temperature, maxTokens, topP, contextWindow, skillEnabled, skillWeight, pointsPerQuery, pointsPerDeep, freeAskLimit, apiKey, apiBaseUrl, timeout } = ctx.request.body as any;
 
   const aiConfig = await prisma.aiConfig.findFirst();
-  if (!aiConfig) throw new Error('AI 配置不存在');
+  if (!aiConfig) throw new AppError(404, 'AI 配置不存在', 'AI_CONFIG_NOT_FOUND');
 
   const updated = await prisma.aiConfig.update({
     where: { id: aiConfig.id },
-    data: { model, temperature, maxTokens, topP, contextWindow, skillEnabled, skillWeight, pointsPerQuery, pointsPerDeep },
+    data: { model, temperature, maxTokens, topP, contextWindow, skillEnabled, skillWeight, pointsPerQuery, pointsPerDeep, freeAskLimit, apiKey, apiBaseUrl, timeout },
   });
 
-  cachedAiConfig = updated;
   ctx.body = { success: true, data: updated };
+}
+
+// ─── 公共配置（供小程序读取） ──────────────────────────
+
+export async function getPublicConfig(ctx: Context) {
+  const aiConfig = await prisma.aiConfig.findFirst();
+  ctx.body = {
+    success: true,
+    data: {
+      freeAskLimit: aiConfig?.freeAskLimit ?? 2,
+    },
+  };
+}
+
+// ─── Skill 管理 ─────────────────────────────────────
+
+export async function getSkills(ctx: Context) {
+  const skills = await prisma.skill.findMany({
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+  });
+  ctx.body = { success: true, data: skills };
+}
+
+export async function createSkill(ctx: Context) {
+  const { name, description, systemPrompt, model, temperature, maxTokens, topP, keywords, status, isDefault, sortOrder } = ctx.request.body as any;
+
+  const skill = await prisma.$transaction(async (tx) => {
+    if (isDefault) {
+      await tx.skill.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+    }
+    return tx.skill.create({
+      data: {
+        name,
+        description,
+        systemPrompt,
+        model: model || 'deepseek-chat',
+        temperature,
+        maxTokens,
+        topP,
+        keywords: Array.isArray(keywords) ? JSON.stringify(keywords) : (keywords || '[]'),
+        status: status || 'enabled',
+        isDefault: isDefault || false,
+        sortOrder: sortOrder || 0,
+      },
+    });
+  });
+
+  ctx.body = { success: true, data: skill };
+}
+
+export async function updateSkill(ctx: Context) {
+  const { name, description, systemPrompt, model, temperature, maxTokens, topP, keywords, status, isDefault, sortOrder } = ctx.request.body as any;
+
+  try {
+    const skill = await prisma.$transaction(async (tx) => {
+      if (isDefault) {
+        await tx.skill.updateMany({
+          where: { isDefault: true, id: { not: ctx.params.id } },
+          data: { isDefault: false },
+        });
+      }
+      const data: any = { name, description, systemPrompt, model, temperature, maxTokens, topP, status, isDefault, sortOrder };
+      if (keywords !== undefined) {
+        data.keywords = Array.isArray(keywords) ? JSON.stringify(keywords) : keywords;
+      }
+      return tx.skill.update({ where: { id: ctx.params.id }, data });
+    });
+    ctx.body = { success: true, data: skill };
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      ctx.status = 404;
+      ctx.body = { success: false, message: 'Skill 不存在' };
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function deleteSkill(ctx: Context) {
+  try {
+    await prisma.skill.delete({ where: { id: ctx.params.id } });
+    ctx.body = { success: true, message: '删除成功' };
+  } catch (err: any) {
+    if (err?.code === 'P2025') {
+      ctx.status = 404;
+      ctx.body = { success: false, message: 'Skill 不存在' };
+      return;
+    }
+    throw err;
+  }
+}
+
+// ─── Skill GitHub 同步 ───────────────────────────
+
+export async function syncSkillFromGithub(ctx: Context) {
+  const { skillId } = (ctx.request.body as any) || {};
+
+  try {
+    const response = await fetch(GITHUB_SKILL_URL, { signal: AbortSignal.timeout(15000) });
+    if (!response.ok) {
+      ctx.status = 502;
+      ctx.body = { success: false, message: `获取 GitHub 内容失败: HTTP ${response.status}` };
+      return;
+    }
+
+    const rawContent = await response.text();
+    if (!rawContent || rawContent.length < 500) {
+      ctx.status = 502;
+      ctx.body = { success: false, message: '获取的 SKILL.md 内容过短，请检查 GitHub 仓库' };
+      return;
+    }
+
+    const systemPrompt = transformSkillContent(rawContent);
+
+    // 指定 skillId 或更新默认 Skill
+    let skill;
+    if (skillId) {
+      skill = await prisma.skill.update({
+        where: { id: skillId },
+        data: { systemPrompt },
+      });
+    } else {
+      const defaultSkill = await prisma.skill.findFirst({ where: { isDefault: true } });
+      if (!defaultSkill) {
+        ctx.status = 404;
+        ctx.body = { success: false, message: '没有默认 Skill，请先创建一个或指定 skillId' };
+        return;
+      }
+      skill = await prisma.skill.update({
+        where: { id: defaultSkill.id },
+        data: { systemPrompt },
+      });
+    }
+
+    logger.info('Skill "%s" 已从 GitHub 同步 (%d 字符)', skill.name, systemPrompt.length);
+    ctx.body = { success: true, data: skill, message: `同步成功 (${systemPrompt.length} 字符)` };
+  } catch (err: any) {
+    logger.error('GitHub 同步失败: %s', err.message);
+    ctx.status = 502;
+    ctx.body = { success: false, message: `同步失败: ${err.message}` };
+  }
 }
 
 // ─── 公众号菜单管理 ────────────────────────────────
@@ -304,12 +515,125 @@ export async function syncWechatMenu(ctx: Context) {
   ctx.body = { success: true, message: '菜单同步成功' };
 }
 
+// ─── 数据导出 ───────────────────────────────────────
+
+function escapeCsvField(val: any): string {
+  const s = val == null ? '' : String(val);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function arrayToCsv(headers: string[], rows: any[][]): string {
+  const headerLine = headers.map(escapeCsvField).join(',');
+  const bodyLines = rows.map(row => row.map(escapeCsvField).join(','));
+  return [headerLine, ...bodyLines].join('\n');
+}
+
+export async function exportUsers(ctx: Context) {
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: 'desc' },
+    include: { pointsAccount: { select: { balance: true } } },
+  });
+
+  const headers = ['ID', '昵称', '小程序OpenID', '公众号OpenID', 'UnionID', '点数余额', '状态', '注册时间'];
+  const rows = users.map(u => [
+    u.id, u.nickname || '', u.miniOpenId || '', u.mpOpenId || '', u.unionId || '',
+    u.pointsAccount?.balance ?? 0, u.status === 1 ? '正常' : '禁用',
+    u.createdAt.toISOString(),
+  ]);
+
+  ctx.set('Content-Type', 'text/csv; charset=utf-8');
+  ctx.set('Content-Disposition', `attachment; filename="users_${new Date().toISOString().slice(0, 10)}.csv"`);
+  ctx.body = '﻿' + arrayToCsv(headers, rows); // BOM for Excel
+}
+
+export async function exportOrders(ctx: Context) {
+  const { startDate, endDate } = ctx.query as any;
+
+  const where: any = { status: 'paid' };
+  if (startDate || endDate) {
+    where.paidAt = {};
+    if (startDate) where.paidAt.gte = new Date(startDate);
+    if (endDate) where.paidAt.lte = new Date(endDate);
+  }
+
+  const orders = await prisma.order.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const headers = ['订单号', '用户ID', '商品名称', '金额(分)', '购买点数', '赠送点数', '状态', '支付时间', '创建时间'];
+  const rows = orders.map(o => [
+    o.orderNo, o.userId, o.productName, o.amount, o.points, o.bonusPoints,
+    o.status === 'paid' ? '已完成' : o.status,
+    o.paidAt?.toISOString() || '',
+    o.createdAt.toISOString(),
+  ]);
+
+  const revenue = orders.reduce((sum, o) => sum + o.amount, 0);
+  const summaryHeader = ['', '', '', '', '', '', '', '', ''];
+  const summaryRow = ['', '', '合计营收(分):', revenue, '总订单数:', orders.length, '', '', ''];
+
+  ctx.set('Content-Type', 'text/csv; charset=utf-8');
+  ctx.set('Content-Disposition', `attachment; filename="orders_${new Date().toISOString().slice(0, 10)}.csv"`);
+  ctx.body = '﻿' + arrayToCsv(headers, rows) + '\n' + arrayToCsv(summaryHeader, [summaryRow]);
+}
+
+export async function exportConsultations(ctx: Context) {
+  const { startDate, endDate } = ctx.query as any;
+
+  const where: any = {};
+  if (startDate || endDate) {
+    where.createdAt = {};
+    if (startDate) where.createdAt.gte = new Date(startDate);
+    if (endDate) where.createdAt.lte = new Date(endDate);
+  }
+
+  const records = await prisma.consultationRecord.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    take: 5000, // 限制导出条数
+  });
+
+  const headers = ['ID', '用户ID', 'SessionID', '问题', '回答', '模型', '消耗点数', '类型', '渠道', '时间'];
+  const rows = records.map(r => [
+    r.id, r.userId, r.sessionId,
+    r.question.replace(/[\n\r]/g, ' ').slice(0, 200),
+    r.answer.replace(/[\n\r]/g, ' ').slice(0, 500),
+    r.model, r.pointsCost, r.type, r.channel,
+    r.createdAt.toISOString(),
+  ]);
+
+  ctx.set('Content-Type', 'text/csv; charset=utf-8');
+  ctx.set('Content-Disposition', `attachment; filename="consultations_${new Date().toISOString().slice(0, 10)}.csv"`);
+  ctx.body = '﻿' + arrayToCsv(headers, rows);
+}
+
 // ─── 数据大盘 ───────────────────────────────────────
 
 export async function getDashboard(ctx: Context) {
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // 近 7 天趋势
+  const trendDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(todayStart);
+    d.setDate(d.getDate() - (6 - i));
+    return d;
+  });
+  const trendLabels = trendDays.map(d => `${d.getMonth() + 1}/${d.getDate()}`);
+
+  const trendQueries = trendDays.map(d => {
+    const next = new Date(d);
+    next.setDate(next.getDate() + 1);
+    return {
+      users: prisma.user.count({ where: { createdAt: { gte: d, lt: next } } }),
+      consults: prisma.consultationRecord.count({ where: { createdAt: { gte: d, lt: next } } }),
+    };
+  });
 
   const [
     totalUsers,
@@ -329,6 +653,14 @@ export async function getDashboard(ctx: Context) {
     getRevenueStats(monthStart, now),
   ]);
 
+  const trendResults = await Promise.all(trendQueries.flatMap(q => [q.users, q.consults]));
+  const userTrend: number[] = [];
+  const consultTrend: number[] = [];
+  for (let i = 0; i < trendResults.length; i += 2) {
+    userTrend.push(trendResults[i]);
+    consultTrend.push(trendResults[i + 1]);
+  }
+
   ctx.body = {
     success: true,
     data: {
@@ -346,6 +678,11 @@ export async function getDashboard(ctx: Context) {
         todayOrders: revenueToday.totalOrders,
         month: revenueMonth.totalRevenue,
         monthOrders: revenueMonth.totalOrders,
+      },
+      trends: {
+        labels: trendLabels,
+        users: userTrend,
+        consultations: consultTrend,
       },
     },
   };

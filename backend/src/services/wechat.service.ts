@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { prisma } from '../utils/prisma';
 import { config } from '../config';
+import { AppError } from '../middleware/errorHandler';
 import { createLogger } from '../utils/logger';
 import { findOrCreateByMpOpenId } from './auth.service';
 import { consult } from './ai.service';
@@ -34,7 +35,7 @@ export async function getAccessToken(): Promise<string> {
   );
 
   if (data.errcode) {
-    throw new Error(`获取 Access Token 失败: ${data.errmsg}`);
+    throw new AppError(502, `获取 Access Token 失败: ${data.errmsg}`, 'WECHAT_TOKEN_ERROR');
   }
 
   cachedAccessToken = {
@@ -270,7 +271,7 @@ export async function syncMenu() {
   );
 
   if (data.errcode !== 0) {
-    throw new Error(`菜单同步失败: ${data.errmsg}`);
+    throw new AppError(502, `菜单同步失败: ${data.errmsg}`, 'WECHAT_MENU_ERROR');
   }
 
   logger.info('公众号菜单同步成功');

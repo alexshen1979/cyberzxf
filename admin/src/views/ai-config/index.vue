@@ -26,6 +26,20 @@
           <el-input-number v-model="form.contextWindow" :min="1" :max="20" />
         </el-form-item>
 
+        <el-divider content-position="left">DeepSeek API 连接</el-divider>
+
+        <el-form-item label="API Key">
+          <el-input v-model="form.apiKey" type="password" show-password placeholder="留空使用环境变量 DEEPSEEK_API_KEY" />
+        </el-form-item>
+
+        <el-form-item label="API 地址">
+          <el-input v-model="form.apiBaseUrl" placeholder="留空使用环境变量 DEEPSEEK_BASE_URL" />
+        </el-form-item>
+
+        <el-form-item label="请求超时 (ms)">
+          <el-input-number v-model="form.timeout" :min="1000" :max="120000" :step="1000" />
+        </el-form-item>
+
         <el-divider />
 
         <el-form-item label="Skill 知识库">
@@ -34,6 +48,13 @@
 
         <el-form-item label="知识库权重">
           <el-slider v-model="form.skillWeight" :min="0.1" :max="1" :step="0.1" show-input :disabled="!form.skillEnabled" />
+        </el-form-item>
+
+        <el-divider />
+
+        <el-form-item label="未登录免费次数">
+          <el-input-number v-model="form.freeAskLimit" :min="0" :max="999" />
+          <span style="margin-left: 8px; color: #94a3b8; font-size: 13px;">小程序未登录用户每天可免费提问次数</span>
         </el-form-item>
 
         <el-divider />
@@ -72,6 +93,10 @@ const form = reactive({
   skillWeight: 0.6,
   pointsPerQuery: 5,
   pointsPerDeep: 18,
+  freeAskLimit: 2,
+  apiKey: '',
+  apiBaseUrl: '',
+  timeout: 30000,
 });
 
 onMounted(async () => {

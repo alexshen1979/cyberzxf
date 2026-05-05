@@ -1,51 +1,45 @@
-@import './variables.scss';
+@use './variables.scss' as *;
 
 page {
-  background-color: $bg-primary;
+  background-color: $bg-page;
   color: $text-primary;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: $font-md;
   line-height: 1.6;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
-// ─── 全局工具类 ────────────────────────────────────
-.text-primary { color: $primary; }
-.text-secondary { color: $text-secondary; }
-.text-dim { color: $text-dim; }
-.text-gradient { @include gradient-text; }
+// ─── 页面容器 ──────────────────────────────────────
+.page {
+  min-height: 100vh;
+  background: $bg-page;
+  padding-bottom: $spacing-lg;
+}
 
-.bg-primary { background: $bg-primary; }
-.bg-card { background: $bg-card; }
-
+// ─── 卡片 ─────────────────────────────────────────
 .card {
   @include card;
   padding: $spacing-md;
   margin: $spacing-sm $spacing-md;
 }
 
-.glow-card {
+.card-flush {
   @include card;
-  @include glow-border;
   padding: $spacing-md;
-  margin: $spacing-sm $spacing-md;
 }
 
-.btn-primary {
-  @include gradient-btn;
-  @include flex-center;
-  padding: $spacing-sm $spacing-lg;
-  font-size: $font-md;
-  font-weight: 600;
-}
+// ─── 文字工具类 ────────────────────────────────────
+.text-primary   { color: $text-primary; }
+.text-secondary { color: $text-secondary; }
+.text-tertiary  { color: $text-tertiary; }
+.text-brand     { color: $brand; }
 
-.btn-glow {
-  @include gradient-btn;
-  @include glow-border;
-  padding: $spacing-sm $spacing-lg;
-  font-size: $font-md;
-  font-weight: 600;
-  @include flex-center;
+// ─── 分割线 ───────────────────────────────────────
+.divider {
+  height: 1rpx;
+  background: $border;
+  margin: $spacing-sm 0;
 }
 
 // ─── 安全区域 ──────────────────────────────────────
@@ -54,7 +48,7 @@ page {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-// ─── ScrollView 隐藏滚动条 ─────────────────────────
+// ─── 隐藏滚动条 ────────────────────────────────────
 ::-webkit-scrollbar {
   display: none;
   width: 0;

@@ -1,4 +1,5 @@
 import { Context } from 'koa';
+import { marked } from 'marked';
 import { prisma } from '../utils/prisma';
 
 // ─── 用户端 ─────────────────────────────────────────
@@ -49,7 +50,10 @@ export async function detail(ctx: Context) {
     data: { viewCount: { increment: 1 } },
   });
 
-  ctx.body = { success: true, data: article };
+  // Markdown → HTML 转换（适配小程序 rich-text 渲染）
+  const contentHtml = await marked.parse(article.content, { async: true });
+
+  ctx.body = { success: true, data: { ...article, content: contentHtml } };
 }
 
 // ─── 管理端 ─────────────────────────────────────────

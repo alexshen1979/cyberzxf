@@ -77,4 +77,61 @@ export const api = {
     update: (id: string, data: any) => http.put(`/admin/notices/${id}`, data),
     delete: (id: string) => http.delete(`/admin/notices/${id}`),
   },
+  skills: {
+    list: () => http.get('/admin/skills'),
+    create: (data: any) => http.post('/admin/skills', data),
+    update: (id: string, data: any) => http.put(`/admin/skills/${id}`, data),
+    delete: (id: string) => http.delete(`/admin/skills/${id}`),
+    syncGithub: (skillId?: string) => http.post('/admin/skills/sync-github', { skillId }),
+  },
+  knowledge: {
+    list: (params?: any) => http.get('/admin/knowledge', { params }),
+    detail: (id: string) => http.get(`/admin/knowledge/${id}`),
+    create: (data: any) => http.post('/admin/knowledge', data),
+    update: (id: string, data: any) => http.put(`/admin/knowledge/${id}`, data),
+    delete: (id: string) => http.delete(`/admin/knowledge/${id}`),
+  },
+  webScrape: {
+    search: (keyword: string) => http.post('/admin/web-search', { keyword }),
+    scrape: (url: string) => http.post('/admin/web-scrape', { url }),
+    polish: (title: string, content: string, type: 'article' | 'knowledge') =>
+      http.post('/admin/web-polish', { title, content, type }),
+  },
+  export: {
+    users: () => downloadCsv('/admin/export/users'),
+    orders: (startDate?: string, endDate?: string) => {
+      let url = '/admin/export/orders';
+      const params: string[] = [];
+      if (startDate) params.push(`startDate=${startDate}`);
+      if (endDate) params.push(`endDate=${endDate}`);
+      if (params.length) url += `?${params.join('&')}`;
+      return downloadCsv(url);
+    },
+    consultations: (startDate?: string, endDate?: string) => {
+      let url = '/admin/export/consultations';
+      const params: string[] = [];
+      if (startDate) params.push(`startDate=${startDate}`);
+      if (endDate) params.push(`endDate=${endDate}`);
+      if (params.length) url += `?${params.join('&')}`;
+      return downloadCsv(url);
+    },
+  },
 };
+
+async function downloadCsv(url: string) {
+  const token = localStorage.getItem('admin_token');
+  const response = await fetch(`/api/v1${url}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error('导出失败');
+  const blob = await response.blob();
+  const downloadUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = downloadUrl;
+  const filename = url.split('/').pop()?.split('?')[0] || 'export';
+  a.download = `${filename}_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(downloadUrl);
+}

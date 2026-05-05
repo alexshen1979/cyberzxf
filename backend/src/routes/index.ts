@@ -7,6 +7,9 @@ import * as paymentCtrl from '../controllers/payment.controller';
 import * as wechatCtrl from '../controllers/wechat.controller';
 import * as articleCtrl from '../controllers/article.controller';
 import * as adminCtrl from '../controllers/admin.controller';
+import * as favCtrl from '../controllers/favorite.controller';
+import * as knowledgeCtrl from '../controllers/knowledge.controller';
+import * as webScrapeCtrl from '../controllers/web-scrape.controller';
 
 const router = new Router({ prefix: '/api/v1' });
 
@@ -20,8 +23,8 @@ router.get('/auth/profile', auth, authCtrl.getProfile);               // 获取�
 router.put('/auth/profile', auth, authCtrl.updateProfile);            // 更新用户信息
 
 // ─── AI 咨询 ───────────────────────────────────────
-router.post('/ai/consult', auth, aiCtrl.consult);                    // AI 咨询
-router.post('/ai/stream-consult', auth, aiCtrl.streamConsult);       // 流式 AI 咨询
+router.post('/ai/consult', optionalAuth, aiCtrl.consult);                    // AI 咨询（未登录用户可免费试用）
+router.post('/ai/stream-consult', optionalAuth, aiCtrl.streamConsult);       // 流式 AI 咨询（未登录用户可免费试用）
 router.get('/ai/history', auth, aiCtrl.getHistory);                  // 咨询历史
 router.get('/ai/session/:sessionId', auth, aiCtrl.getSession);       // 会话详情
 router.get('/ai/quick-questions', optionalAuth, aiCtrl.getQuickQuestions); // 快捷提问
@@ -44,8 +47,22 @@ router.post('/wechat/mp', wechatCtrl.receiveMessage);                 // 接收�
 router.get('/articles', optionalAuth, articleCtrl.list);             // 文章列表
 router.get('/articles/:id', optionalAuth, articleCtrl.detail);       // 文章详情
 
+// ─── 知识库 ─────────────────────────────────────────
+router.get('/knowledge', optionalAuth, knowledgeCtrl.list);
+router.get('/knowledge-categories', optionalAuth, knowledgeCtrl.getCategories);
+router.get('/knowledge/:id', optionalAuth, knowledgeCtrl.detail);
+
+// ─── 文章收藏 ───────────────────────────────────────
+router.post('/favorites/toggle', auth, favCtrl.toggle);
+router.get('/favorites/check', auth, favCtrl.check);
+router.get('/favorites', auth, favCtrl.list);
+router.delete('/favorites/:id', auth, favCtrl.remove);
+
 // ─── 系统公告 ───────────────────────────────────────
 router.get('/notices', optionalAuth, adminCtrl.getNotices);          // 公告列表
+
+// ─── 公共配置（供小程序/前端读取） ──────────────────
+router.get('/public-config', adminCtrl.getPublicConfig);
 
 // ─── 管理后台接口（需要 admin 权限） ─────────────────
 const admin = new Router({ prefix: '/admin' });
@@ -81,9 +98,23 @@ admin.post('/auto-reply', adminAuth, adminCtrl.createAutoReplyRule);
 admin.put('/auto-reply/:id', adminAuth, adminCtrl.updateAutoReplyRule);
 admin.delete('/auto-reply/:id', adminAuth, adminCtrl.deleteAutoReplyRule);
 
+// 知识库管理
+admin.get('/knowledge', adminAuth, knowledgeCtrl.adminList);
+admin.get('/knowledge/:id', adminAuth, knowledgeCtrl.adminDetail);
+admin.post('/knowledge', adminAuth, knowledgeCtrl.create);
+admin.put('/knowledge/:id', adminAuth, knowledgeCtrl.update);
+admin.delete('/knowledge/:id', adminAuth, knowledgeCtrl.remove);
+
 // AI 配置
 admin.get('/ai-config', adminAuth, adminCtrl.getAiConfig);
 admin.put('/ai-config', adminAuth, adminCtrl.updateAiConfig);
+
+// Skill 管理
+admin.get('/skills', adminAuth, adminCtrl.getSkills);
+admin.post('/skills', adminAuth, adminCtrl.createSkill);
+admin.post('/skills/sync-github', adminAuth, adminCtrl.syncSkillFromGithub);
+admin.put('/skills/:id', adminAuth, adminCtrl.updateSkill);
+admin.delete('/skills/:id', adminAuth, adminCtrl.deleteSkill);
 
 // 公告管理
 admin.get('/notices', adminAuth, adminCtrl.adminGetNotices);
@@ -94,6 +125,11 @@ admin.delete('/notices/:id', adminAuth, adminCtrl.deleteNotice);
 // 数据大盘
 admin.get('/dashboard', adminAuth, adminCtrl.getDashboard);
 
+// 数据导出
+admin.get('/export/users', adminAuth, adminCtrl.exportUsers);
+admin.get('/export/orders', adminAuth, adminCtrl.exportOrders);
+admin.get('/export/consultations', adminAuth, adminCtrl.exportConsultations);
+
 // 公众号菜单管理
 admin.get('/wechat-menu', adminAuth, adminCtrl.getWechatMenu);
 admin.post('/wechat-menu/sync', adminAuth, adminCtrl.syncWechatMenu);
@@ -101,6 +137,11 @@ admin.post('/wechat-menu/sync', adminAuth, adminCtrl.syncWechatMenu);
 // 管理员账号
 admin.post('/admins/login', adminCtrl.adminLogin);
 admin.post('/admins', adminAuth, adminCtrl.createAdmin);
+
+// 全网搜索智能添加
+admin.post('/web-search', adminAuth, webScrapeCtrl.webSearch);
+admin.post('/web-scrape', adminAuth, webScrapeCtrl.webScrape);
+admin.post('/web-polish', adminAuth, webScrapeCtrl.webPolish);
 
 router.use(admin.routes());
 

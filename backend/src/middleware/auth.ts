@@ -16,13 +16,15 @@ export async function auth(ctx: Context, next: Next) {
     throw new AppError(401, '请先登录', 'UNAUTHORIZED');
   }
 
+  let payload: JwtPayload;
   try {
-    const payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
-    ctx.state.user = payload;
-    await next();
+    payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
   } catch {
     throw new AppError(401, '登录已过期，请重新登录', 'TOKEN_EXPIRED');
   }
+
+  ctx.state.user = payload;
+  await next();
 }
 
 // 仅管理端鉴权
@@ -33,17 +35,19 @@ export async function adminAuth(ctx: Context, next: Next) {
     throw new AppError(401, '请先登录', 'UNAUTHORIZED');
   }
 
+  let payload: JwtPayload;
   try {
-    const payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
-    if (!payload.role || !['admin', 'super_admin'].includes(payload.role)) {
-      throw new AppError(403, '无管理员权限', 'FORBIDDEN');
-    }
-    ctx.state.user = payload;
-    await next();
-  } catch (err) {
-    if (err instanceof AppError) throw err;
+    payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
+  } catch {
     throw new AppError(401, '登录已过期，请重新登录', 'TOKEN_EXPIRED');
   }
+
+  if (!payload.role || !['admin', 'super_admin'].includes(payload.role)) {
+    throw new AppError(403, '无管理员权限', 'FORBIDDEN');
+  }
+
+  ctx.state.user = payload;
+  await next();
 }
 
 // 可选鉴权（不强制要求登录，但若提供了 token 则解析）

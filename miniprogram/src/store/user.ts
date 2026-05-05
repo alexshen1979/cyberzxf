@@ -7,6 +7,11 @@ export const useUserStore = defineStore('user', () => {
   const userInfo = ref<any>(null);
   const pointsBalance = ref(0);
   const notices = ref<any[]>([]);
+  const consultQuestion = ref('');
+  const consultType = ref('gaokao');
+  const pendingConsult = ref(false);
+  const showHistoryTab = ref(false);
+  const loadSessionId = ref('');
 
   const isLogin = computed(() => !!token.value);
 
@@ -28,6 +33,7 @@ export const useUserStore = defineStore('user', () => {
 
   // 获取点数余额
   async function fetchBalance() {
+    if (!isLogin.value) return;
     try {
       const res = await api.points.getBalance();
       pointsBalance.value = res.data.balance;
@@ -66,6 +72,11 @@ export const useUserStore = defineStore('user', () => {
     userInfo,
     pointsBalance,
     notices,
+    consultQuestion,
+    consultType,
+    pendingConsult,
+    showHistoryTab,
+    loadSessionId,
     isLogin,
     silentLogin,
     fetchBalance,

@@ -38,7 +38,7 @@ export const config = {
     },
   },
   deepseek: {
-    apiKey: process.env.DEEPSEEK_API_KEY!,
+    apiKey: process.env.DEEPSEEK_API_KEY || '',
     baseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
   },
   oss: {
@@ -61,7 +61,6 @@ export function validateConfig(): void {
   const required: Record<string, string | undefined> = {
     DATABASE_URL: config.database.url,
     JWT_SECRET: process.env.JWT_SECRET,
-    DEEPSEEK_API_KEY: config.deepseek.apiKey,
   };
   const missing = Object.entries(required)
     .filter(([_, v]) => !v)
@@ -72,6 +71,10 @@ export function validateConfig(): void {
     if (!config.server.isDev) {
       process.exit(1);
     }
+  }
+
+  if (!config.deepseek.apiKey) {
+    console.warn('⚠️  DEEPSEEK_API_KEY 未设置，请在管理后台 AI 配置中设置或添加环境变量');
   }
 }
 

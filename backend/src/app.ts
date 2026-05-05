@@ -7,6 +7,10 @@ import { errorHandler } from './middleware/errorHandler';
 import { rateLimiter } from './middleware/rateLimiter';
 import { routes } from './routes';
 import { config } from './config';
+import { startScheduler } from './services/scheduler.service';
+
+// Suppress MaxListeners warning from Prisma's exit handlers
+process.setMaxListeners(20);
 
 const app = new Koa();
 const logger = createLogger('app');
@@ -30,6 +34,7 @@ const port = config.server.port;
 app.listen(port, () => {
   logger.info(`🚀 赛博张老师后端服务已启动 → http://localhost:${port}`);
   logger.info(`环境: ${config.server.env}`);
+  startScheduler();
 });
 
 export { app };

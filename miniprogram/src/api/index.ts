@@ -1,4 +1,6 @@
-const BASE_URL = 'https://api.cyberzhang.com/api/v1';
+// 开发环境使用本地后端，生产环境使用正式域名
+// 可通过 .env 文件中的 VITE_API_BASE_URL 覆盖
+export const BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3000/api/v1';
 
 interface RequestOptions {
   url: string;
@@ -66,6 +68,8 @@ export const api = {
       request<{ answer: string; pointsCost: number; model: string; sessionId: string }>({ url: '/ai/consult', method: 'POST', data }),
     getHistory: (page = 1, pageSize = 20) =>
       request({ url: `/ai/history?page=${page}&pageSize=${pageSize}` }),
+    getSession: (sessionId: string) =>
+      request({ url: `/ai/session/${sessionId}` }),
     getQuickQuestions: () =>
       request({ url: '/ai/quick-questions' }),
   },
@@ -93,7 +97,7 @@ export const api = {
     list: (page = 1, pageSize = 20, category?: string) => {
       let url = `/articles?page=${page}&pageSize=${pageSize}`;
       if (category) url += `&category=${category}`;
-      return request(url);
+      return request({ url });
     },
     detail: (id: string) =>
       request({ url: `/articles/${id}` }),
@@ -103,5 +107,37 @@ export const api = {
   notices: {
     list: () =>
       request({ url: '/notices' }),
+  },
+
+  // 公共配置
+  config: {
+    getPublic: () =>
+      request<{ freeAskLimit: number }>({ url: '/public-config' }),
+  },
+
+  // 知识库
+  knowledge: {
+    list: (page = 1, pageSize = 20, category?: string, keyword?: string) => {
+      let url = `/knowledge?page=${page}&pageSize=${pageSize}`;
+      if (category) url += `&category=${encodeURIComponent(category)}`;
+      if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+      return request({ url });
+    },
+    detail: (id: string) =>
+      request({ url: `/knowledge/${id}` }),
+    categories: () =>
+      request<string[]>({ url: '/knowledge-categories' }),
+  },
+
+  // 收藏
+  favorites: {
+    toggle: (targetType: string, targetId: string) =>
+      request({ url: '/favorites/toggle', method: 'POST', data: { targetType, targetId } }),
+    check: (targetType: string, targetId: string) =>
+      request({ url: `/favorites/check?targetType=${targetType}&targetId=${targetId}` }),
+    list: (page = 1, pageSize = 20) =>
+      request({ url: `/favorites?page=${page}&pageSize=${pageSize}` }),
+    remove: (id: string) =>
+      request({ url: `/favorites/${id}`, method: 'DELETE' }),
   },
 };

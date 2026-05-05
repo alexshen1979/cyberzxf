@@ -29,10 +29,16 @@
           </template>
           <el-menu-item index="/content/articles">干货文库</el-menu-item>
           <el-menu-item index="/content/quick-questions">快捷提问</el-menu-item>
+          <el-menu-item index="/content/auto-reply">自动回复</el-menu-item>
+          <el-menu-item index="/content/knowledge">知识库</el-menu-item>
         </el-sub-menu>
         <el-menu-item index="/ai-config">
           <el-icon><Cpu /></el-icon>
           <span>AI 配置</span>
+        </el-menu-item>
+        <el-menu-item index="/skills">
+          <el-icon><MagicStick /></el-icon>
+          <span>Skill 管理</span>
         </el-menu-item>
         <el-menu-item index="/wechat">
           <el-icon><ChatDotRound /></el-icon>

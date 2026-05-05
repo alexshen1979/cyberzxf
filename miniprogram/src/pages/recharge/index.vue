@@ -111,7 +111,6 @@ async function handlePay() {
 </script>
 
 <style lang="scss" scoped>
-@import '@/styles/variables.scss';
 
 .recharge-page {
   padding: $spacing-md;

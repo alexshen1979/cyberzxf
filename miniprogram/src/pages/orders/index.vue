@@ -41,7 +41,6 @@ onMounted(async () => {
 </script>
 
 <style lang="scss" scoped>
-@import '@/styles/variables.scss';
 .orders-page { padding: $spacing-md; min-height: 100vh; }
 .section-title { font-size: $font-lg; font-weight: 600; margin-bottom: $spacing-sm; }
 .order-card { padding: $spacing-md; margin: 0 0 $spacing-sm; }

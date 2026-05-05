@@ -30,7 +30,6 @@ onMounted(async () => {
 </script>
 
 <style lang="scss" scoped>
-@import '@/styles/variables.scss';
 .notices-page { padding: $spacing-md; min-height: 100vh; }
 .notice-card { padding: $spacing-md; margin: 0 0 $spacing-sm; }
 .notice-header { display: flex; justify-content: space-between; margin-bottom: $spacing-xs; }

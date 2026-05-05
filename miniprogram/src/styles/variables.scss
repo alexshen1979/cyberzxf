@@ -1,35 +1,43 @@
-// ─── 赛博科技风配色方案 ──────────────────────────
-$primary: #00f5ff;          // 霓虹青
-$primary-dark: #00c8d6;
-$secondary: #7c3aed;        // 紫罗兰
-$accent: #f97316;           // 警示橙
-$success: #22c55e;
-$danger: #ef4444;
-$warning: #eab308;
+// ─── shadcn/ui 风格设计令牌 ──────────────────────────
+
+// 品牌色
+$brand: #3b82f6;            // blue-500
+$brand-light: #eff6ff;      // blue-50
+$brand-hover: #2563eb;      // blue-600
 
 // 背景色
-$bg-primary: #0a0e27;       // 主背景
-$bg-secondary: #111640;     // 卡片背景
-$bg-card: #1a1f4a;          // 悬浮卡片
-$bg-input: #151a3a;         // 输入框背景
+$bg-page: #f8fafc;          // slate-50
+$bg-card: #ffffff;
+$bg-hover: #f1f5f9;         // slate-100
+$bg-active: #e2e8f0;        // slate-200
 
 // 文字色
-$text-primary: #e8eaf0;
-$text-secondary: #8890b0;
-$text-dim: #5a6080;
+$text-primary: #0f172a;     // slate-900
+$text-secondary: #475569;   // slate-600
+$text-tertiary: #94a3b8;    // slate-400
+$text-inverse: #ffffff;
 
 // 边框
-$border-color: #1e2550;
-$border-glow: rgba(0, 245, 255, 0.3);
+$border: #e2e8f0;           // slate-200
+$border-light: #f1f5f9;     // slate-100
+
+// 功能色
+$success: #22c55e;
+$warning: #f59e0b;
+$danger: #ef4444;
 
 // 圆角
-$radius-sm: 8rpx;
+$radius-xs: 6rpx;
+$radius-sm: 10rpx;
 $radius-md: 16rpx;
 $radius-lg: 24rpx;
+$radius-xl: 32rpx;
+$radius-full: 9999rpx;
 
 // 阴影
-$shadow-glow: 0 0 20rpx rgba(0, 245, 255, 0.15);
-$shadow-card: 0 4rpx 24rpx rgba(0, 0, 0, 0.4);
+$shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+$shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+$shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
 
 // 间距
 $spacing-xs: 8rpx;
@@ -46,12 +54,26 @@ $font-lg: 32rpx;
 $font-xl: 36rpx;
 $font-xxl: 48rpx;
 
-// ─── 混入 ──────────────────────────────────────────
+// ─── 旧变量别名（兼容现有页面）───────────────────────────
+$primary: $brand;
+$primary-dark: $brand-hover;
+$secondary: #8b5cf6;
+$accent: #f59e0b;
+$bg-primary: $bg-page;
+$bg-secondary: $bg-card;
+$bg-input: $bg-hover;
+$text-dim: $text-tertiary;
+$border-color: $border;
+$border-glow: rgba($brand, 0.2);
+$shadow-glow: 0 0 20rpx rgba($brand, 0.08);
+$shadow-card: $shadow-sm;
+
+// ─── 混入 ──────────────────────────────────────────────
 @mixin card {
   background: $bg-card;
   border-radius: $radius-md;
-  border: 1rpx solid $border-color;
-  box-shadow: $shadow-card;
+  border: 1rpx solid $border;
+  box-shadow: $shadow-sm;
 }
 
 @mixin glow-border {
@@ -60,14 +82,14 @@ $font-xxl: 48rpx;
 }
 
 @mixin gradient-text {
-  background: linear-gradient(135deg, $primary, $secondary);
+  background: linear-gradient(135deg, $brand, $secondary);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 @mixin gradient-btn {
-  background: linear-gradient(135deg, $primary-dark, $secondary);
+  background: linear-gradient(135deg, $brand-hover, $secondary);
   color: #fff;
   border: none;
   border-radius: $radius-md;
@@ -77,4 +99,10 @@ $font-xxl: 48rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+@mixin text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

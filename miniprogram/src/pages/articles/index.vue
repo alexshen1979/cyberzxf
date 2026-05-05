@@ -86,7 +86,6 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
-@import '@/styles/variables.scss';
 
 .articles-page {
   padding: $spacing-md;

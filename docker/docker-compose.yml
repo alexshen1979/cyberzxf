@@ -1,39 +1,7 @@
 version: '3.8'
 
 services:
-  # MySQL 数据库
-  mysql:
-    image: mysql:8.0
-    container_name: cyberzhang-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-cyberzhang2024}
-      MYSQL_DATABASE: cyberzhang
-      MYSQL_USER: czadmin
-      MYSQL_PASSWORD: ${DB_PASSWORD:-cz2024secure}
-      TZ: Asia/Shanghai
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-      - --default-time-zone=+08:00
-
-  # Redis 缓存
-  redis:
-    image: redis:7-alpine
-    container_name: cyberzhang-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-
-  # 后端服务
+  # 后端服务（SQLite，零外部依赖）
   backend:
     build:
       context: ../backend
@@ -43,20 +11,24 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: mysql://czadmin:${DB_PASSWORD:-cz2024secure}@mysql:3306/cyberzhang
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: file:/data/cyberzhang.db
       JWT_SECRET: ${JWT_SECRET}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       WECHAT_MINI_APPID: ${WECHAT_MINI_APPID}
       WECHAT_MINI_SECRET: ${WECHAT_MINI_SECRET}
       WECHAT_MP_APPID: ${WECHAT_MP_APPID}
       WECHAT_MP_SECRET: ${WECHAT_MP_SECRET}
       WECHAT_MP_TOKEN: ${WECHAT_MP_TOKEN}
+    volumes:
+      - backend_data:/data
     ports:
       - "3000:3000"
-    depends_on:
-      - mysql
-      - redis
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # 管理后台（Nginx 托管静态文件）
   admin:
@@ -78,11 +50,9 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - backend
       - admin
 
 volumes:
-  mysql_data:
-  redis_data:
+  backend_data:

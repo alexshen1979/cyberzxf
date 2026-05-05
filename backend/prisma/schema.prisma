@@ -23,6 +23,7 @@ model User {
   pointsTransactions   PointsTransaction[]
   orders               Order[]
   consultationRecords  ConsultationRecord[]
+  favorites            Favorite[]
 
   @@map("users")
 }
@@ -92,6 +93,19 @@ model ConsultationRecord {
   @@map("consultation_records")
 }
 
+model Favorite {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetType String   @map("target_type")
+  targetId   String   @map("target_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, targetType, targetId])
+  @@index([userId])
+  @@map("favorites")
+}
+
 model Article {
   id        String   @id @default(uuid())
   title     String
@@ -117,9 +131,32 @@ model AiConfig {
   skillWeight    Float    @default(0.6) @map("skill_weight")
   pointsPerQuery Int      @default(5) @map("points_per_query")
   pointsPerDeep  Int      @default(18) @map("points_per_deep")
+  freeAskLimit   Int      @default(2) @map("free_ask_limit")
+  apiKey         String?  @map("api_key")
+  apiBaseUrl     String?  @map("api_base_url")
+  timeout        Int      @default(30000)
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@map("ai_config")
+}
+
+model Skill {
+  id           String   @id @default(uuid())
+  name         String
+  description  String?
+  systemPrompt String   @map("system_prompt")
+  model        String   @default("deepseek-chat")
+  temperature  Float?
+  maxTokens    Int?     @map("max_tokens")
+  topP         Float?   @map("top_p")
+  keywords     String   @default("[]")
+  status       String   @default("enabled")
+  isDefault    Boolean  @default(false) @map("is_default")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("skills")
 }
 
 model SystemNotice {
@@ -157,6 +194,23 @@ model AutoReplyRule {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@map("auto_reply_rules")
+}
+
+model KnowledgeEntry {
+  id         String   @id @default(uuid())
+  title      String
+  content    String                                          // Markdown 内容
+  category   String                                          // 分类：招生简章/专业解读/院校信息/政策法规/分数线
+  tags       String   @default("[]")                         // JSON 字符串数组
+  sourceName String?  @map("source_name")                    // 来源名称
+  sourceUrl  String?  @map("source_url")                     // 来源URL
+  sourceDate String?  @map("source_date")                    // 来源日期
+  status     String   @default("published")                  // published | draft
+  viewCount  Int      @default(0) @map("view_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("knowledge_entries")
 }
 
 model WechatMenu {

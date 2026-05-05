@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import { config } from '../config';
+import { AppError } from '../middleware/errorHandler';
 import { chargePoints } from './points.service';
 import { createLogger } from '../utils/logger';
 
@@ -31,7 +32,7 @@ export function getProductById(id: string) {
 export async function createOrder(userId: string, productId: string) {
   const product = getProductById(productId);
   if (!product) {
-    throw new Error('充值套餐不存在');
+    throw new AppError(404, '充值套餐不存在', 'PRODUCT_NOT_FOUND');
   }
 
   const orderNo = generateOrderNo();
@@ -55,7 +56,7 @@ export async function createOrder(userId: string, productId: string) {
 export async function handlePaymentCallback(orderNo: string, transactionId: string) {
   const order = await prisma.order.findUnique({ where: { orderNo } });
   if (!order) {
-    throw new Error(`订单不存在: ${orderNo}`);
+    throw new AppError(404, `订单不存在: ${orderNo}`, 'ORDER_NOT_FOUND');
   }
 
   if (order.status === 'paid') {
@@ -64,7 +65,7 @@ export async function handlePaymentCallback(orderNo: string, transactionId: stri
   }
 
   if (order.status !== 'pending') {
-    throw new Error(`订单状态异常: ${order.status}`);
+    throw new AppError(409, `订单状态异常: ${order.status}`, 'ORDER_STATUS_ERROR');
   }
 
   // 更新订单状态

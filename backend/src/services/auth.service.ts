@@ -48,17 +48,18 @@ export async function loginByMiniProgram(code: string) {
       },
     });
   } else {
-    // 新用户注册
-    user = await prisma.user.create({
-      data: {
-        miniOpenId: openId,
-        ...(unionId ? { unionId } : {}),
-        nickname: `用户${Date.now().toString(36)}`,
-      },
+    // 新用户注册 + 赠送点数（事务保证原子性）
+    user = await prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          miniOpenId: openId,
+          ...(unionId ? { unionId } : {}),
+          nickname: `用户${Date.now().toString(36)}`,
+        },
+      });
+      await giftNewUserPoints(newUser.id, tx);
+      return newUser;
     });
-
-    // 新用户赠送免费点数
-    await giftNewUserPoints(user.id);
   }
 
   const token = signToken({ userId: user.id });
@@ -84,34 +85,34 @@ export async function findOrCreateByMpOpenId(mpOpenId: string, unionId?: string)
       data: { mpOpenId, ...(unionId ? { unionId } : {}) },
     });
   } else {
-    // 新用户：公众号关注即注册
-    user = await prisma.user.create({
-      data: {
-        mpOpenId,
-        ...(unionId ? { unionId } : {}),
-        nickname: `公众号用户${Date.now().toString(36)}`,
-      },
+    // 新用户：公众号关注即注册 + 赠送点数（事务保证原子性）
+    user = await prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          mpOpenId,
+          ...(unionId ? { unionId } : {}),
+          nickname: `公众号用户${Date.now().toString(36)}`,
+        },
+      });
+      await giftNewUserPoints(newUser.id, tx);
+      return newUser;
     });
-    await giftNewUserPoints(user.id);
   }
 
   return user;
 }
 
-// 新用户赠送免费点数
-async function giftNewUserPoints(userId: string) {
+// 新用户赠送免费点数（可选事务客户端）
+async function giftNewUserPoints(userId: string, tx?: any) {
+  const db = tx || prisma;
   const expiredAt = new Date();
   expiredAt.setDate(expiredAt.getDate() + config.points.expireDays);
 
-  await prisma.pointsAccount.create({
-    data: {
-      userId,
-      balance: config.points.freeGift,
-      expiredAt,
-    },
+  await db.pointsAccount.create({
+    data: { userId, balance: config.points.freeGift, expiredAt },
   });
 
-  await prisma.pointsTransaction.create({
+  await db.pointsTransaction.create({
     data: {
       userId,
       type: 'gift',

@@ -19,6 +19,10 @@
 </template>
 
 <script setup lang="ts">
+import { useUserStore } from '@/store/user';
+
+const userStore = useUserStore();
+
 const plans = [
   { key: 'gaokao-deep', icon: '🎓', name: '全套志愿方案', desc: '根据分数、排名、省份，生成冲/稳/保志愿梯度方案' },
   { key: 'major-analysis', icon: '🔍', name: '深度择校分析', desc: '目标院校全方位对比：就业率、师资、区位、行业认可度' },
@@ -26,12 +30,14 @@ const plans = [
 ];
 
 function goPlan(plan: any) {
-  uni.navigateTo({ url: `/pages/consult/index?type=deep&plan=${plan.key}` });
+  userStore.consultType = 'deep';
+  userStore.consultQuestion = '';
+  userStore.pendingConsult = true;
+  uni.switchTab({ url: '/pages/consult/index' });
 }
 </script>
 
 <style lang="scss" scoped>
-@import '@/styles/variables.scss';
 .plans-page { padding: $spacing-md; min-height: 100vh; }
 .page-header { text-align: center; padding: $spacing-lg 0; }
 .page-title { font-size: $font-xl; font-weight: 700; display: block; }
