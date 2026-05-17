@@ -166,23 +166,17 @@ export async function getMyDistributionQrCode(userId: string) {
 
   const scene = `d=${distributor.code}`;
   const page = 'pages/volunteer/index';
-  const token = await getMiniAccessToken();
-  const response = await axios.post(
-    `https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token=${encodeURIComponent(token)}`,
-    {
-      scene,
-      page,
-      check_path: false,
-      env_version: 'release',
-    },
-    { responseType: 'arraybuffer', timeout: 15000 },
-  );
+  let response = await requestMiniQrCode(scene, page, await getMiniAccessToken());
+  let errorDetail = readMiniQrCodeError(response);
+  if (isWechatAccessTokenInvalid(errorDetail)) {
+    miniAccessTokenCache = null;
+    response = await requestMiniQrCode(scene, page, await getMiniAccessToken(true));
+    errorDetail = readMiniQrCodeError(response);
+  }
 
   const body = Buffer.from(response.data);
-  const contentType = String(response.headers['content-type'] || '');
-  if (contentType.includes('json')) {
-    const detail = safeJson(body.toString('utf8'), {});
-    throw new AppError(502, `小程序码生成失败：${detail.errmsg || detail.errcode || '微信接口异常'}`, 'WXACODE_FAILED', detail);
+  if (errorDetail) {
+    throw new AppError(502, `小程序码生成失败：${errorDetail.errmsg || errorDetail.errcode || '微信接口异常'}`, 'WXACODE_FAILED', errorDetail);
   }
 
   return {
@@ -577,9 +571,9 @@ function buildSharePath(code: string) {
   return `pages/volunteer/index?ref=${encodeURIComponent(code)}`;
 }
 
-async function getMiniAccessToken() {
+async function getMiniAccessToken(forceRefresh = false) {
   const now = Date.now();
-  if (miniAccessTokenCache && miniAccessTokenCache.expiresAt > now + 60_000) {
+  if (!forceRefresh && miniAccessTokenCache && miniAccessTokenCache.expiresAt > now + 60_000) {
     return miniAccessTokenCache.token;
   }
 
@@ -588,10 +582,16 @@ async function getMiniAccessToken() {
     throw new AppError(503, '微信小程序参数未配置，无法生成小程序码', 'WECHAT_MINI_NOT_CONFIGURED');
   }
 
-  const { data } = await axios.get('https://api.weixin.qq.com/cgi-bin/token', {
-    params: { grant_type: 'client_credential', appid: appId, secret },
-    timeout: 10000,
-  });
+  const { data } = await axios.post(
+    'https://api.weixin.qq.com/cgi-bin/stable_token',
+    {
+      grant_type: 'client_credential',
+      appid: appId,
+      secret,
+      force_refresh: forceRefresh,
+    },
+    { timeout: 10000 },
+  );
 
   if (data.errcode) {
     throw new AppError(502, `微信 access_token 获取失败：${data.errmsg}`, 'WECHAT_ACCESS_TOKEN_FAIL', data);
@@ -602,6 +602,30 @@ async function getMiniAccessToken() {
     expiresAt: now + Math.max(0, Number(data.expires_in || 7200) - 300) * 1000,
   };
   return miniAccessTokenCache.token;
+}
+
+async function requestMiniQrCode(scene: string, page: string, token: string) {
+  return axios.post(
+    `https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token=${encodeURIComponent(token)}`,
+    {
+      scene,
+      page,
+      check_path: false,
+      env_version: 'release',
+    },
+    { responseType: 'arraybuffer', timeout: 15000 },
+  );
+}
+
+function readMiniQrCodeError(response: any) {
+  const body = Buffer.from(response.data);
+  const contentType = String(response.headers['content-type'] || '');
+  if (!contentType.includes('json')) return null;
+  return safeJson(body.toString('utf8'), {});
+}
+
+function isWechatAccessTokenInvalid(data: any) {
+  return [40001, 40014, 42001].includes(Number(data?.errcode));
 }
 
 async function resolveMiniProgramCredentials() {

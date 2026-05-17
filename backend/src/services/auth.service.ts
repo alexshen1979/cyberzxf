@@ -172,15 +172,11 @@ async function getPhoneNumberByCode(phoneCode: string) {
     throw new AppError(503, '微信小程序登录未配置：WECHAT_MINI_APPID、WECHAT_MINI_SECRET', 'WECHAT_MINI_NOT_CONFIGURED');
   }
 
-  const accessToken = await getMiniProgramAccessToken(appId, secret);
-  const { data } = await axios.post(
-    'https://api.weixin.qq.com/wxa/business/getuserphonenumber',
-    { code: phoneCode },
-    {
-      params: { access_token: accessToken },
-      timeout: 10000,
-    },
-  );
+  let data = await requestPhoneNumber(phoneCode, await getMiniProgramAccessToken(appId, secret));
+  if (isWechatAccessTokenInvalid(data)) {
+    accessTokenCache = null;
+    data = await requestPhoneNumber(phoneCode, await getMiniProgramAccessToken(appId, secret, true));
+  }
 
   if (data.errcode) {
     const errmsg = String(data.errmsg || '');
@@ -197,20 +193,38 @@ async function getPhoneNumberByCode(phoneCode: string) {
   return data.phone_info?.phoneNumber || data.phone_info?.purePhoneNumber || '';
 }
 
-async function getMiniProgramAccessToken(appId: string, secret: string) {
+async function requestPhoneNumber(phoneCode: string, accessToken: string) {
+  const { data } = await axios.post(
+    'https://api.weixin.qq.com/wxa/business/getuserphonenumber',
+    { code: phoneCode },
+    {
+      params: { access_token: accessToken },
+      timeout: 10000,
+    },
+  );
+  return data;
+}
+
+function isWechatAccessTokenInvalid(data: any) {
+  return [40001, 40014, 42001].includes(Number(data?.errcode));
+}
+
+async function getMiniProgramAccessToken(appId: string, secret: string, forceRefresh = false) {
   const now = Date.now();
-  if (accessTokenCache && accessTokenCache.expiresAt > now + 60_000) {
+  if (!forceRefresh && accessTokenCache && accessTokenCache.expiresAt > now + 60_000) {
     return accessTokenCache.token;
   }
 
-  const { data } = await axios.get('https://api.weixin.qq.com/cgi-bin/token', {
-    params: {
+  const { data } = await axios.post(
+    'https://api.weixin.qq.com/cgi-bin/stable_token',
+    {
       grant_type: 'client_credential',
       appid: appId,
       secret,
+      force_refresh: forceRefresh,
     },
-    timeout: 10000,
-  });
+    { timeout: 10000 },
+  );
 
   if (data.errcode) {
     throw new AppError(400, `微信 access_token 获取失败: ${data.errmsg}`, 'WECHAT_ACCESS_TOKEN_FAIL');
