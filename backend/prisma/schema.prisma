@@ -266,6 +266,8 @@ model RechargeProduct {
   originalPrice Int?   @map("original_price")
   points      Int
   bonus       Int      @default(0)
+  isDefault   Boolean  @default(false) @map("is_default")
+  badgeType   String?  @map("badge_type")
   sortOrder   Int      @default(0) @map("sort_order")
   enabled     Boolean  @default(true)
   updatedAt   DateTime @updatedAt @map("updated_at")

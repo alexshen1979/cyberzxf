@@ -35,7 +35,7 @@ interface ResolvedWechatPayConfig {
 
 export async function getProductList() {
   const products = await listRechargeProducts();
-  return products.map(({ id, name, description, price, originalPrice, points, bonus }) => ({
+  return products.map(({ id, name, description, price, originalPrice, points, bonus, isDefault, badgeType }) => ({
     id,
     name,
     description,
@@ -43,6 +43,8 @@ export async function getProductList() {
     originalPrice: originalPrice ? originalPrice / 100 : null,
     points,
     bonus,
+    isDefault,
+    badgeType,
   }));
 }
 

@@ -17,6 +17,15 @@
       "postcss": true,
       "minified": true
     },
+    "permission": {
+      "scope.userLocation": {
+        "desc": "用于根据当前位置自动默认高考省份"
+      }
+    },
+    "requiredPrivateInfos": [
+      "getFuzzyLocation",
+      "getLocation"
+    ],
     "usingComponents": true,
     "plugins": {
       "WechatSI": {

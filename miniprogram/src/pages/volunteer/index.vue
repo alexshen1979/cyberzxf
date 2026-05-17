@@ -852,38 +852,14 @@ function isLocationDenied(err: any) {
   return /auth deny|authorize|denied|deny|cancel|拒绝|取消|privacy/i.test(message);
 }
 
-function isDesktopLocation(err: any) {
-  const message = String(err?.errMsg || err?.message || '');
-  return /devtools|desktop|mac|windows/i.test(message);
-}
-
 function formatLocationError(err: any) {
-  if (isDesktopLocation(err)) return '开发者工具定位不稳定，请真机预览或手动选择省份';
   if (isLocationTimeout(err)) return '定位超时，请手动选择省份';
   if (isLocationDenied(err)) return '定位未开启，请手动选择省份';
   return '定位暂不可用，请手动选择省份';
 }
 
-function isDesktopRuntime() {
-  try {
-    const info = (uni as any).getSystemInfoSync?.() || {};
-    const platform = String(info.platform || '').toLowerCase();
-    const system = String(info.system || '').toLowerCase();
-    if (platform && !['ios', 'android'].includes(platform)) return true;
-    return /devtools|mac|windows/.test(`${platform} ${system}`);
-  } catch {
-    return false;
-  }
-}
-
-function requestLocation(timeoutMs = 5500) {
+function requestLocationByApi(apiFn: Function, timeoutMs = 6500) {
   return new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
-    const apiFn = (uni as any).getFuzzyLocation || (globalThis as any).wx?.getFuzzyLocation;
-    if (typeof apiFn !== 'function') {
-      reject(new Error('getFuzzyLocation not available'));
-      return;
-    }
-
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
@@ -899,10 +875,13 @@ function requestLocation(timeoutMs = 5500) {
         reject(err);
         return;
       }
-      resolve({
-        latitude: Number(value?.latitude),
-        longitude: Number(value?.longitude),
-      });
+      const latitude = Number(value?.latitude);
+      const longitude = Number(value?.longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        reject(new Error('location invalid'));
+        return;
+      }
+      resolve({ latitude, longitude });
     };
 
     apiFn({
@@ -914,10 +893,27 @@ function requestLocation(timeoutMs = 5500) {
 }
 
 async function getProvinceLocation() {
-  if (isDesktopRuntime()) {
-    throw Object.assign(new Error('desktop location unavailable'), { errMsg: 'location:desktop' });
+  const candidates = [
+    (uni as any).getFuzzyLocation,
+    (globalThis as any).wx?.getFuzzyLocation,
+    (uni as any).getLocation,
+    (globalThis as any).wx?.getLocation,
+  ].filter((item, index, list) => typeof item === 'function' && list.indexOf(item) === index);
+
+  if (!candidates.length) {
+    throw new Error('location api not available');
   }
-  return requestLocation(5500);
+
+  let lastError: any;
+  for (const apiFn of candidates) {
+    try {
+      return await requestLocationByApi(apiFn, 6500);
+    } catch (err: any) {
+      lastError = err;
+      if (isLocationDenied(err)) break;
+    }
+  }
+  throw lastError || new Error('location unavailable');
 }
 
 function selectProvince(province: string) {
@@ -1348,6 +1344,7 @@ onShow(() => {
   loadVolunteerDataYears();
   loadRegions();
   loadReports();
+  detectProvince(false);
 });
 
 onPullDownRefresh(async () => {

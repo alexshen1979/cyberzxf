@@ -108,7 +108,17 @@ export const api = {
   // 支付
   payment: {
     getProducts: () =>
-      request<Array<{ id: string; name: string; price: number; originalPrice?: number | null; points: number; bonus: number; description?: string }>>({ url: '/payments/products' }),
+      request<Array<{
+        id: string;
+        name: string;
+        price: number;
+        originalPrice?: number | null;
+        points: number;
+        bonus: number;
+        description?: string;
+        isDefault?: boolean;
+        badgeType?: 'hot' | 'best_value' | null;
+      }>>({ url: '/payments/products' }),
     createOrder: (productId: string) =>
       request<{
         orderNo: string;

@@ -63,6 +63,15 @@
         </el-table-column>
         <el-table-column prop="points" label="基础点数" width="100" />
         <el-table-column prop="bonus" label="赠送" width="80" />
+        <el-table-column label="展示" width="150">
+          <template #default="{ row }">
+            <el-tag v-if="row.isDefault" type="success" size="small">默认</el-tag>
+            <el-tag v-if="row.badgeType" :type="row.badgeType === 'hot' ? 'danger' : 'warning'" size="small" class="ml-6">
+              {{ badgeLabel(row.badgeType) }}
+            </el-tag>
+            <span v-if="!row.isDefault && !row.badgeType">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="sortOrder" label="排序" width="80" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
@@ -149,6 +158,16 @@
         <el-form-item label="赠送点数">
           <el-input-number v-model="productForm.bonus" :min="0" :max="10000000" />
         </el-form-item>
+        <el-form-item label="默认选中">
+          <el-switch v-model="productForm.isDefault" />
+          <span class="hint">小程序充值页默认选中这一档；保存后其他套餐会自动取消默认</span>
+        </el-form-item>
+        <el-form-item label="角标">
+          <el-select v-model="productForm.badgeType" placeholder="不显示角标" clearable style="width: 180px">
+            <el-option label="热门" value="hot" />
+            <el-option label="最划算" value="best_value" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="排序">
           <el-input-number v-model="productForm.sortOrder" :min="-100000" :max="100000" />
         </el-form-item>
@@ -194,6 +213,8 @@ const productForm = reactive({
   originalPriceYuan: 0,
   points: 0,
   bonus: 0,
+  isDefault: false,
+  badgeType: '',
   sortOrder: 0,
   enabled: true,
 });
@@ -242,6 +263,8 @@ function openProductDialog(row?: any) {
     originalPriceYuan: row.originalPrice ? Number((row.originalPrice / 100).toFixed(2)) : 0,
     points: row.points,
     bonus: row.bonus,
+    isDefault: row.isDefault,
+    badgeType: row.badgeType || '',
     sortOrder: row.sortOrder,
     enabled: row.enabled,
   } : {
@@ -252,6 +275,8 @@ function openProductDialog(row?: any) {
     originalPriceYuan: 0,
     points: 0,
     bonus: 0,
+    isDefault: false,
+    badgeType: '',
     sortOrder: 0,
     enabled: true,
   });
@@ -271,6 +296,8 @@ async function saveProduct() {
         : null,
       points: productForm.points,
       bonus: productForm.bonus,
+      isDefault: productForm.isDefault,
+      badgeType: productForm.badgeType || null,
       sortOrder: productForm.sortOrder,
       enabled: productForm.enabled,
     };
@@ -342,6 +369,12 @@ async function adjustPoints() {
   }
 }
 
+function badgeLabel(type?: string | null) {
+  if (type === 'hot') return '热门';
+  if (type === 'best_value') return '最划算';
+  return '-';
+}
+
 onMounted(() => {
   loadSettings();
   loadProducts();
@@ -365,4 +398,5 @@ h3 { margin-bottom: 16px; }
 .balance-result { margin-top: 16px; }
 .balance-num { font-weight: 700; font-size: 18px; color: var(--el-color-primary); }
 .hint { font-size: 12px; margin-left: 8px; }
+.ml-6 { margin-left: 6px; }
 </style>

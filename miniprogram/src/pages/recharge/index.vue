@@ -14,6 +14,9 @@
     <view class="product-list">
       <view class="product-card" v-for="p in products" :key="p.id"
         :class="{ selected: selectedProduct?.id === p.id }" @click="selectedProduct = p">
+        <view class="corner-badge" :class="badgeClass(p)" v-if="productBadge(p)">
+          {{ productBadge(p) }}
+        </view>
         <view class="product-points">
           <text class="product-points-num">{{ p.points + p.bonus }}</text>
           <text class="product-points-label">点数</text>
@@ -59,7 +62,7 @@ import { useUserStore } from '@/store/user';
 
 const userStore = useUserStore();
 
-const products = ref<Array<{
+interface Product {
   id: string;
   name: string;
   price: number;
@@ -67,16 +70,20 @@ const products = ref<Array<{
   points: number;
   bonus: number;
   description?: string;
-}>>([]);
+  isDefault?: boolean;
+  badgeType?: 'hot' | 'best_value' | null;
+}
 
-const selectedProduct = ref<any>(null);
+const products = ref<Product[]>([]);
+
+const selectedProduct = ref<Product | null>(null);
 const paying = ref(false);
 
 onMounted(async () => {
   const res = await api.payment.getProducts();
   products.value = res.data;
   if (products.value.length > 0) {
-    selectedProduct.value = products.value[0];
+    selectedProduct.value = chooseDefaultProduct(products.value);
   }
 });
 
@@ -160,6 +167,23 @@ function formatPrice(price?: number | null) {
 function hasDiscount(product: { price: number; originalPrice?: number | null }) {
   return Number(product.originalPrice || 0) > product.price;
 }
+
+function chooseDefaultProduct(list: Product[]) {
+  return list.find(product => product.isDefault) || list[0];
+}
+
+function productBadge(product: Product) {
+  if (product.badgeType === 'hot') return '热门';
+  if (product.badgeType === 'best_value') return '最划算';
+  return '';
+}
+
+function badgeClass(product: Product) {
+  return {
+    hot: product.badgeType === 'hot',
+    value: product.badgeType === 'best_value',
+  };
+}
 </script>
 
 <style lang="scss" scoped>
@@ -218,13 +242,38 @@ function hasDiscount(product: { price: number; originalPrice?: number | null }) 
   @include card;
   display: flex;
   align-items: center;
-  padding: $spacing-md;
+  padding: 44rpx $spacing-md $spacing-md;
   position: relative;
+  overflow: hidden;
   transition: border-color 0.2s;
 
   &.selected {
     border-color: rgba(34, 197, 94, 0.45);
     box-shadow: 0 12rpx 36rpx rgba(34, 197, 94, 0.10);
+  }
+}
+
+.corner-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 104rpx;
+  height: 40rpx;
+  padding: 0 18rpx;
+  border-radius: $radius-md 0 $radius-md 0;
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 40rpx;
+  text-align: center;
+  letter-spacing: 0;
+
+  &.hot {
+    background: linear-gradient(135deg, #ef4444, #f97316);
+  }
+
+  &.value {
+    background: linear-gradient(135deg, #7c3aed, #2563eb);
   }
 }
 

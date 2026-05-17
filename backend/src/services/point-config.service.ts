@@ -10,15 +10,17 @@ type RechargeProductInput = {
   originalPrice?: number | null;
   points: number;
   bonus: number;
+  isDefault: boolean;
+  badgeType?: string | null;
   sortOrder: number;
   enabled: boolean;
 };
 
 const DEFAULT_RECHARGE_PRODUCTS = [
-  { id: 'pkg_120', name: '120 咨询点数', description: '首充体验，适合生成报告后继续追问', price: 1990, originalPrice: 2990, points: 120, bonus: 0, sortOrder: 10, enabled: true },
-  { id: 'pkg_280', name: '240 咨询点数 + 赠40点', description: '推荐套餐，适合志愿季集中使用', price: 3990, originalPrice: 5990, points: 240, bonus: 40, sortOrder: 20, enabled: true },
-  { id: 'pkg_560', name: '480 咨询点数 + 赠80点', description: '适合多省市、多院校反复对比', price: 6990, originalPrice: 9990, points: 480, bonus: 80, sortOrder: 30, enabled: true },
-  { id: 'pkg_1000', name: '800 咨询点数 + 赠200点', description: '家庭规划包，适合长期升学咨询', price: 9990, originalPrice: 14990, points: 800, bonus: 200, sortOrder: 40, enabled: true },
+  { id: 'pkg_120', name: '120 咨询点数', description: '首充体验，适合生成报告后继续追问', price: 1990, originalPrice: 2990, points: 120, bonus: 0, isDefault: false, badgeType: null, sortOrder: 10, enabled: true },
+  { id: 'pkg_280', name: '240 咨询点数 + 赠40点', description: '推荐套餐，适合志愿季集中使用', price: 3990, originalPrice: 5990, points: 240, bonus: 40, isDefault: false, badgeType: null, sortOrder: 20, enabled: true },
+  { id: 'pkg_560', name: '480 咨询点数 + 赠80点', description: '适合多省市、多院校反复对比', price: 6990, originalPrice: 9990, points: 480, bonus: 80, isDefault: true, badgeType: 'hot', sortOrder: 30, enabled: true },
+  { id: 'pkg_1000', name: '800 咨询点数 + 赠200点', description: '家庭规划包，适合长期升学咨询', price: 9990, originalPrice: 14990, points: 800, bonus: 200, isDefault: false, badgeType: 'best_value', sortOrder: 40, enabled: true },
 ];
 
 export async function ensurePointSettings() {
@@ -53,8 +55,11 @@ export async function updatePointSettings(input: Record<string, any>) {
 
 export async function seedDefaultRechargeProducts() {
   const count = await prisma.rechargeProduct.count();
-  if (count > 0) return;
-  await prisma.rechargeProduct.createMany({ data: DEFAULT_RECHARGE_PRODUCTS });
+  if (count === 0) {
+    await prisma.rechargeProduct.createMany({ data: DEFAULT_RECHARGE_PRODUCTS });
+    return;
+  }
+  await ensureRechargeProductDisplayDefaults();
 }
 
 export async function listRechargeProducts(options: { includeDisabled?: boolean } = {}) {
@@ -63,6 +68,29 @@ export async function listRechargeProducts(options: { includeDisabled?: boolean 
     where: options.includeDisabled ? undefined : { enabled: true },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
   });
+}
+
+async function ensureRechargeProductDisplayDefaults() {
+  const hasDisplayConfig = await prisma.rechargeProduct.count({
+    where: {
+      OR: [
+        { isDefault: true },
+        { badgeType: { not: null } },
+      ],
+    },
+  });
+  if (hasDisplayConfig > 0) return;
+
+  await prisma.$transaction([
+    prisma.rechargeProduct.updateMany({
+      where: { id: 'pkg_560' },
+      data: { isDefault: true, badgeType: 'hot' },
+    }),
+    prisma.rechargeProduct.updateMany({
+      where: { id: 'pkg_1000' },
+      data: { badgeType: 'best_value' },
+    }),
+  ]);
 }
 
 export async function getRechargeProductById(id: string, options: { includeDisabled?: boolean } = {}) {
@@ -74,12 +102,25 @@ export async function getRechargeProductById(id: string, options: { includeDisab
 
 export async function createRechargeProduct(input: Record<string, any>) {
   const data = normalizeRechargeProduct(input, false) as RechargeProductInput;
-  return prisma.rechargeProduct.create({ data });
+  return prisma.$transaction(async (tx) => {
+    if (data.isDefault) {
+      await tx.rechargeProduct.updateMany({ data: { isDefault: false } });
+    }
+    return tx.rechargeProduct.create({ data });
+  });
 }
 
 export async function updateRechargeProduct(id: string, input: Record<string, any>) {
   const data = normalizeRechargeProduct(input, true);
-  return prisma.rechargeProduct.update({ where: { id }, data });
+  return prisma.$transaction(async (tx) => {
+    if (data.isDefault === true) {
+      await tx.rechargeProduct.updateMany({
+        where: { id: { not: id } },
+        data: { isDefault: false },
+      });
+    }
+    return tx.rechargeProduct.update({ where: { id }, data });
+  });
 }
 
 export async function deleteRechargeProduct(id: string) {
@@ -129,9 +170,20 @@ function normalizeRechargeProduct(input: Record<string, any>, partial: boolean) 
   }
   if (!partial || input.points !== undefined) data.points = intInRange(input.points, 0, 10000000, '基础点数');
   if (!partial || input.bonus !== undefined) data.bonus = intInRange(input.bonus || 0, 0, 10000000, '赠送点数');
+  if (!partial || input.isDefault !== undefined) data.isDefault = input.isDefault === true;
+  if (!partial || input.badgeType !== undefined) data.badgeType = normalizeBadgeType(input.badgeType);
   if (!partial || input.sortOrder !== undefined) data.sortOrder = intInRange(input.sortOrder || 0, -100000, 100000, '排序');
   if (!partial || input.enabled !== undefined) data.enabled = input.enabled !== false;
   return data;
+}
+
+function normalizeBadgeType(value: any) {
+  const badgeType = String(value || '').trim();
+  if (!badgeType) return null;
+  if (!['hot', 'best_value'].includes(badgeType)) {
+    throw new AppError(422, '套餐角标只能选择热门或最划算', 'PRODUCT_BADGE_INVALID');
+  }
+  return badgeType;
 }
 
 function intInRange(value: any, min: number, max: number, label: string) {
