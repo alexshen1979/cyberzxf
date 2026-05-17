@@ -858,6 +858,10 @@ function formatLocationError(err: any) {
   return '定位暂不可用，请手动选择省份';
 }
 
+function locationDebugText(err: any) {
+  return String(err?.errMsg || err?.message || '').replace(/\s+/g, ' ').slice(0, 42);
+}
+
 function isDevtoolsRuntime() {
   try {
     const wxApi = (globalThis as any).wx;
@@ -872,7 +876,25 @@ function isDevtoolsRuntime() {
   }
 }
 
-function requestLocationByApi(apiFn: Function, timeoutMs = 6500) {
+function delay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function authorizeLocation() {
+  const wxApi = (globalThis as any).wx;
+  const authorize = (uni as any).authorize || wxApi?.authorize;
+  if (typeof authorize !== 'function') return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
+    authorize({
+      scope: 'scope.userLocation',
+      success: () => resolve(),
+      fail: (err: any) => reject(err),
+    });
+  });
+}
+
+function requestLocationByApi(apiFn: Function, type: 'gcj02' | 'wgs84', timeoutMs = 9000) {
   return new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -899,7 +921,8 @@ function requestLocationByApi(apiFn: Function, timeoutMs = 6500) {
     };
 
     apiFn({
-      type: 'gcj02',
+      type,
+      isHighAccuracy: false,
       success: (res: any) => done(undefined, res),
       fail: (err: any) => done(err),
     });
@@ -907,6 +930,11 @@ function requestLocationByApi(apiFn: Function, timeoutMs = 6500) {
 }
 
 async function getProvinceLocation() {
+  await authorizeLocation().catch((err) => {
+    if (isLocationDenied(err)) throw err;
+  });
+  await delay(250);
+
   const candidates = [
     (uni as any).getLocation,
     (globalThis as any).wx?.getLocation,
@@ -918,12 +946,15 @@ async function getProvinceLocation() {
 
   let lastError: any;
   for (const apiFn of candidates) {
-    try {
-      return await requestLocationByApi(apiFn, 6500);
-    } catch (err: any) {
-      lastError = err;
-      if (isLocationDenied(err)) break;
+    for (const type of ['gcj02', 'wgs84'] as const) {
+      try {
+        return await requestLocationByApi(apiFn, type, 9000);
+      } catch (err: any) {
+        lastError = err;
+        if (isLocationDenied(err)) break;
+      }
     }
+    if (isLocationDenied(lastError)) break;
   }
   throw lastError || new Error('location unavailable');
 }
@@ -1252,7 +1283,8 @@ async function detectProvince(force = false) {
       locationStatusTone.value = 'success';
     }
   } catch (err: any) {
-    locationStatus.value = formatLocationError(err);
+    const debug = locationDebugText(err);
+    locationStatus.value = `${formatLocationError(err)}${debug && force ? `（${debug}）` : ''}`;
     locationStatusTone.value = 'warning';
     if (force) uni.showToast({ title: locationStatus.value, icon: 'none' });
   } finally {
