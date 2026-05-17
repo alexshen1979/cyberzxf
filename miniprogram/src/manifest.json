@@ -23,8 +23,7 @@
       }
     },
     "requiredPrivateInfos": [
-      "getFuzzyLocation",
-      "getLocation"
+      "getFuzzyLocation"
     ],
     "usingComponents": true,
     "plugins": {

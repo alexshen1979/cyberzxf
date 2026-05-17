@@ -896,8 +896,6 @@ async function getProvinceLocation() {
   const candidates = [
     (uni as any).getFuzzyLocation,
     (globalThis as any).wx?.getFuzzyLocation,
-    (uni as any).getLocation,
-    (globalThis as any).wx?.getLocation,
   ].filter((item, index, list) => typeof item === 'function' && list.indexOf(item) === index);
 
   if (!candidates.length) {
