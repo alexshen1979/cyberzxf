@@ -852,7 +852,13 @@ function isLocationDenied(err: any) {
   return /auth deny|authorize|denied|deny|cancel|拒绝|取消|privacy/i.test(message);
 }
 
+function isNetworkLocationUnavailable(err: any) {
+  const message = String(err?.errMsg || err?.message || '');
+  return /NOCELL|WIFI_LOCATION|LOCATIONSWITCHOFF/i.test(message);
+}
+
 function formatLocationError(err: any) {
+  if (isNetworkLocationUnavailable(err)) return '系统网络定位不可用，请打开手机定位、Wi-Fi或移动网络后重试，也可以手动选择省份';
   if (isLocationTimeout(err)) return '定位超时，请手动选择省份';
   if (isLocationDenied(err)) return '定位未开启，请手动选择省份';
   return '定位暂不可用，请手动选择省份';
@@ -894,7 +900,10 @@ function authorizeLocation() {
   });
 }
 
-function requestLocationByApi(apiFn: Function, type: 'gcj02' | 'wgs84', timeoutMs = 9000) {
+function requestLocationByApi(
+  apiFn: Function,
+  options: { type: 'gcj02' | 'wgs84'; highAccuracy: boolean; timeoutMs: number },
+) {
   return new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -920,12 +929,16 @@ function requestLocationByApi(apiFn: Function, type: 'gcj02' | 'wgs84', timeoutM
       resolve({ latitude, longitude });
     };
 
-    apiFn({
-      type,
-      isHighAccuracy: false,
+    const params: Record<string, any> = {
+      type: options.type,
+      isHighAccuracy: options.highAccuracy,
       success: (res: any) => done(undefined, res),
       fail: (err: any) => done(err),
-    });
+    };
+    if (options.highAccuracy) {
+      params.highAccuracyExpireTime = Math.max(3000, Math.min(options.timeoutMs - 1000, 10000));
+    }
+    apiFn(params);
   });
 }
 
@@ -945,10 +958,16 @@ async function getProvinceLocation() {
   }
 
   let lastError: any;
+  const attempts = [
+    { type: 'gcj02' as const, highAccuracy: true, timeoutMs: 15000 },
+    { type: 'wgs84' as const, highAccuracy: true, timeoutMs: 15000 },
+    { type: 'gcj02' as const, highAccuracy: false, timeoutMs: 9000 },
+    { type: 'wgs84' as const, highAccuracy: false, timeoutMs: 9000 },
+  ];
   for (const apiFn of candidates) {
-    for (const type of ['gcj02', 'wgs84'] as const) {
+    for (const options of attempts) {
       try {
-        return await requestLocationByApi(apiFn, type, 9000);
+        return await requestLocationByApi(apiFn, options);
       } catch (err: any) {
         lastError = err;
         if (isLocationDenied(err)) break;
@@ -1286,7 +1305,13 @@ async function detectProvince(force = false) {
     const debug = locationDebugText(err);
     locationStatus.value = `${formatLocationError(err)}${debug && force ? `（${debug}）` : ''}`;
     locationStatusTone.value = 'warning';
-    if (force) uni.showToast({ title: locationStatus.value, icon: 'none' });
+    provincePanelOpen.value = true;
+    if (force) {
+      uni.showToast({
+        title: isNetworkLocationUnavailable(err) ? '请打开定位和网络后重试' : formatLocationError(err),
+        icon: 'none',
+      });
+    }
   } finally {
     locating.value = false;
   }
