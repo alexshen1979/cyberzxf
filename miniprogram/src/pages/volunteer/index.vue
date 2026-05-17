@@ -858,6 +858,20 @@ function formatLocationError(err: any) {
   return '定位暂不可用，请手动选择省份';
 }
 
+function isDevtoolsRuntime() {
+  try {
+    const wxApi = (globalThis as any).wx;
+    const info = typeof wxApi?.getDeviceInfo === 'function'
+      ? wxApi.getDeviceInfo()
+      : (uni as any).getSystemInfoSync?.();
+    const platform = String(info?.platform || '').toLowerCase();
+    const system = String(info?.system || '').toLowerCase();
+    return platform === 'devtools' || /devtools/.test(`${platform} ${system}`);
+  } catch {
+    return false;
+  }
+}
+
 function requestLocationByApi(apiFn: Function, timeoutMs = 6500) {
   return new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
     let settled = false;
@@ -1210,6 +1224,12 @@ function goRecharge() {
 async function detectProvince(force = false) {
   if (locating.value) return;
   if (!force && (form.province || provinceTouched.value)) return;
+  if (isDevtoolsRuntime()) {
+    locationStatus.value = force ? '开发者工具定位不稳定，请真机预览或手动选择省份' : '';
+    locationStatusTone.value = 'warning';
+    if (force) uni.showToast({ title: locationStatus.value, icon: 'none' });
+    return;
+  }
 
   locating.value = true;
   locationStatus.value = '正在根据位置默认省份...';
