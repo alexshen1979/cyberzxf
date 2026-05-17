@@ -263,6 +263,8 @@ export const api = {
       request({ url: `/volunteer/reports?page=${page}&pageSize=${pageSize}` }),
     detail: (id: string) =>
       request({ url: `/volunteer/reports/${id}` }),
+    exportUrl: (id: string, type: 'pdf' | 'image' = 'pdf') =>
+      `${BASE_URL}/volunteer/reports/${id}/export?type=${type}`,
   },
 
   // 院校库

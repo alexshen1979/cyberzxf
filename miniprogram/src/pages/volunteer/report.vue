@@ -128,13 +128,114 @@
       </view>
     </view>
 
-    <view v-else class="report-chat">
-      <view class="report-message" v-for="block in reportBlocks" :key="block.title">
-        <view class="report-avatar">AI</view>
-        <view class="report-bubble">
-          <text class="report-block-title">{{ block.title }}</text>
-          <text class="report-block-content">{{ block.content }}</text>
+    <view v-else class="complete-report">
+      <view class="report-cover">
+        <view class="cover-top">
+          <text class="cover-brand">涨识 · 赛博张老师</text>
+          <text class="cover-date">{{ formattedReportDate }}</text>
         </view>
+        <text class="cover-title">{{ reportTitle }}志愿分析</text>
+        <text class="cover-summary">{{ result?.summary || data?.summary || '报告正在整理中。' }}</text>
+        <view class="cover-tags">
+          <text class="cover-tag">位次优先</text>
+          <text class="cover-tag">冲稳保结构</text>
+          <text class="cover-tag">{{ riskPreferenceLabel(reportInput?.riskPreference) }}</text>
+        </view>
+      </view>
+
+      <view class="download-panel">
+        <view class="download-copy">
+          <text class="download-title">保存精美报告</text>
+          <text class="download-subtitle">PDF 适合归档打印，长图适合转发给家人一起看。</text>
+        </view>
+        <view class="download-actions">
+          <view class="download-btn pdf" :class="{ disabled: exportingType === 'pdf' }" @click="downloadReport('pdf')">
+            {{ exportingType === 'pdf' ? '生成中' : 'PDF' }}
+          </view>
+          <view class="download-btn image" :class="{ disabled: exportingType === 'image' }" @click="downloadReport('image')">
+            {{ exportingType === 'image' ? '生成中' : '长图' }}
+          </view>
+        </view>
+      </view>
+
+      <view class="report-metrics">
+        <view class="metric-tile" v-for="metric in reportMetrics" :key="metric.label">
+          <text class="metric-label">{{ metric.label }}</text>
+          <text class="metric-value">{{ metric.value }}</text>
+        </view>
+      </view>
+
+      <view class="report-section">
+        <view class="report-section-head">
+          <text class="report-section-title">冲稳保速览</text>
+          <text class="report-section-note">优先看院校层级，再看专业组风险</text>
+        </view>
+        <view class="plan-grid">
+          <view class="plan-card" :class="card.key" v-for="card in reportPlanCards" :key="card.key">
+            <view class="plan-head">
+              <text class="plan-title">{{ card.title }}</text>
+              <text class="plan-count">{{ card.count }} 所</text>
+            </view>
+            <text class="plan-desc">{{ card.desc }}</text>
+            <view class="plan-school" v-for="school in card.schools" :key="`${card.key}-${school.name}`">
+              <text class="plan-school-name">{{ school.name }}</text>
+              <text class="plan-school-meta">{{ school.meta }}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view class="report-section">
+        <view class="report-section-head">
+          <text class="report-section-title">偏好与风险</text>
+          <text class="report-section-note">来自本次分析设定</text>
+        </view>
+        <view class="preference-list">
+          <view class="preference-row" v-for="item in reportPreferenceRows" :key="item.label">
+            <text class="preference-label">{{ item.label }}</text>
+            <text class="preference-value">{{ item.value }}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="report-section two-columns">
+        <view class="mini-report-card">
+          <text class="mini-title">专业建议</text>
+          <view class="report-bullet" v-for="item in result?.majorAdvice || []" :key="`major-${item}`">{{ item }}</view>
+          <view class="report-empty" v-if="!(result?.majorAdvice || []).length">暂无专业建议</view>
+        </view>
+        <view class="mini-report-card">
+          <text class="mini-title">城市建议</text>
+          <view class="report-bullet" v-for="item in result?.cityAdvice || []" :key="`city-${item}`">{{ item }}</view>
+          <view class="report-empty" v-if="!(result?.cityAdvice || []).length">暂无城市建议</view>
+        </view>
+      </view>
+
+      <view class="report-section">
+        <view class="report-section-head">
+          <text class="report-section-title">风险提示</text>
+          <text class="report-section-note">填报前逐项核验</text>
+        </view>
+        <view class="risk-list">
+          <view class="risk-item" v-for="risk in result?.risks || []" :key="risk">{{ risk }}</view>
+          <view class="report-empty" v-if="!(result?.risks || []).length">暂无额外风险提示</view>
+        </view>
+      </view>
+
+      <view class="report-section detail-section">
+        <view class="report-section-head">
+          <text class="report-section-title">完整分析</text>
+          <text class="report-section-note">可继续追问细化排序</text>
+        </view>
+        <view class="analysis-block" v-for="block in reportBlocks" :key="block.title">
+          <text class="analysis-title">{{ block.title }}</text>
+          <text class="analysis-content">{{ block.content }}</text>
+        </view>
+      </view>
+
+      <view class="action-row">
+        <view class="secondary-btn" @click="goBackForm">重新分析</view>
+        <view class="primary-btn" @click="askFollowup">继续追问</view>
       </view>
     </view>
   </view>
@@ -152,6 +253,7 @@ const data = ref<any>(null);
 const collapsedGroups = ref<Record<string, boolean>>({});
 const groupDisplayLimits = ref<Record<string, number>>({});
 const loadingMoreGroup = ref('');
+const exportingType = ref<'pdf' | 'image' | ''>('');
 const initialGroupLimit = 12;
 const loadMoreStep = 12;
 const result = computed(() => data.value?.result || data.value);
@@ -237,6 +339,109 @@ const reportInput = computed(() => {
     rank: source.rank ? Number(source.rank) : undefined,
   });
 });
+
+const formattedReportDate = computed(() => {
+  const raw = data.value?.createdAt;
+  const date = raw ? new Date(raw) : new Date();
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
+});
+
+const reportMetrics = computed(() => {
+  const source = reportInput.value || data.value || {};
+  return [
+    { label: '考生省份', value: source.province || '未填写' },
+    { label: '科类/选科', value: source.subjectType || '未填写' },
+    { label: '高考分数', value: source.score ? `${source.score} 分` : '未填写' },
+    { label: '参考位次', value: source.rank ? `${source.rank}` : '未填写' },
+    { label: '分析年份', value: source.year ? `${source.year} 年` : '默认年份' },
+    { label: '风险偏好', value: riskPreferenceLabel(source.riskPreference) },
+  ];
+});
+
+const reportPreferenceRows = computed(() => {
+  const source = reportInput.value || {};
+  return [
+    { label: '目标城市或省份', value: joinDisplayList(source.preferredCities) },
+    { label: '偏好专业', value: joinDisplayList(source.preferredMajors) },
+    { label: '规避专业', value: joinDisplayList(source.avoidMajors) },
+    { label: '补充背景', value: source.familyExpectation || '未填写' },
+  ];
+});
+
+const reportPlanCards = computed(() => groups.value.map(group => ({
+  key: group.key,
+  title: group.key === 'rush' ? '冲刺' : group.key === 'safe' ? '保底' : '稳妥',
+  desc: group.key === 'rush'
+    ? '适合冲击更高层次院校，注意专业组和调剂风险。'
+    : group.key === 'safe'
+      ? '用于守住可接受底线，优先确认专业接受度。'
+      : '录取概率和专业选择更均衡，是方案主体。' ,
+  count: groupTotal(group),
+  schools: group.items.slice(0, 4).map((item: any) => ({
+    name: item.universityName,
+    meta: [item.city || item.province, item.type, item.level].filter(Boolean).join(' · ') || '院校信息待补充',
+  })),
+})));
+
+function joinDisplayList(value: unknown) {
+  if (!Array.isArray(value) || !value.length) return '未填写';
+  return value.filter(Boolean).join('、') || '未填写';
+}
+
+function riskPreferenceLabel(value?: string) {
+  if (value === 'conservative') return '稳健保守';
+  if (value === 'aggressive') return '积极冲刺';
+  return '均衡配置';
+}
+
+function currentReportId() {
+  return data.value?.id || data.value?.reportId || '';
+}
+
+async function downloadReport(type: 'pdf' | 'image') {
+  const reportId = currentReportId();
+  if (!reportId) {
+    uni.showToast({ title: '请先生成报告', icon: 'none' });
+    return;
+  }
+  if (exportingType.value) return;
+
+  exportingType.value = type;
+  uni.showLoading({ title: type === 'pdf' ? '生成PDF中' : '生成长图中', mask: true });
+  try {
+    const token = uni.getStorageSync('token');
+    const downloadRes = await uni.downloadFile({
+      url: api.volunteer.exportUrl(reportId, type),
+      header: token ? { Authorization: `Bearer ${token}` } : {},
+      timeout: 90000,
+    });
+
+    if (downloadRes.statusCode && downloadRes.statusCode >= 400) {
+      throw new Error('报告生成失败');
+    }
+    if (!downloadRes.tempFilePath) {
+      throw new Error('报告下载失败');
+    }
+
+    if (type === 'pdf') {
+      await uni.openDocument({ filePath: downloadRes.tempFilePath, fileType: 'pdf', showMenu: true });
+      return;
+    }
+
+    await uni.saveImageToPhotosAlbum({ filePath: downloadRes.tempFilePath });
+    uni.showToast({ title: '长图已保存', icon: 'success' });
+  } catch (err: any) {
+    const message = String(err?.errMsg || err?.message || '');
+    const title = /auth|authorize|permission|scope/i.test(message)
+      ? '请允许保存到相册'
+      : err?.message || '导出失败，请稍后再试';
+    uni.showToast({ title, icon: 'none' });
+  } finally {
+    exportingType.value = '';
+    uni.hideLoading();
+  }
+}
 
 function toggleGroup(key: string) {
   collapsedGroups.value = Object.assign({}, collapsedGroups.value, {
@@ -1135,53 +1340,416 @@ onLoad((query: any) => {
   color: $text-secondary;
 }
 
-.report-chat {
+.complete-report {
   padding-bottom: $spacing-md;
 }
 
-.report-message {
+.report-cover {
+  position: relative;
+  overflow: hidden;
+  padding: 34rpx;
+  margin-bottom: $spacing-md;
+  border-radius: 28rpx;
+  background: linear-gradient(135deg, #405136 0%, #4d7569 56%, #bf744d 100%);
+  box-shadow: 0 20rpx 42rpx rgba(64, 81, 54, 0.18);
+}
+
+.report-cover::after {
+  content: "";
+  position: absolute;
+  right: -90rpx;
+  bottom: -120rpx;
+  width: 260rpx;
+  height: 260rpx;
+  border-radius: 50%;
+  border: 2rpx solid rgba(255, 255, 255, 0.18);
+}
+
+.cover-top {
+  position: relative;
+  z-index: 1;
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-bottom: 44rpx;
+}
+
+.cover-brand,
+.cover-date {
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
+.cover-title {
+  position: relative;
+  z-index: 1;
+  display: block;
+  color: #fff;
+  font-size: 46rpx;
+  font-weight: 900;
+  line-height: 1.18;
+  letter-spacing: 0;
+}
+
+.cover-summary {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-top: 18rpx;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 26rpx;
+  line-height: 1.65;
+}
+
+.cover-tags {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 30rpx;
+}
+
+.cover-tag {
+  padding: 9rpx 16rpx;
+  border-radius: $radius-full;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 21rpx;
+  font-weight: 800;
+}
+
+.download-panel {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 22rpx;
+  margin-bottom: $spacing-md;
+  border: 1rpx solid rgba(15, 23, 42, 0.06);
+  border-radius: 22rpx;
+  background: #fff;
+  box-shadow: 0 10rpx 24rpx rgba(15, 23, 42, 0.04);
+}
+
+.download-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.download-title {
+  display: block;
+  color: $text-primary;
+  font-size: $font-md;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.download-subtitle {
+  display: block;
+  margin-top: 6rpx;
+  color: $text-tertiary;
+  font-size: 22rpx;
+  line-height: 1.45;
+}
+
+.download-actions {
+  display: flex;
+  gap: 10rpx;
+  flex-shrink: 0;
+}
+
+.download-btn {
+  min-width: 88rpx;
+  height: 64rpx;
+  padding: 0 16rpx;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 23rpx;
+  font-weight: 900;
+  box-sizing: border-box;
+}
+
+.download-btn.pdf {
+  color: #fff;
+  background: #4f6f63;
+}
+
+.download-btn.image {
+  color: #7a4b28;
+  background: #fff3e8;
+  border: 1rpx solid rgba(191, 116, 77, 0.18);
+}
+
+.download-btn.disabled {
+  opacity: 0.62;
+}
+
+.report-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14rpx;
   margin-bottom: $spacing-md;
 }
 
-.report-avatar {
-  width: 54rpx;
-  height: 54rpx;
+.metric-tile {
+  min-width: 0;
+  padding: 20rpx;
+  border-radius: 20rpx;
+  background: #fff;
+  border: 1rpx solid rgba(15, 23, 42, 0.06);
+}
+
+.metric-label {
+  display: block;
+  color: $text-tertiary;
+  font-size: 22rpx;
+  margin-bottom: 8rpx;
+}
+
+.metric-value {
+  display: block;
+  color: $text-primary;
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.report-section {
+  @include card;
+  padding: 26rpx;
+  margin-bottom: $spacing-md;
+  border-color: rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.report-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
+  margin-bottom: 20rpx;
+}
+
+.report-section-title {
+  color: $text-primary;
+  font-size: $font-lg;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.report-section-note {
   flex-shrink: 0;
-  border-radius: 16rpx;
-  background: #ecfdf5;
-  color: #0f766e;
-  font-size: 20rpx;
-  font-weight: 800;
+  max-width: 260rpx;
+  color: $text-tertiary;
+  font-size: 21rpx;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.plan-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.plan-card {
+  padding: 20rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid transparent;
+}
+
+.plan-card.rush {
+  background: #fff7f5;
+  border-color: rgba(217, 121, 97, 0.18);
+}
+
+.plan-card.stable {
+  background: #fffbeb;
+  border-color: rgba(214, 168, 92, 0.20);
+}
+
+.plan-card.safe {
+  background: #f2fbf6;
+  border-color: rgba(120, 146, 98, 0.18);
+}
+
+.plan-head {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 18rpx;
 }
 
-.report-bubble {
+.plan-title {
+  color: $text-primary;
+  font-size: 30rpx;
+  font-weight: 900;
+}
+
+.plan-count {
+  color: $text-tertiary;
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
+.plan-desc {
+  display: block;
+  margin-top: 8rpx;
+  color: $text-secondary;
+  font-size: 23rpx;
+  line-height: 1.45;
+}
+
+.plan-school {
+  padding: 14rpx 0 0;
+}
+
+.plan-school-name {
+  display: block;
+  color: $text-primary;
+  font-size: 26rpx;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.plan-school-meta {
+  display: block;
+  margin-top: 4rpx;
+  color: $text-tertiary;
+  font-size: 21rpx;
+  line-height: 1.35;
+}
+
+.preference-list {
+  border-radius: 18rpx;
+  overflow: hidden;
+  border: 1rpx solid rgba(15, 23, 42, 0.06);
+}
+
+.preference-row {
+  display: flex;
+  gap: 18rpx;
+  padding: 18rpx;
+  background: #fff;
+  border-bottom: 1rpx solid rgba(15, 23, 42, 0.06);
+}
+
+.preference-row:last-child {
+  border-bottom: 0;
+}
+
+.preference-label {
+  width: 150rpx;
+  flex-shrink: 0;
+  color: $text-tertiary;
+  font-size: 22rpx;
+  line-height: 1.45;
+}
+
+.preference-value {
   flex: 1;
   min-width: 0;
-  padding: 22rpx;
-  border-radius: 22rpx;
-  border: 1rpx solid rgba(15, 23, 42, 0.06);
-  background: #fff;
-  box-shadow: 0 8rpx 20rpx rgba(15, 23, 42, 0.04);
+  color: $text-primary;
+  font-size: 25rpx;
+  font-weight: 750;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.report-block-title {
+.two-columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16rpx;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.mini-report-card {
+  padding: 24rpx;
+  border-radius: 22rpx;
+  background: #fff;
+  border: 1rpx solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 8rpx 20rpx rgba(15, 23, 42, 0.035);
+}
+
+.mini-title {
+  display: block;
+  margin-bottom: 14rpx;
+  color: $text-primary;
+  font-size: $font-md;
+  font-weight: 900;
+}
+
+.report-bullet,
+.risk-item {
+  position: relative;
+  padding-left: 26rpx;
+  color: $text-secondary;
+  font-size: $font-sm;
+  line-height: 1.68;
+  margin-top: 10rpx;
+}
+
+.report-bullet::before,
+.risk-item::before {
+  content: "";
+  position: absolute;
+  left: 2rpx;
+  top: 18rpx;
+  width: 9rpx;
+  height: 9rpx;
+  border-radius: 50%;
+  background: #bf744d;
+}
+
+.risk-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.report-empty {
+  color: $text-tertiary;
+  font-size: $font-sm;
+  line-height: 1.6;
+}
+
+.detail-section {
+  background: #fff;
+}
+
+.analysis-block {
+  padding: 22rpx 0;
+  border-top: 1rpx solid rgba(15, 23, 42, 0.06);
+}
+
+.analysis-block:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.analysis-title {
   display: block;
   color: $text-primary;
   font-size: $font-md;
-  font-weight: 800;
-  margin-bottom: 10rpx;
+  font-weight: 900;
+  margin-bottom: 12rpx;
+  line-height: 1.35;
 }
 
-.report-block-content {
+.analysis-content {
   display: block;
   white-space: pre-wrap;
   color: $text-secondary;
   font-size: $font-sm;
-  line-height: 1.7;
+  line-height: 1.75;
+  word-break: break-word;
 }
 </style>

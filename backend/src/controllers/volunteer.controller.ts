@@ -6,6 +6,10 @@ import {
   previewVolunteer,
   VolunteerAnalyzeInput,
 } from '../services/volunteer-analysis.service';
+import {
+  exportVolunteerReport,
+  VolunteerReportExportType,
+} from '../services/volunteer-report-export.service';
 import { AppError } from '../middleware/errorHandler';
 import {
   getAdmissionAutoFillStatus,
@@ -13,6 +17,7 @@ import {
   stopAdmissionAutoFill,
 } from '../services/admission-auto-fill.service';
 import { prisma } from '../utils/prisma';
+import fs from 'fs';
 
 export async function analyze(ctx: Context) {
   const userId = ctx.state.user.userId;
@@ -41,6 +46,30 @@ export async function reportDetail(ctx: Context) {
   const userId = ctx.state.user.userId;
   const result = await getVolunteerReport(userId, ctx.params.id);
   ctx.body = { success: true, data: result };
+}
+
+export async function exportReport(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  const type = normalizeExportType(String(ctx.query.type || 'pdf'));
+  const file = await exportVolunteerReport(userId, ctx.params.id, type);
+
+  ctx.set('Content-Type', file.contentType);
+  ctx.set('Content-Disposition', contentDisposition(file.filename));
+  ctx.set('Cache-Control', 'private, max-age=3600');
+  ctx.body = fs.createReadStream(file.filePath);
+}
+
+function normalizeExportType(value: string): VolunteerReportExportType {
+  if (value === 'image' || value === 'png') return 'image';
+  return 'pdf';
+}
+
+function contentDisposition(filename: string) {
+  const fallback = filename.replace(/[^\x20-\x7E]+/g, '_').replace(/["\\]/g, '_');
+  const encoded = encodeURIComponent(filename)
+    .replace(/['()]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/\*/g, '%2A');
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 export async function scoreRankLookup(ctx: Context) {
