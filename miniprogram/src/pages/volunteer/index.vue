@@ -866,7 +866,7 @@ function isDevtoolsRuntime() {
       : (uni as any).getSystemInfoSync?.();
     const platform = String(info?.platform || '').toLowerCase();
     const system = String(info?.system || '').toLowerCase();
-    return platform === 'devtools' || /devtools/.test(`${platform} ${system}`);
+    return platform === 'devtools' || /devtools|mac|windows/.test(`${platform} ${system}`);
   } catch {
     return false;
   }
@@ -908,8 +908,8 @@ function requestLocationByApi(apiFn: Function, timeoutMs = 6500) {
 
 async function getProvinceLocation() {
   const candidates = [
-    (uni as any).getFuzzyLocation,
-    (globalThis as any).wx?.getFuzzyLocation,
+    (uni as any).getLocation,
+    (globalThis as any).wx?.getLocation,
   ].filter((item, index, list) => typeof item === 'function' && list.indexOf(item) === index);
 
   if (!candidates.length) {
