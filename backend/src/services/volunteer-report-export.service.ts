@@ -58,6 +58,7 @@ async function renderVolunteerReport(report: any, type: VolunteerReportExportTyp
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--font-render-hinting=none',
+        '--lang=zh-CN',
       ],
     });
 
@@ -139,7 +140,7 @@ function buildReportHtml(report: any) {
       margin: 0;
       color: #192126;
       background: #f5f7f4;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+      font-family: "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Zen Hei", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
       letter-spacing: 0;
     }
     .page {
