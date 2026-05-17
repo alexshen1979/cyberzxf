@@ -249,6 +249,8 @@ model PointSetting {
   defaultCost           Int      @default(5) @map("default_cost")
   deepAnalysisCost      Int      @default(18) @map("deep_analysis_cost")
   volunteerAnalysisCost Int      @default(38) @map("volunteer_analysis_cost")
+  volunteerReportPdfCost   Int   @default(3) @map("volunteer_report_pdf_cost")
+  volunteerReportImageCost Int   @default(5) @map("volunteer_report_image_cost")
   expireDays            Int      @default(365) @map("expire_days")
   updatedAt             DateTime @updatedAt @map("updated_at")
   createdAt             DateTime @default(now()) @map("created_at")

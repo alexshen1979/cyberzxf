@@ -5,6 +5,8 @@ import { prisma } from '../utils/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { sanitizeAiOutput } from './ai.service';
 import { createLogger } from '../utils/logger';
+import { getPointSettings } from './point-config.service';
+import { deductPoints } from './points.service';
 
 const logger = createLogger('volunteer-export');
 const REPORT_OUTPUT_DIR = path.resolve(process.cwd(), 'uploads', 'reports');
@@ -32,10 +34,30 @@ export async function exportVolunteerReport(
   const extension = type === 'pdf' ? 'pdf' : 'png';
   const filename = `涨识志愿分析报告-${safeFilename(report.province)}-${report.score}分.${extension}`;
   const filePath = path.join(REPORT_OUTPUT_DIR, safeFilename(userId), `${safeFilename(report.id)}.${extension}`);
+  const pointsCost = await getExportPointsCost(type);
+  const sourceId = `${report.id}:${type}`;
+  const alreadyPaid = await hasPaidExport(userId, sourceId);
+
+  if (pointsCost > 0 && !alreadyPaid) {
+    await deductPoints(userId, pointsCost, {
+      source: 'volunteer_report_export',
+      sourceId,
+      remark: `${type === 'pdf' ? 'PDF报告导出' : '长图报告导出'} - ${report.province}${report.score}分`,
+    });
+  }
 
   if (!fs.existsSync(filePath)) {
     await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-    await renderVolunteerReport(report, type, filePath);
+    try {
+      await renderVolunteerReport(report, type, filePath);
+    } catch (err) {
+      if (pointsCost > 0 && !alreadyPaid) {
+        await refundExportPoints(userId, pointsCost, sourceId, type).catch(refundErr => {
+          logger.error({ refundErr, userId, reportId, type }, 'volunteer report export refund failed');
+        });
+      }
+      throw err;
+    }
   }
 
   return {
@@ -43,6 +65,51 @@ export async function exportVolunteerReport(
     filename,
     contentType: type === 'pdf' ? 'application/pdf' : 'image/png',
   };
+}
+
+export async function getVolunteerReportExportCosts() {
+  const settings = await getPointSettings();
+  return {
+    pdf: settings.volunteerReportPdfCost,
+    image: settings.volunteerReportImageCost,
+  };
+}
+
+async function getExportPointsCost(type: VolunteerReportExportType) {
+  const costs = await getVolunteerReportExportCosts();
+  return type === 'pdf' ? costs.pdf : costs.image;
+}
+
+async function hasPaidExport(userId: string, sourceId: string) {
+  const aggregate = await prisma.pointsTransaction.aggregate({
+    where: {
+      userId,
+      source: 'volunteer_report_export',
+      sourceId,
+    },
+    _sum: { amount: true },
+  });
+  return (aggregate._sum.amount || 0) < 0;
+}
+
+async function refundExportPoints(userId: string, amount: number, sourceId: string, type: VolunteerReportExportType) {
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.pointsAccount.update({
+      where: { userId },
+      data: { balance: { increment: amount } },
+    });
+    await tx.pointsTransaction.create({
+      data: {
+        userId,
+        type: 'refund',
+        amount,
+        balanceAfter: updated.balance,
+        source: 'volunteer_report_export',
+        sourceId,
+        remark: `${type === 'pdf' ? 'PDF报告导出' : '长图报告导出'}失败，退还点数`,
+      },
+    });
+  });
 }
 
 async function renderVolunteerReport(report: any, type: VolunteerReportExportType, filePath: string) {

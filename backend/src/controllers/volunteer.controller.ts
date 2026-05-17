@@ -8,6 +8,7 @@ import {
 } from '../services/volunteer-analysis.service';
 import {
   exportVolunteerReport,
+  getVolunteerReportExportCosts,
   VolunteerReportExportType,
 } from '../services/volunteer-report-export.service';
 import { AppError } from '../middleware/errorHandler';
@@ -57,6 +58,11 @@ export async function exportReport(ctx: Context) {
   ctx.set('Content-Disposition', contentDisposition(file.filename));
   ctx.set('Cache-Control', 'private, max-age=3600');
   ctx.body = fs.createReadStream(file.filePath);
+}
+
+export async function reportExportCosts(ctx: Context) {
+  const costs = await getVolunteerReportExportCosts();
+  ctx.body = { success: true, data: costs };
 }
 
 function normalizeExportType(value: string): VolunteerReportExportType {

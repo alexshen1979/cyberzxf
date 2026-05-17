@@ -146,14 +146,14 @@
       <view class="download-panel">
         <view class="download-copy">
           <text class="download-title">保存精美报告</text>
-          <text class="download-subtitle">PDF 适合归档打印，长图适合转发给家人一起看。</text>
+          <text class="download-subtitle">首次生成 PDF {{ exportCosts.pdf }}点，长图 {{ exportCosts.image }}点；同一报告重复保存不再扣点。</text>
         </view>
         <view class="download-actions">
           <view class="download-btn pdf" :class="{ disabled: exportingType === 'pdf' }" @click="downloadReport('pdf')">
-            {{ exportingType === 'pdf' ? '生成中' : 'PDF' }}
+            {{ exportingType === 'pdf' ? '生成中' : `PDF ${exportCosts.pdf}点` }}
           </view>
           <view class="download-btn image" :class="{ disabled: exportingType === 'image' }" @click="downloadReport('image')">
-            {{ exportingType === 'image' ? '生成中' : '长图' }}
+            {{ exportingType === 'image' ? '生成中' : `长图 ${exportCosts.image}点` }}
           </view>
         </view>
       </view>
@@ -254,6 +254,7 @@ const collapsedGroups = ref<Record<string, boolean>>({});
 const groupDisplayLimits = ref<Record<string, number>>({});
 const loadingMoreGroup = ref('');
 const exportingType = ref<'pdf' | 'image' | ''>('');
+const exportCosts = ref({ pdf: 3, image: 5 });
 const initialGroupLimit = 12;
 const loadMoreStep = 12;
 const result = computed(() => data.value?.result || data.value);
@@ -407,6 +408,21 @@ async function downloadReport(type: 'pdf' | 'image') {
   }
   if (exportingType.value) return;
 
+  const cost = type === 'pdf' ? exportCosts.value.pdf : exportCosts.value.image;
+  try {
+    await uni.showModal({
+      title: type === 'pdf' ? '生成 PDF 报告' : '生成长图报告',
+      content: `首次生成将消耗 ${cost} 点，同一报告重复保存不再扣点。确认继续吗？`,
+      confirmText: '继续',
+      cancelText: '取消',
+    }).then((res: any) => {
+      if (!res.confirm) throw new Error('CANCEL_EXPORT');
+    });
+  } catch (err: any) {
+    if (err?.message === 'CANCEL_EXPORT') return;
+    return;
+  }
+
   exportingType.value = type;
   uni.showLoading({ title: type === 'pdf' ? '生成PDF中' : '生成长图中', mask: true });
   try {
@@ -559,6 +575,20 @@ async function loadReport(id?: string) {
     uni.setStorageSync('latest_volunteer_report', res.data);
   } catch (err: any) {
     uni.showToast({ title: err?.message || '报告加载失败', icon: 'none' });
+  }
+}
+
+async function loadExportCosts() {
+  try {
+    const res = await api.volunteer.exportCosts();
+    const pdf = Number(res.data?.pdf);
+    const image = Number(res.data?.image);
+    exportCosts.value = {
+      pdf: Number.isFinite(pdf) ? Math.max(0, Math.trunc(pdf)) : 3,
+      image: Number.isFinite(image) ? Math.max(0, Math.trunc(image)) : 5,
+    };
+  } catch {
+    // Keep local defaults when the config endpoint is temporarily unavailable.
   }
 }
 
@@ -786,6 +816,7 @@ function displayReason(item: any) {
 
 onLoad((query: any) => {
   loadReport(query?.id);
+  loadExportCosts();
 });
 </script>
 

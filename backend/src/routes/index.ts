@@ -87,6 +87,7 @@ router.post('/volunteer/preview', optionalAuth, volunteerCtrl.preview);
 router.get('/volunteer/score-rank', optionalAuth, volunteerCtrl.scoreRankLookup);
 router.get('/volunteer/data-years', optionalAuth, volunteerCtrl.volunteerDataYears);
 router.get('/volunteer/major-suggestions', optionalAuth, volunteerCtrl.majorSuggestions);
+router.get('/volunteer/report-export-costs', optionalAuth, volunteerCtrl.reportExportCosts);
 router.get('/volunteer/reports', auth, volunteerCtrl.reports);
 router.get('/volunteer/reports/:id', auth, volunteerCtrl.reportDetail);
 router.get('/volunteer/reports/:id/export', auth, volunteerCtrl.exportReport);

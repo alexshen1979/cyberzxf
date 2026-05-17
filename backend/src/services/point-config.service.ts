@@ -31,6 +31,8 @@ export async function ensurePointSettings() {
       defaultCost: config.points.defaultCost,
       deepAnalysisCost: config.points.deepAnalysisCost,
       volunteerAnalysisCost: config.points.volunteerAnalysisCost,
+      volunteerReportPdfCost: config.points.volunteerReportPdfCost,
+      volunteerReportImageCost: config.points.volunteerReportImageCost,
       expireDays: config.points.expireDays,
     },
   });
@@ -95,6 +97,8 @@ function normalizePointSettings(input: Record<string, any>) {
     defaultCost: intInRange(input.defaultCost, 0, 10000, '普通问答扣点'),
     deepAnalysisCost: intInRange(input.deepAnalysisCost, 0, 10000, '深度分析扣点'),
     volunteerAnalysisCost: intInRange(input.volunteerAnalysisCost, 0, 10000, '志愿分析扣点'),
+    volunteerReportPdfCost: intInRange(input.volunteerReportPdfCost, 0, 10000, 'PDF报告导出扣点'),
+    volunteerReportImageCost: intInRange(input.volunteerReportImageCost, 0, 10000, '长图报告导出扣点'),
     expireDays: intInRange(input.expireDays, 1, 3650, '点数有效期'),
   };
 }

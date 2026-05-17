@@ -148,7 +148,13 @@ export const api = {
   // 公共配置
   config: {
     getPublic: () =>
-      request<{ freeAskLimit: number; freeGift: number; volunteerAnalysisCost: number }>({ url: '/public-config' }),
+      request<{
+        freeAskLimit: number;
+        freeGift: number;
+        volunteerAnalysisCost: number;
+        volunteerReportPdfCost: number;
+        volunteerReportImageCost: number;
+      }>({ url: '/public-config' }),
   },
 
   // 知识库
@@ -263,6 +269,8 @@ export const api = {
       request({ url: `/volunteer/reports?page=${page}&pageSize=${pageSize}` }),
     detail: (id: string) =>
       request({ url: `/volunteer/reports/${id}` }),
+    exportCosts: () =>
+      request<{ pdf: number; image: number }>({ url: '/volunteer/report-export-costs' }),
     exportUrl: (id: string, type: 'pdf' | 'image' = 'pdf') =>
       `${BASE_URL}/volunteer/reports/${id}/export?type=${type}`,
   },

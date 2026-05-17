@@ -55,6 +55,8 @@ export const config = {
     defaultCost: 5,                        // 普通问答消耗
     deepAnalysisCost: 18,                  // 深度分析消耗
     volunteerAnalysisCost: 38,             // 志愿分析消耗
+    volunteerReportPdfCost: 3,             // 志愿报告 PDF 导出消耗
+    volunteerReportImageCost: 5,           // 志愿报告长图导出消耗
     expireDays: 365,                       // 点数有效期（天）
     dailyConsultLimit: 50,                 // 单用户每日咨询上限
   },

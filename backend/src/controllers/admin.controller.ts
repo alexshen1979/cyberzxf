@@ -385,6 +385,8 @@ export async function updateAiConfig(ctx: Context) {
       defaultCost: pointsPerQuery ?? current.defaultCost,
       deepAnalysisCost: pointsPerDeep ?? current.deepAnalysisCost,
       volunteerAnalysisCost: current.volunteerAnalysisCost,
+      volunteerReportPdfCost: current.volunteerReportPdfCost,
+      volunteerReportImageCost: current.volunteerReportImageCost,
       expireDays: current.expireDays,
     });
   }
@@ -477,6 +479,8 @@ export async function getPublicConfig(ctx: Context) {
       freeAskLimit: aiConfig?.freeAskLimit ?? 2,
       freeGift: pointSettings.freeGift,
       volunteerAnalysisCost: pointSettings.volunteerAnalysisCost,
+      volunteerReportPdfCost: pointSettings.volunteerReportPdfCost,
+      volunteerReportImageCost: pointSettings.volunteerReportImageCost,
     },
   };
 }

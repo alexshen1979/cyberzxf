@@ -27,6 +27,14 @@
         <el-form-item label="志愿分析扣点">
           <el-input-number v-model="settingsForm.volunteerAnalysisCost" :min="0" :max="10000" />
         </el-form-item>
+        <el-form-item label="PDF报告导出扣点">
+          <el-input-number v-model="settingsForm.volunteerReportPdfCost" :min="0" :max="10000" />
+          <span class="hint">建议 3 点，同一报告重复导出不重复扣点</span>
+        </el-form-item>
+        <el-form-item label="长图报告导出扣点">
+          <el-input-number v-model="settingsForm.volunteerReportImageCost" :min="0" :max="10000" />
+          <span class="hint">建议 5 点，同一报告重复导出不重复扣点</span>
+        </el-form-item>
         <el-form-item label="点数有效期">
           <el-input-number v-model="settingsForm.expireDays" :min="1" :max="3650" />
           <span class="hint">天，充值或新赠点时刷新</span>
@@ -167,6 +175,8 @@ const settingsForm = reactive({
   defaultCost: 5,
   deepAnalysisCost: 18,
   volunteerAnalysisCost: 38,
+  volunteerReportPdfCost: 3,
+  volunteerReportImageCost: 5,
   expireDays: 365,
 });
 const savingSettings = ref(false);
