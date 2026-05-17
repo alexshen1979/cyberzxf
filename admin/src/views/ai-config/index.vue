@@ -50,23 +50,6 @@
           <el-slider v-model="form.skillWeight" :min="0.1" :max="1" :step="0.1" show-input :disabled="!form.skillEnabled" />
         </el-form-item>
 
-        <el-divider />
-
-        <el-form-item label="未登录免费次数">
-          <el-input-number v-model="form.freeAskLimit" :min="0" :max="999" />
-          <span style="margin-left: 8px; color: #94a3b8; font-size: 13px;">小程序未登录用户每天可免费提问次数</span>
-        </el-form-item>
-
-        <el-divider />
-
-        <el-form-item label="普通问答扣点">
-          <el-input-number v-model="form.pointsPerQuery" :min="1" :max="50" />
-        </el-form-item>
-
-        <el-form-item label="深度分析扣点">
-          <el-input-number v-model="form.pointsPerDeep" :min="1" :max="100" />
-        </el-form-item>
-
         <el-form-item>
           <el-button type="primary" size="large" native-type="submit" :loading="saving">
             保存配置
@@ -91,9 +74,6 @@ const form = reactive({
   contextWindow: 10,
   skillEnabled: true,
   skillWeight: 0.6,
-  pointsPerQuery: 5,
-  pointsPerDeep: 18,
-  freeAskLimit: 2,
   apiKey: '',
   apiBaseUrl: '',
   timeout: 30000,
@@ -101,13 +81,32 @@ const form = reactive({
 
 onMounted(async () => {
   const res = await api.aiConfig.get() as any;
-  if (res.data) Object.assign(form, res.data);
+  if (res.data) {
+    const allowedFields = Object.keys(form) as Array<keyof typeof form>;
+    allowedFields.forEach((key) => {
+      if (res.data[key] !== undefined) {
+        (form as any)[key] = res.data[key];
+      }
+    });
+  }
 });
 
 async function save() {
   saving.value = true;
   try {
-    await api.aiConfig.update(form);
+    const payload = {
+      model: form.model,
+      temperature: form.temperature,
+      maxTokens: form.maxTokens,
+      topP: form.topP,
+      contextWindow: form.contextWindow,
+      skillEnabled: form.skillEnabled,
+      skillWeight: form.skillWeight,
+      apiKey: form.apiKey,
+      apiBaseUrl: form.apiBaseUrl,
+      timeout: form.timeout,
+    };
+    await api.aiConfig.update(payload);
     ElMessage.success('配置已保存，立即生效');
   } catch (e: any) {
     ElMessage.error(e.response?.data?.message || '保存失败');
@@ -122,9 +121,6 @@ async function save() {
   max-width: 800px;
 }
 .config-card {
-  background: #1a1f4a;
-  border-color: #1e2550;
 }
-h2 { color: #e8eaf0; margin-bottom: 20px; }
-.el-divider { border-color: #1e2550; }
+h2 { margin-bottom: 20px; }
 </style>

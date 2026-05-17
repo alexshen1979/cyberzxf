@@ -48,10 +48,7 @@
           <el-col :span="12">
             <el-form-item label="分类">
               <el-select v-model="form.category" style="width: 100%">
-                <el-option label="高考志愿" value="gaokao" />
-                <el-option label="考研规划" value="kaoyan" />
-                <el-option label="职业发展" value="zhiye" />
-                <el-option label="专业避坑" value="bimian" />
+                <el-option v-for="c in categoryOptions" :key="c.key" :label="c.label" :value="c.key" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -68,7 +65,7 @@
           <el-input v-model="form.cover" placeholder="文章封面图片链接（可选）" />
         </el-form-item>
         <el-form-item label="内容" required>
-          <MdEditor v-model="form.content" :theme="'dark'" :toolbars="toolbars" style="height: 480px" />
+          <MdEditor v-model="form.content" :theme="'light'" :toolbars="toolbars" style="height: 480px" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -94,9 +91,11 @@ const page = ref(1);
 const pageSize = 20;
 const total = ref(0);
 
+const categoryOptions = ref<Array<{ key: string; label: string }>>([]);
+
 const form = reactive({
   title: '',
-  category: 'gaokao',
+  category: '',
   cover: '',
   content: '',
   status: 'published' as string,
@@ -109,15 +108,16 @@ const toolbars: any[] = [
   'preview', 'fullscreen',
 ];
 
-const categoryLabels: Record<string, string> = {
-  gaokao: '高考志愿',
-  kaoyan: '考研规划',
-  zhiye: '职业发展',
-  bimian: '专业避坑',
-};
-
 function categoryLabel(cat: string) {
-  return categoryLabels[cat] || cat;
+  const item = categoryOptions.value.find(c => c.key === cat);
+  return item?.label || cat;
+}
+
+async function loadCategories() {
+  try {
+    const res: any = await api.categories.list();
+    categoryOptions.value = res.data || [];
+  } catch { /* keep empty */ }
 }
 
 async function load() {
@@ -141,7 +141,13 @@ function openDialog(row?: any) {
     });
   } else {
     editingId.value = '';
-    Object.assign(form, { title: '', category: 'gaokao', cover: '', content: '', status: 'published' });
+    Object.assign(form, {
+      title: '',
+      category: categoryOptions.value[0]?.key || '',
+      cover: '',
+      content: '',
+      status: 'published',
+    });
   }
   dialogVisible.value = true;
 }
@@ -181,17 +187,14 @@ function exportArticle(row: any) {
   ElMessage.success('导出成功');
 }
 
-onMounted(load);
+onMounted(() => {
+  loadCategories();
+  load();
+});
 </script>
 
 <style lang="scss" scoped>
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .header-actions { display: flex; gap: 12px; }
-h2 { color: #e8eaf0; margin: 0; }
-
-:deep(.md-editor-dark) {
-  --md-bk-color: #111640;
-  --md-border-color: #1e2550;
-  --md-color: #e8eaf0;
-}
+h2 { margin: 0; }
 </style>

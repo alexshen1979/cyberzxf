@@ -1,38 +1,134 @@
+import axios from 'axios';
+import crypto from 'crypto';
+import fs from 'fs';
 import { prisma } from '../utils/prisma';
 import { config } from '../config';
 import { AppError } from '../middleware/errorHandler';
 import { chargePoints } from './points.service';
 import { createLogger } from '../utils/logger';
+import {
+  getRechargeProductById,
+  listRechargeProducts,
+} from './point-config.service';
+import { settleDistributionCommissionForOrder } from './distribution.service';
 
 const logger = createLogger('payment');
 
-// 充值套餐定义
-const PRODUCTS = [
-  { id: 'pkg_50',  name: '50 咨询点数',  price: 9.9  * 100, points: 50,  bonus: 0  },
-  { id: 'pkg_120', name: '110 咨询点数 + 赠10点', price: 19.9 * 100, points: 110, bonus: 10 },
-  { id: 'pkg_200', name: '180 咨询点数 + 赠20点', price: 29.9 * 100, points: 180, bonus: 20 },
-  { id: 'pkg_360', name: '320 咨询点数 + 赠40点', price: 49.9 * 100, points: 320, bonus: 40 },
-];
+interface WechatPayParams {
+  timeStamp: string;
+  nonceStr: string;
+  package: string;
+  signType: 'RSA';
+  paySign: string;
+}
 
-export function getProductList() {
-  return PRODUCTS.map(({ id, name, price, points, bonus }) => ({
+interface ResolvedWechatPayConfig {
+  miniAppId: string;
+  miniSecret: string;
+  mchId: string;
+  apiV3Key: string;
+  serialNo: string;
+  privateKeyPath: string;
+  platformPublicKeyPath: string;
+  notifyUrl: string;
+}
+
+export async function getProductList() {
+  const products = await listRechargeProducts();
+  return products.map(({ id, name, description, price, originalPrice, points, bonus }) => ({
     id,
     name,
+    description,
     price: price / 100,   // 转换为元
+    originalPrice: originalPrice ? originalPrice / 100 : null,
     points,
     bonus,
   }));
 }
 
-export function getProductById(id: string) {
-  return PRODUCTS.find(p => p.id === id) || null;
+export async function getWechatPayConfigStatus() {
+  const cfg = await resolveWechatPayConfig();
+  const checks = [
+    { key: 'WECHAT_MINI_APPID', ok: !isPlaceholder(cfg.miniAppId), required: true },
+    { key: 'WECHAT_MINI_SECRET', ok: !isPlaceholder(cfg.miniSecret), required: true },
+    { key: 'WECHAT_PAY_MCHID', ok: !isPlaceholder(cfg.mchId), required: true },
+    { key: 'WECHAT_PAY_SERIAL_NO', ok: !isPlaceholder(cfg.serialNo), required: true },
+    { key: 'WECHAT_PAY_PRIVATE_KEY_PATH', ok: !isPlaceholder(cfg.privateKeyPath) && fs.existsSync(cfg.privateKeyPath), required: true },
+    { key: 'WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH', ok: !isPlaceholder(cfg.platformPublicKeyPath) && fs.existsSync(cfg.platformPublicKeyPath), required: true },
+    { key: 'WECHAT_PAY_APIV3_KEY', ok: !isPlaceholder(cfg.apiV3Key) && cfg.apiV3Key.length >= 32, required: true },
+    { key: 'WECHAT_PAY_NOTIFY_URL', ok: !isPlaceholder(cfg.notifyUrl), required: true },
+  ];
+  const missing = checks.filter(item => item.required && !item.ok).map(item => item.key);
+  return {
+    ready: missing.length === 0,
+    missing,
+    checks,
+  };
+}
+
+export async function getWechatPayConfigForAdmin() {
+  const dbConfig = await prisma.wechatPayConfig.findFirst();
+  const cfg = await resolveWechatPayConfig();
+  const status = await getWechatPayConfigStatus();
+  return {
+    miniAppId: dbConfig?.miniAppId || cfg.miniAppId,
+    miniSecret: maskSecret(dbConfig?.miniSecret || cfg.miniSecret),
+    mchId: dbConfig?.mchId || cfg.mchId,
+    apiV3Key: maskSecret(dbConfig?.apiV3Key || cfg.apiV3Key),
+    serialNo: dbConfig?.serialNo || cfg.serialNo,
+    privateKeyPath: dbConfig?.privateKeyPath || cfg.privateKeyPath,
+    platformPublicKeyPath: dbConfig?.platformPublicKeyPath || cfg.platformPublicKeyPath,
+    notifyUrl: dbConfig?.notifyUrl || cfg.notifyUrl,
+    source: dbConfig ? 'database' : 'env',
+    status,
+  };
+}
+
+export async function getWechatMiniProgramCredentials() {
+  const cfg = await resolveWechatPayConfig();
+  return {
+    appId: cfg.miniAppId,
+    secret: cfg.miniSecret,
+  };
+}
+
+export async function updateWechatPayConfig(input: Record<string, any>) {
+  const current = await prisma.wechatPayConfig.findFirst();
+  const data = {
+    miniAppId: normalizeConfigValue(input.miniAppId),
+    miniSecret: normalizeSecretInput(input.miniSecret, current?.miniSecret),
+    mchId: normalizeConfigValue(input.mchId),
+    apiV3Key: normalizeSecretInput(input.apiV3Key, current?.apiV3Key),
+    serialNo: normalizeConfigValue(input.serialNo),
+    privateKeyPath: normalizeConfigValue(input.privateKeyPath),
+    platformPublicKeyPath: normalizeConfigValue(input.platformPublicKeyPath),
+    notifyUrl: normalizeConfigValue(input.notifyUrl),
+  };
+
+  if (current) {
+    await prisma.wechatPayConfig.update({ where: { id: current.id }, data });
+  } else {
+    await prisma.wechatPayConfig.create({ data });
+  }
+
+  return getWechatPayConfigForAdmin();
 }
 
 // 创建预支付订单
 export async function createOrder(userId: string, productId: string) {
-  const product = getProductById(productId);
+  const product = await getRechargeProductById(productId);
   if (!product) {
     throw new AppError(404, '充值套餐不存在', 'PRODUCT_NOT_FOUND');
+  }
+
+  const payConfig = await ensureWechatPayConfigured();
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { miniOpenId: true },
+  });
+  if (!user?.miniOpenId) {
+    throw new AppError(422, '请先完成微信小程序登录后再支付', 'WECHAT_OPENID_REQUIRED');
   }
 
   const orderNo = generateOrderNo();
@@ -49,7 +145,19 @@ export async function createOrder(userId: string, productId: string) {
     },
   });
 
-  return { orderNo: order.orderNo, amount: product.price, productName: product.name };
+  const payParams = await createWechatJsapiPrepay(payConfig, {
+    openId: user.miniOpenId,
+    orderNo: order.orderNo,
+    amount: product.price,
+    description: product.name,
+  });
+
+  return {
+    orderNo: order.orderNo,
+    amount: product.price,
+    productName: product.name,
+    payParams,
+  };
 }
 
 // 支付成功回调处理
@@ -61,6 +169,7 @@ export async function handlePaymentCallback(orderNo: string, transactionId: stri
 
   if (order.status === 'paid') {
     logger.warn('重复支付回调: %s', orderNo);
+    await settleDistributionCommissionForOrder(order.id);
     return; // 幂等处理
   }
 
@@ -71,14 +180,40 @@ export async function handlePaymentCallback(orderNo: string, transactionId: stri
   // 更新订单状态
   await prisma.order.update({
     where: { orderNo },
-    data: { status: 'paid', paidAt: new Date() },
+    data: { status: 'paid', transactionId, paidAt: new Date() },
   });
 
   // 充值到账
   await chargePoints(order.userId, order.points, order.bonusPoints, order.id);
 
+  // 首单分销佣金结算。只对该用户第一笔已支付订单生效，服务内做幂等保护。
+  await settleDistributionCommissionForOrder(order.id);
+
   logger.info('支付成功: orderNo=%s, userId=%s, points=%d(+%d)',
     orderNo, order.userId, order.points, order.bonusPoints);
+}
+
+export async function handleWechatPayNotify(body: Record<string, any>, headers?: Record<string, any>, rawBody?: string) {
+  const payConfig = await resolveWechatPayConfig();
+  verifyWechatPayNotifySignature(payConfig, headers, rawBody);
+
+  const resource = body?.resource;
+  if (!resource?.ciphertext || !resource?.nonce) {
+    throw new AppError(422, '微信支付回调参数不完整', 'WECHAT_PAY_NOTIFY_INVALID');
+  }
+
+  const payload = decryptWechatPayResource(payConfig, resource);
+  if (!payload.out_trade_no) {
+    throw new AppError(422, '微信支付回调缺少商户订单号', 'WECHAT_PAY_NOTIFY_INVALID');
+  }
+
+  if (payload.trade_state !== 'SUCCESS') {
+    logger.warn('微信支付非成功回调: orderNo=%s, state=%s', payload.out_trade_no, payload.trade_state);
+    return payload;
+  }
+
+  await handlePaymentCallback(payload.out_trade_no, payload.transaction_id || '');
+  return payload;
 }
 
 // 查询用户订单
@@ -93,6 +228,24 @@ export async function getUserOrders(userId: string, page = 1, pageSize = 20) {
     prisma.order.count({ where: { userId } }),
   ]);
   return { list, total, page, pageSize };
+}
+
+export async function getUserOrderDetail(userId: string, orderNo: string) {
+  let order = await prisma.order.findFirst({
+    where: { userId, orderNo },
+  });
+  if (!order) {
+    throw new AppError(404, '订单不存在', 'ORDER_NOT_FOUND');
+  }
+
+  if (order.status === 'pending') {
+    await syncWechatOrderStatus(order.orderNo);
+    order = await prisma.order.findFirst({
+      where: { userId, orderNo },
+    });
+  }
+
+  return order;
 }
 
 // 按时间统计充值（管理后台用）
@@ -116,4 +269,234 @@ function generateOrderNo(): string {
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
   const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
   return `CZ${dateStr}${rand}`;
+}
+
+async function resolveWechatPayConfig(): Promise<ResolvedWechatPayConfig> {
+  const dbConfig = await prisma.wechatPayConfig.findFirst();
+  return {
+    miniAppId: dbConfig?.miniAppId || config.wechat.miniProgram.appId || '',
+    miniSecret: dbConfig?.miniSecret || config.wechat.miniProgram.secret || '',
+    mchId: dbConfig?.mchId || config.wechat.pay.mchId || '',
+    apiV3Key: dbConfig?.apiV3Key || config.wechat.pay.apiV3Key || '',
+    serialNo: dbConfig?.serialNo || config.wechat.pay.serialNo || '',
+    privateKeyPath: dbConfig?.privateKeyPath || config.wechat.pay.privateKeyPath || '',
+    platformPublicKeyPath: dbConfig?.platformPublicKeyPath || config.wechat.pay.platformPublicKeyPath || '',
+    notifyUrl: dbConfig?.notifyUrl || config.wechat.pay.notifyUrl || '',
+  };
+}
+
+async function ensureWechatPayConfigured() {
+  const pay = await resolveWechatPayConfig();
+  const missing: string[] = [];
+  if (isPlaceholder(pay.miniAppId)) missing.push('WECHAT_MINI_APPID');
+  if (isPlaceholder(pay.mchId)) missing.push('WECHAT_PAY_MCHID');
+  if (isPlaceholder(pay.serialNo)) missing.push('WECHAT_PAY_SERIAL_NO');
+  if (isPlaceholder(pay.privateKeyPath) || !fs.existsSync(pay.privateKeyPath)) missing.push('WECHAT_PAY_PRIVATE_KEY_PATH');
+  if (isPlaceholder(pay.apiV3Key) || pay.apiV3Key.length < 32) missing.push('WECHAT_PAY_APIV3_KEY');
+  if (isPlaceholder(pay.notifyUrl)) missing.push('WECHAT_PAY_NOTIFY_URL');
+
+  if (missing.length > 0) {
+    throw new AppError(503, `微信支付未配置完整：${missing.join('、')}`, 'WECHAT_PAY_NOT_CONFIGURED');
+  }
+  return pay;
+}
+
+async function createWechatJsapiPrepay(payConfig: ResolvedWechatPayConfig, input: {
+  openId: string;
+  orderNo: string;
+  amount: number;
+  description: string;
+}): Promise<WechatPayParams> {
+  const requestPath = '/v3/pay/transactions/jsapi';
+  const url = `https://api.mch.weixin.qq.com${requestPath}`;
+  const body = {
+    appid: payConfig.miniAppId,
+    mchid: payConfig.mchId,
+    description: input.description.slice(0, 127),
+    out_trade_no: input.orderNo,
+    notify_url: payConfig.notifyUrl,
+    amount: { total: input.amount, currency: 'CNY' },
+    payer: { openid: input.openId },
+  };
+  const bodyText = JSON.stringify(body);
+  const authorization = buildWechatPayAuthorization(payConfig, 'POST', requestPath, bodyText);
+
+  let data: any;
+  try {
+    const response = await axios.post(url, body, {
+      headers: {
+        Authorization: authorization,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      timeout: 10000,
+    });
+    data = response.data;
+  } catch (err: any) {
+    const detail = err?.response?.data;
+    const message = detail?.message || detail?.code || err?.message || '微信支付下单失败';
+    logger.error('微信支付下单失败: %s %j', message, detail || {});
+    throw new AppError(502, `微信支付下单失败：${message}`, 'WECHAT_PAY_PREPAY_FAILED', detail);
+  }
+
+  if (!data?.prepay_id) {
+    throw new AppError(502, '微信支付下单失败：未返回 prepay_id', 'WECHAT_PAY_PREPAY_FAILED', data);
+  }
+
+  return buildMiniProgramPayParams(payConfig, data.prepay_id);
+}
+
+async function syncWechatOrderStatus(orderNo: string) {
+  const payConfig = await resolveWechatPayConfig();
+  if (isPlaceholder(payConfig.mchId) || isPlaceholder(payConfig.privateKeyPath) || isPlaceholder(payConfig.serialNo)) {
+    return;
+  }
+
+  const requestPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(orderNo)}?mchid=${encodeURIComponent(payConfig.mchId)}`;
+  const url = `https://api.mch.weixin.qq.com${requestPath}`;
+  const authorization = buildWechatPayAuthorization(payConfig, 'GET', requestPath, '');
+
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: authorization,
+        Accept: 'application/json',
+      },
+      timeout: 8000,
+    });
+    const data = response.data;
+
+    if (data?.trade_state === 'SUCCESS') {
+      await handlePaymentCallback(orderNo, data.transaction_id || '');
+      return;
+    }
+
+    if (data?.trade_state === 'CLOSED' || data?.trade_state === 'REVOKED' || data?.trade_state === 'PAYERROR') {
+      await prisma.order.updateMany({
+        where: { orderNo, status: 'pending' },
+        data: { status: 'failed' },
+      });
+      logger.warn('微信支付订单未成功: orderNo=%s, state=%s, desc=%s', orderNo, data.trade_state, data.trade_state_desc || '');
+    }
+  } catch (err: any) {
+    const detail = err?.response?.data;
+    if (detail?.code === 'RESOURCE_NOT_EXISTS') {
+      logger.warn('微信支付查单未找到: orderNo=%s', orderNo);
+      return;
+    }
+    logger.warn('微信支付查单失败: orderNo=%s, message=%s, detail=%j',
+      orderNo,
+      detail?.message || err?.message || 'unknown',
+      detail || {});
+  }
+}
+
+function buildWechatPayAuthorization(payConfig: ResolvedWechatPayConfig, method: string, requestPath: string, bodyText: string) {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const nonceStr = crypto.randomBytes(16).toString('hex');
+  const message = `${method}\n${requestPath}\n${timestamp}\n${nonceStr}\n${bodyText}\n`;
+  const signature = signWithMerchantKey(payConfig, message);
+
+  return `WECHATPAY2-SHA256-RSA2048 ${[
+    `mchid="${payConfig.mchId}"`,
+    `nonce_str="${nonceStr}"`,
+    `signature="${signature}"`,
+    `timestamp="${timestamp}"`,
+    `serial_no="${payConfig.serialNo}"`,
+  ].join(',')}`;
+}
+
+function buildMiniProgramPayParams(payConfig: ResolvedWechatPayConfig, prepayId: string): WechatPayParams {
+  const timeStamp = Math.floor(Date.now() / 1000).toString();
+  const nonceStr = crypto.randomBytes(16).toString('hex');
+  const packageValue = `prepay_id=${prepayId}`;
+  const paySign = signWithMerchantKey(payConfig, `${payConfig.miniAppId}\n${timeStamp}\n${nonceStr}\n${packageValue}\n`);
+
+  return {
+    timeStamp,
+    nonceStr,
+    package: packageValue,
+    signType: 'RSA',
+    paySign,
+  };
+}
+
+function signWithMerchantKey(payConfig: ResolvedWechatPayConfig, message: string) {
+  try {
+    const privateKey = fs.readFileSync(payConfig.privateKeyPath, 'utf8');
+    return crypto.createSign('RSA-SHA256').update(message).sign(privateKey, 'base64');
+  } catch (err: any) {
+    throw new AppError(503, `微信支付商户私钥不可用：${err.message}`, 'WECHAT_PAY_PRIVATE_KEY_INVALID');
+  }
+}
+
+function decryptWechatPayResource(payConfig: ResolvedWechatPayConfig, resource: Record<string, string>) {
+  const apiV3Key = Buffer.from(payConfig.apiV3Key, 'utf8');
+  const encrypted = Buffer.from(resource.ciphertext, 'base64');
+  const authTag = encrypted.subarray(encrypted.length - 16);
+  const data = encrypted.subarray(0, encrypted.length - 16);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', apiV3Key, Buffer.from(resource.nonce, 'utf8'));
+
+  if (resource.associated_data) {
+    decipher.setAAD(Buffer.from(resource.associated_data, 'utf8'));
+  }
+  decipher.setAuthTag(authTag);
+
+  const decrypted = Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+  return JSON.parse(decrypted);
+}
+
+function verifyWechatPayNotifySignature(payConfig: ResolvedWechatPayConfig, headers?: Record<string, any>, rawBody?: string) {
+  if (config.server.isDev && !rawBody) return;
+
+  const signature = getHeader(headers, 'wechatpay-signature');
+  const timestamp = getHeader(headers, 'wechatpay-timestamp');
+  const nonce = getHeader(headers, 'wechatpay-nonce');
+  const serial = getHeader(headers, 'wechatpay-serial');
+
+  if (!signature || !timestamp || !nonce || !serial || !rawBody) {
+    throw new AppError(401, '微信支付回调签名头不完整', 'WECHAT_PAY_SIGNATURE_MISSING');
+  }
+
+  const publicKeyPath = payConfig.platformPublicKeyPath;
+  if (isPlaceholder(publicKeyPath) || !fs.existsSync(publicKeyPath)) {
+    throw new AppError(503, '微信支付平台公钥未配置，无法校验回调签名', 'WECHAT_PAY_PLATFORM_KEY_NOT_CONFIGURED');
+  }
+
+  const message = `${timestamp}\n${nonce}\n${rawBody}\n`;
+  const publicKey = fs.readFileSync(publicKeyPath, 'utf8');
+  const ok = crypto.verify('RSA-SHA256', Buffer.from(message), publicKey, Buffer.from(signature, 'base64'));
+  if (!ok) {
+    throw new AppError(401, '微信支付回调签名校验失败', 'WECHAT_PAY_SIGNATURE_INVALID');
+  }
+
+  logger.info('微信支付回调签名校验通过: serial=%s, timestamp=%s', serial, timestamp);
+}
+
+function getHeader(headers: Record<string, any> | undefined, name: string) {
+  if (!headers) return '';
+  const key = Object.keys(headers).find(k => k.toLowerCase() === name.toLowerCase());
+  return key ? String(headers[key]) : '';
+}
+
+function isPlaceholder(value?: string) {
+  if (!value) return true;
+  return /^(wx_.*|your_.*|\/path\/to\/.*)$/i.test(value);
+}
+
+function normalizeConfigValue(value: any) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function normalizeSecretInput(value: any, current?: string | null) {
+  if (typeof value !== 'string' || !value.trim() || value.includes('***')) {
+    return current || null;
+  }
+  return value.trim();
+}
+
+function maskSecret(value?: string | null) {
+  if (!value) return '';
+  if (value.length <= 8) return '********';
+  return `${value.slice(0, 4)}********${value.slice(-4)}`;
 }

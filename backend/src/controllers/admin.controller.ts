@@ -6,12 +6,17 @@ import { AppError } from '../middleware/errorHandler';
 import { syncMenu as syncWechatMenuService } from '../services/wechat.service';
 import { getBalance } from '../services/points.service';
 import { getRevenueStats } from '../services/payment.service';
-import { transformSkillContent } from '../utils/skillTransform';
 import { createLogger } from '../utils/logger';
+import {
+  createRechargeProduct,
+  deleteRechargeProduct,
+  getPointSettings,
+  listRechargeProducts,
+  updatePointSettings,
+  updateRechargeProduct,
+} from '../services/point-config.service';
 
 const logger = createLogger('admin-ctrl');
-
-const GITHUB_SKILL_URL = 'https://raw.githubusercontent.com/alchaincyf/zhangxuefeng-skill/main/SKILL.md';
 
 // ─── 管理员登录 ─────────────────────────────────────
 
@@ -254,26 +259,41 @@ export async function deleteNotice(ctx: Context) {
 // ─── 快捷提问管理 ──────────────────────────────────
 
 export async function getQuickQuestions(ctx: Context) {
+  const { keyword, category } = ctx.query as Record<string, string>;
+  const where: any = {};
+  if (keyword) where.question = { contains: keyword };
+  if (category) where.category = category;
   const questions = await prisma.quickQuestion.findMany({
+    where,
     orderBy: { sortOrder: 'asc' },
   });
   ctx.body = { success: true, data: questions };
 }
 
 export async function createQuickQuestion(ctx: Context) {
-  const { question, category, sortOrder } = ctx.request.body as any;
+  const { question, category, sortOrder, enabled } = ctx.request.body as any;
   const q = await prisma.quickQuestion.create({
-    data: { question, category: category || 'general', sortOrder: sortOrder || 0 },
+    data: {
+      question,
+      category: category || 'general',
+      sortOrder: sortOrder || 0,
+      enabled: enabled !== undefined ? enabled : true,
+    },
   });
   ctx.body = { success: true, data: q };
 }
 
 export async function updateQuickQuestion(ctx: Context) {
-  const { question, category, sortOrder } = ctx.request.body as any;
+  const { question, category, sortOrder, enabled } = ctx.request.body as any;
+  const data: any = {};
+  if (question !== undefined) data.question = question;
+  if (category !== undefined) data.category = category;
+  if (sortOrder !== undefined) data.sortOrder = sortOrder;
+  if (enabled !== undefined) data.enabled = enabled;
   try {
     const q = await prisma.quickQuestion.update({
       where: { id: ctx.params.id },
-      data: { question, category, sortOrder },
+      data,
     });
     ctx.body = { success: true, data: q };
   } catch (err: any) {
@@ -358,18 +378,105 @@ export async function updateAiConfig(ctx: Context) {
     where: { id: aiConfig.id },
     data: { model, temperature, maxTokens, topP, contextWindow, skillEnabled, skillWeight, pointsPerQuery, pointsPerDeep, freeAskLimit, apiKey, apiBaseUrl, timeout },
   });
+  if (pointsPerQuery !== undefined || pointsPerDeep !== undefined) {
+    const current = await getPointSettings();
+    await updatePointSettings({
+      freeGift: current.freeGift,
+      defaultCost: pointsPerQuery ?? current.defaultCost,
+      deepAnalysisCost: pointsPerDeep ?? current.deepAnalysisCost,
+      volunteerAnalysisCost: current.volunteerAnalysisCost,
+      expireDays: current.expireDays,
+    });
+  }
 
   ctx.body = { success: true, data: updated };
+}
+
+// ─── 点数规则与充值套餐 ──────────────────────────────
+
+export async function getPointSettingsForAdmin(ctx: Context) {
+  const [settings, aiConfig] = await Promise.all([
+    getPointSettings(),
+    prisma.aiConfig.findFirst(),
+  ]);
+  ctx.body = {
+    success: true,
+    data: {
+      ...settings,
+      freeAskLimit: aiConfig?.freeAskLimit ?? 2,
+    },
+  };
+}
+
+export async function updatePointSettingsForAdmin(ctx: Context) {
+  const input = ctx.request.body as Record<string, any>;
+  const updated = await updatePointSettings(input);
+  const currentAiConfig = await prisma.aiConfig.findFirst();
+  const freeAskLimit = input.freeAskLimit !== undefined
+    ? normalizeFreeAskLimit(input.freeAskLimit)
+    : (currentAiConfig?.freeAskLimit ?? 2);
+  if (currentAiConfig) {
+    await prisma.aiConfig.update({
+      where: { id: currentAiConfig.id },
+      data: {
+        pointsPerQuery: updated.defaultCost,
+        pointsPerDeep: updated.deepAnalysisCost,
+        freeAskLimit,
+      },
+    });
+  } else {
+    await prisma.aiConfig.create({
+      data: {
+        pointsPerQuery: updated.defaultCost,
+        pointsPerDeep: updated.deepAnalysisCost,
+        freeAskLimit,
+      },
+    });
+  }
+  ctx.body = { success: true, data: { ...updated, freeAskLimit } };
+}
+
+function normalizeFreeAskLimit(value: any) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > 999) {
+    throw new AppError(422, '未登录免费次数必须是 0-999 之间的整数', 'POINT_CONFIG_INVALID');
+  }
+  return n;
+}
+
+export async function getRechargeProductsForAdmin(ctx: Context) {
+  const includeDisabled = ctx.query.includeDisabled !== 'false';
+  ctx.body = { success: true, data: await listRechargeProducts({ includeDisabled }) };
+}
+
+export async function createRechargeProductForAdmin(ctx: Context) {
+  const product = await createRechargeProduct(ctx.request.body as Record<string, any>);
+  ctx.body = { success: true, data: product };
+}
+
+export async function updateRechargeProductForAdmin(ctx: Context) {
+  const product = await updateRechargeProduct(ctx.params.id, ctx.request.body as Record<string, any>);
+  ctx.body = { success: true, data: product };
+}
+
+export async function deleteRechargeProductForAdmin(ctx: Context) {
+  const product = await deleteRechargeProduct(ctx.params.id);
+  ctx.body = { success: true, data: product, message: product ? '套餐已有订单，已改为下架' : '删除成功' };
 }
 
 // ─── 公共配置（供小程序读取） ──────────────────────────
 
 export async function getPublicConfig(ctx: Context) {
-  const aiConfig = await prisma.aiConfig.findFirst();
+  const [aiConfig, pointSettings] = await Promise.all([
+    prisma.aiConfig.findFirst(),
+    getPointSettings(),
+  ]);
   ctx.body = {
     success: true,
     data: {
       freeAskLimit: aiConfig?.freeAskLimit ?? 2,
+      freeGift: pointSettings.freeGift,
+      volunteerAnalysisCost: pointSettings.volunteerAnalysisCost,
     },
   };
 }
@@ -455,52 +562,8 @@ export async function deleteSkill(ctx: Context) {
 // ─── Skill GitHub 同步 ───────────────────────────
 
 export async function syncSkillFromGithub(ctx: Context) {
-  const { skillId } = (ctx.request.body as any) || {};
-
-  try {
-    const response = await fetch(GITHUB_SKILL_URL, { signal: AbortSignal.timeout(15000) });
-    if (!response.ok) {
-      ctx.status = 502;
-      ctx.body = { success: false, message: `获取 GitHub 内容失败: HTTP ${response.status}` };
-      return;
-    }
-
-    const rawContent = await response.text();
-    if (!rawContent || rawContent.length < 500) {
-      ctx.status = 502;
-      ctx.body = { success: false, message: '获取的 SKILL.md 内容过短，请检查 GitHub 仓库' };
-      return;
-    }
-
-    const systemPrompt = transformSkillContent(rawContent);
-
-    // 指定 skillId 或更新默认 Skill
-    let skill;
-    if (skillId) {
-      skill = await prisma.skill.update({
-        where: { id: skillId },
-        data: { systemPrompt },
-      });
-    } else {
-      const defaultSkill = await prisma.skill.findFirst({ where: { isDefault: true } });
-      if (!defaultSkill) {
-        ctx.status = 404;
-        ctx.body = { success: false, message: '没有默认 Skill，请先创建一个或指定 skillId' };
-        return;
-      }
-      skill = await prisma.skill.update({
-        where: { id: defaultSkill.id },
-        data: { systemPrompt },
-      });
-    }
-
-    logger.info('Skill "%s" 已从 GitHub 同步 (%d 字符)', skill.name, systemPrompt.length);
-    ctx.body = { success: true, data: skill, message: `同步成功 (${systemPrompt.length} 字符)` };
-  } catch (err: any) {
-    logger.error('GitHub 同步失败: %s', err.message);
-    ctx.status = 502;
-    ctx.body = { success: false, message: `同步失败: ${err.message}` };
-  }
+  ctx.status = 403;
+  ctx.body = { success: false, message: '为避免版权和公众人物风格风险，已禁用外部 Skill 同步。请在后台手动维护合规提示词。' };
 }
 
 // ─── 公众号菜单管理 ────────────────────────────────
@@ -564,17 +627,17 @@ export async function exportOrders(ctx: Context) {
     orderBy: { createdAt: 'desc' },
   });
 
-  const headers = ['订单号', '用户ID', '商品名称', '金额(分)', '购买点数', '赠送点数', '状态', '支付时间', '创建时间'];
+  const headers = ['订单号', '微信交易号', '用户ID', '商品名称', '金额(分)', '购买点数', '赠送点数', '状态', '支付时间', '创建时间'];
   const rows = orders.map(o => [
-    o.orderNo, o.userId, o.productName, o.amount, o.points, o.bonusPoints,
+    o.orderNo, o.transactionId || '', o.userId, o.productName, o.amount, o.points, o.bonusPoints,
     o.status === 'paid' ? '已完成' : o.status,
     o.paidAt?.toISOString() || '',
     o.createdAt.toISOString(),
   ]);
 
   const revenue = orders.reduce((sum, o) => sum + o.amount, 0);
-  const summaryHeader = ['', '', '', '', '', '', '', '', ''];
-  const summaryRow = ['', '', '合计营收(分):', revenue, '总订单数:', orders.length, '', '', ''];
+  const summaryHeader = ['', '', '', '', '', '', '', '', '', ''];
+  const summaryRow = ['', '', '', '合计营收(分):', revenue, '总订单数:', orders.length, '', '', ''];
 
   ctx.set('Content-Type', 'text/csv; charset=utf-8');
   ctx.set('Content-Disposition', `attachment; filename="orders_${new Date().toISOString().slice(0, 10)}.csv"`);

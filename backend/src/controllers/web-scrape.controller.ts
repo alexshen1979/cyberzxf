@@ -155,7 +155,7 @@ export async function webScrape(ctx: Context) {
     const sourceName = new URL(url).hostname.replace(/^www\./, '');
 
     const fullText = `${title} ${description} ${content.slice(0, 2000)}`;
-    const suggestedCategory = guessCategory(fullText);
+    const suggestedCategory = await guessCategory(fullText);
     const suggestedTags = extractTags(fullText, keywords);
     // 添加来源域名作为标签
     if (!suggestedTags.includes(sourceName)) {
@@ -435,19 +435,31 @@ async function searchBing(keyword: string): Promise<Array<{ title: string; snipp
   return results;
 }
 
-function guessCategory(text: string): string {
-  const patterns: [string, string[]][] = [
-    ['gaokao', ['高考', '志愿', '分数线', '录取', '批次', '985', '211', '双一流', '提前批', '平行志愿', '本科', '招生简章']],
-    ['kaoyan', ['考研', '硕士', '博士', '研究生', '复试', '调剂', '学硕', '专硕', '导师', '推免']],
-    ['zhiye', ['职业', '就业', '工作', '薪资', '行业', '职场', '公务员', '考公', '考编', '面试']],
-    ['bimian', ['避坑', '天坑', '劝退', '坑', '不推荐', '建议别', '千万别', '后悔']],
-  ];
+async function guessCategory(text: string): Promise<string> {
+  try {
+    const cats = await prisma.category.findMany({
+      where: { status: 'enabled' },
+      orderBy: { sortOrder: 'asc' },
+    });
+    if (cats.length === 0) return 'gaokao';
 
-  const lower = text.toLowerCase();
-  for (const [cat, keywords] of patterns) {
-    if (keywords.some(kw => lower.includes(kw))) return cat;
+    // 基于标签关键词匹配：用 category label 和 key 作为关键词
+    const lower = text.toLowerCase();
+    const keywordMap: Record<string, string[]> = {
+      gaokao: ['高考', '志愿', '分数线', '录取', '批次', '985', '211', '双一流', '提前批', '平行志愿', '本科', '招生简章'],
+      kaoyan: ['考研', '硕士', '博士', '研究生', '复试', '调剂', '学硕', '专硕', '导师', '推免'],
+      zhiye: ['职业', '就业', '工作', '薪资', '行业', '职场', '公务员', '考公', '考编', '面试'],
+      bimian: ['避坑', '天坑', '劝退', '坑', '不推荐', '建议别', '千万别', '后悔'],
+    };
+
+    for (const cat of cats) {
+      const keywords = keywordMap[cat.key] || [cat.label];
+      if (keywords.some(kw => lower.includes(kw))) return cat.key;
+    }
+    return cats[0].key;
+  } catch {
+    return 'gaokao';
   }
-  return 'gaokao';
 }
 
 function extractTags(text: string, metaKeywords?: string): string[] {

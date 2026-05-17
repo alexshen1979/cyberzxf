@@ -78,7 +78,7 @@ onMounted(loadReplies);
 </script>
 
 <style lang="scss" scoped>
-h2 { color: #e8eaf0; margin-bottom: 20px; }
-.section-card { background: #1a1f4a; border-color: #1e2550; margin-bottom: 16px; }
-.tip { color: #8890b0; font-size: 13px; }
+h2 { margin-bottom: 20px; }
+.section-card { margin-bottom: 16px; }
+.tip { font-size: 13px; }
 </style>

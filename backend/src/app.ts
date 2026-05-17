@@ -32,7 +32,7 @@ app.use(routes.allowedMethods());
 // Start server
 const port = config.server.port;
 app.listen(port, () => {
-  logger.info(`🚀 赛博张老师后端服务已启动 → http://localhost:${port}`);
+  logger.info(`🚀 涨识后端服务已启动 → http://localhost:${port}`);
   logger.info(`环境: ${config.server.env}`);
   startScheduler();
 });

@@ -3,14 +3,14 @@ import * as authService from '../services/auth.service';
 import { prisma } from '../utils/prisma';
 
 export async function miniProgramLogin(ctx: Context) {
-  const { code } = ctx.request.body as any;
+  const { code, userInfo, referralCode } = ctx.request.body as any;
   if (!code) {
     ctx.status = 422;
     ctx.body = { success: false, message: '缺少登录凭证 code' };
     return;
   }
 
-  const result = await authService.loginByMiniProgram(code);
+  const result = await authService.loginByMiniProgram(code, userInfo, referralCode);
   ctx.body = { success: true, data: result };
 }
 
@@ -22,7 +22,7 @@ export async function mpOAuthLogin(ctx: Context) {
     return;
   }
 
-  const result = await authService.loginByMiniProgram(code);
+  const result = await authService.loginByMpOAuth(code);
   ctx.body = { success: true, data: result };
 }
 

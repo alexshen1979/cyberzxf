@@ -33,8 +33,11 @@ export const config = {
     pay: {
       mchId: process.env.WECHAT_PAY_MCHID!,
       apiKey: process.env.WECHAT_PAY_API_KEY!,
+      apiV3Key: process.env.WECHAT_PAY_APIV3_KEY || process.env.WECHAT_PAY_API_KEY || '',
       serialNo: process.env.WECHAT_PAY_SERIAL_NO!,
       privateKeyPath: process.env.WECHAT_PAY_PRIVATE_KEY_PATH!,
+      platformPublicKeyPath: process.env.WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH || '',
+      notifyUrl: process.env.WECHAT_PAY_NOTIFY_URL || '',
     },
   },
   deepseek: {
@@ -48,9 +51,10 @@ export const config = {
     accessSecret: process.env.OSS_ACCESS_SECRET,
   },
   points: {
-    freeGift: 10,                          // 新用户免费赠送点数
+    freeGift: 100,                         // 新用户免费赠送点数
     defaultCost: 5,                        // 普通问答消耗
     deepAnalysisCost: 18,                  // 深度分析消耗
+    volunteerAnalysisCost: 38,             // 志愿分析消耗
     expireDays: 365,                       // 点数有效期（天）
     dailyConsultLimit: 50,                 // 单用户每日咨询上限
   },

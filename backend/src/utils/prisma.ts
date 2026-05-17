@@ -11,7 +11,7 @@ export const prisma = new PrismaClient({
 });
 
 // Graceful shutdown
-process.on('beforeExit', async () => {
+process.once('beforeExit', async () => {
   await prisma.$disconnect();
   logger.info('Prisma 连接已断开');
 });

@@ -135,7 +135,7 @@ async function scrapeGuide(target: TargetUniversity): Promise<{
     const response = await fetch(target.url, {
       signal: AbortSignal.timeout(30000),
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; CyberZhangBot/1.0; +https://cyberzhang.ai)',
+        'User-Agent': 'Mozilla/5.0 (compatible; ZhangshiBot/1.0; +https://zhangshi.ai)',
       },
     });
 

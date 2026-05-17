@@ -12,9 +12,9 @@ export async function toggle(ctx: Context) {
     return;
   }
 
-  if (!['article', 'consultation'].includes(targetType)) {
+  if (!['article', 'consultation', 'knowledge'].includes(targetType)) {
     ctx.status = 422;
-    ctx.body = { success: false, message: 'targetType 只能为 article 或 consultation' };
+    ctx.body = { success: false, message: 'targetType 只能为 article、consultation 或 knowledge' };
     return;
   }
 
@@ -85,6 +85,10 @@ export async function list(ctx: Context) {
       const record = await prisma.consultationRecord.findUnique({ where: { id: fav.targetId } });
       title = record?.question?.slice(0, 50) || '已删除';
       summary = record?.answer?.slice(0, 100) || '';
+    } else if (fav.targetType === 'knowledge') {
+      const entry = await prisma.knowledgeEntry.findUnique({ where: { id: fav.targetId } });
+      title = entry?.title || '已删除';
+      summary = entry?.content?.replace(/<[^>]+>/g, '').slice(0, 100) || '';
     }
     return { ...fav, title, summary };
   }));

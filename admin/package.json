@@ -1,8 +1,8 @@
 {
-  "name": "cyberzhang-admin",
+  "name": "zhangshi-admin",
   "version": "1.0.0",
   "private": true,
-  "description": "赛博张老师 - 一体化管理后台",
+  "description": "涨识 - 一体化管理后台",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
@@ -16,6 +16,8 @@
     "element-plus": "^2.9.0",
     "md-editor-v3": "^6.5.0",
     "pinia": "^2.1.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "vue": "^3.4.0",
     "vue-router": "^4.4.0"
   },

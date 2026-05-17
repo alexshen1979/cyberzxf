@@ -33,7 +33,7 @@
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑 Skill' : '添加 Skill'" width="900px" destroy-on-close>
       <el-form :model="form" label-width="100px">
         <el-form-item label="名称" required>
-          <el-input v-model="form.name" placeholder="如：张雪峰升学咨询" />
+          <el-input v-model="form.name" placeholder="如：升学规划助手" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="2" placeholder="简短描述该 Skill 的用途" />
@@ -79,7 +79,7 @@
           <el-col :span="8">
             <el-form-item label="设为首选">
               <el-switch v-model="form.isDefault" />
-              <span style="margin-left: 8px; font-size: 12px; color: #8890b0">咨询时默认使用</span>
+              <span style="margin-left: 8px; font-size: 12px; color: var(--el-text-color-secondary)">咨询时默认使用</span>
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -225,5 +225,5 @@ onMounted(load);
 
 <style lang="scss" scoped>
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-h2 { color: #e8eaf0; margin: 0; }
+h2 { margin: 0; }
 </style>

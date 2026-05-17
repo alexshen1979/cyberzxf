@@ -169,7 +169,7 @@
               </el-form>
 
               <div class="editor-wrap">
-                <MdEditor v-model="scrapedData.content" :theme="'dark'" :toolbars="toolbars" style="height: 52vh" />
+                <MdEditor v-model="scrapedData.content" :theme="'light'" :toolbars="toolbars" style="height: 52vh" />
               </div>
             </div>
           </div>
@@ -230,7 +230,7 @@
             </el-form>
 
             <div class="editor-wrap">
-              <MdEditor v-model="scrapedData.content" :theme="'dark'" :toolbars="toolbars" style="height: 52vh" />
+              <MdEditor v-model="scrapedData.content" :theme="'light'" :toolbars="toolbars" style="height: 52vh" />
             </div>
           </div>
         </el-tab-pane>
@@ -286,7 +286,7 @@
           <el-input v-model="form.sourceUrl" placeholder="https://..." />
         </el-form-item>
         <el-form-item label="内容" required>
-          <MdEditor v-model="form.content" :theme="'dark'" :toolbars="toolbars" style="height: 400px" />
+          <MdEditor v-model="form.content" :theme="'light'" :toolbars="toolbars" style="height: 400px" />
         </el-form-item>
       </el-form>
       <template #footer>

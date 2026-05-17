@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <div class="login-card">
-      <h1 class="login-title">赛博张老师</h1>
+      <h1 class="login-title">涨识</h1>
       <p class="login-sub">一体化管理后台</p>
       <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin">
         <el-form-item prop="username">
@@ -54,37 +54,34 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #0a0e27, #111640);
+  background: var(--el-bg-color-page);
 }
 
 .login-card {
   width: 400px;
   padding: 48px 40px;
-  background: #1a1f4a;
+  background: var(--el-bg-color);
   border-radius: 16px;
-  border: 1px solid #1e2550;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--el-border-color);
+  box-shadow: var(--el-box-shadow);
 }
 
 .login-title {
   text-align: center;
   font-size: 28px;
-  background: linear-gradient(135deg, #00f5ff, #7c3aed);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  font-weight: 700;
+  color: var(--el-color-primary);
   margin-bottom: 4px;
 }
 
 .login-sub {
   text-align: center;
-  color: #8890b0;
+  color: var(--el-text-color-secondary);
   margin-bottom: 32px;
   font-size: 14px;
 }
 
 .login-btn {
   width: 100%;
-  background: linear-gradient(135deg, #00c8d6, #7c3aed) !important;
-  border: none !important;
 }
 </style>

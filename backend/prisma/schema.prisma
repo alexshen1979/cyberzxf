@@ -16,6 +16,8 @@ model User {
   avatar     String?
   phone      String?
   status     Int      @default(1)
+  referredByDistributorId String? @map("referred_by_distributor_id")
+  referredAt DateTime? @map("referred_at")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
@@ -24,7 +26,12 @@ model User {
   orders               Order[]
   consultationRecords  ConsultationRecord[]
   favorites            Favorite[]
+  volunteerReports     VolunteerReport[]
+  distributorProfile    Distributor? @relation("UserDistributor")
+  referredByDistributor Distributor? @relation("UserReferrer", fields: [referredByDistributorId], references: [id], onDelete: SetNull)
+  referralRecord        DistributionReferral? @relation("ReferralCustomer")
 
+  @@index([referredByDistributorId])
   @@map("users")
 }
 
@@ -68,12 +75,92 @@ model Order {
   points      Int
   bonusPoints Int       @default(0) @map("bonus_points")
   status      String    @default("pending")
+  transactionId String?  @map("transaction_id")
   paidAt      DateTime? @map("paid_at")
+  commissionSettled Boolean @default(false) @map("commission_settled")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
+  distributionCommissions DistributionCommission[]
+
   @@index([userId])
+  @@index([commissionSettled])
   @@map("orders")
+}
+
+model DistributionSetting {
+  id         String   @id @default("default")
+  enabled    Boolean  @default(true)
+  level1Rate Int      @default(5000) @map("level1_rate")
+  level2Rate Int      @default(2000) @map("level2_rate")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("distribution_settings")
+}
+
+model Distributor {
+  id         String   @id @default(uuid())
+  userId     String?  @unique @map("user_id")
+  user       User?    @relation("UserDistributor", fields: [userId], references: [id], onDelete: SetNull)
+  name       String
+  code       String   @unique
+  level      Int      @default(2)
+  parentId   String?  @map("parent_id")
+  parent     Distributor? @relation("DistributorTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children   Distributor[] @relation("DistributorTree")
+  status     String   @default("active")
+  appliedAt  DateTime @default(now()) @map("applied_at")
+  approvedAt DateTime? @map("approved_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  referredUsers      User[] @relation("UserReferrer")
+  referrals          DistributionReferral[] @relation("DirectDistributorReferrals")
+  firstLevelReferrals DistributionReferral[] @relation("FirstLevelDistributorReferrals")
+  commissions        DistributionCommission[]
+
+  @@index([level, status])
+  @@index([parentId])
+  @@map("distributors")
+}
+
+model DistributionReferral {
+  id                      String   @id @default(uuid())
+  userId                  String   @unique @map("user_id")
+  user                    User     @relation("ReferralCustomer", fields: [userId], references: [id], onDelete: Cascade)
+  distributorId           String   @map("distributor_id")
+  distributor             Distributor @relation("DirectDistributorReferrals", fields: [distributorId], references: [id], onDelete: Cascade)
+  firstLevelDistributorId String?  @map("first_level_distributor_id")
+  firstLevelDistributor   Distributor? @relation("FirstLevelDistributorReferrals", fields: [firstLevelDistributorId], references: [id], onDelete: SetNull)
+  sourceCode              String?  @map("source_code")
+  firstOrderId            String?  @map("first_order_id")
+  commissionSettledAt     DateTime? @map("commission_settled_at")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  @@index([distributorId])
+  @@index([firstLevelDistributorId])
+  @@index([firstOrderId])
+  @@map("distribution_referrals")
+}
+
+model DistributionCommission {
+  id             String   @id @default(uuid())
+  orderId        String   @map("order_id")
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  distributorId  String   @map("distributor_id")
+  distributor    Distributor @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  referralUserId String   @map("referral_user_id")
+  role           String
+  rateBps        Int      @map("rate_bps")
+  amount         Int
+  status         String   @default("settled")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([orderId, distributorId, role])
+  @@index([distributorId, createdAt])
+  @@index([referralUserId])
+  @@map("distribution_commissions")
 }
 
 model ConsultationRecord {
@@ -140,6 +227,52 @@ model AiConfig {
   @@map("ai_config")
 }
 
+model WechatPayConfig {
+  id                    String   @id @default(uuid())
+  miniAppId             String?  @map("mini_app_id")
+  miniSecret            String?  @map("mini_secret")
+  mchId                 String?  @map("mch_id")
+  apiV3Key              String?  @map("api_v3_key")
+  serialNo              String?  @map("serial_no")
+  privateKeyPath        String?  @map("private_key_path")
+  platformPublicKeyPath String?  @map("platform_public_key_path")
+  notifyUrl             String?  @map("notify_url")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  @@map("wechat_pay_config")
+}
+
+model PointSetting {
+  id                    String   @id @default("default")
+  freeGift              Int      @default(100) @map("free_gift")
+  defaultCost           Int      @default(5) @map("default_cost")
+  deepAnalysisCost      Int      @default(18) @map("deep_analysis_cost")
+  volunteerAnalysisCost Int      @default(38) @map("volunteer_analysis_cost")
+  expireDays            Int      @default(365) @map("expire_days")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  @@map("point_settings")
+}
+
+model RechargeProduct {
+  id          String   @id
+  name        String
+  description String?
+  price       Int
+  originalPrice Int?   @map("original_price")
+  points      Int
+  bonus       Int      @default(0)
+  sortOrder   Int      @default(0) @map("sort_order")
+  enabled     Boolean  @default(true)
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([enabled, sortOrder])
+  @@map("recharge_products")
+}
+
 model Skill {
   id           String   @id @default(uuid())
   name         String
@@ -177,6 +310,7 @@ model QuickQuestion {
   question  String
   category  String   @default("general")
   sortOrder Int      @default(0) @map("sort_order")
+  enabled   Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("quick_questions")
@@ -229,6 +363,186 @@ model WechatMenu {
   @@map("wechat_menus")
 }
 
+model University {
+  id               String   @id @default(uuid())
+  name             String                    // 学校名称
+  code             String?   @unique         // 院校代码
+  type             String?                   // 院校类型: 综合/理工/师范/农业/医药/财经/政法/语言/民族/体育/艺术
+  level            String?                   // 办学层次: 本科/专科
+  province         String?                   // 所在省份
+  city             String?                   // 所在城市
+  provinceRegionId String?  @map("province_region_id")
+  provinceRegion   Region? @relation("UniversityProvince", fields: [provinceRegionId], references: [id], onDelete: SetNull)
+  cityRegionId     String?  @map("city_region_id")
+  cityRegion       Region? @relation("UniversityCity", fields: [cityRegionId], references: [id], onDelete: SetNull)
+  is985            Boolean  @default(false)  @map("is_985")
+  is211            Boolean  @default(false)  @map("is_211")
+  isDoubleFirst    Boolean  @default(false)  @map("is_double_first")  // 双一流
+  properties       String?                   // 院校属性: 公办/民办/独立学院/中外合作办学
+  logo             String?                   // 校徽 logo URL
+  address          String?                   // 详细地址
+  website          String?                   // 官网
+  introduction     String?                   // 学校简介
+  featureTags      String   @default("[]") @map("feature_tags") // 特色标签：强基计划/101计划/C9等
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  admissionScores  AdmissionScore[]
+  universityMajors UniversityMajor[]
+
+  @@index([provinceRegionId])
+  @@index([cityRegionId])
+  @@map("universities")
+}
+
+model Region {
+  id        String   @id @default(uuid())
+  name      String
+  code      String?  @unique
+  level     String   // province | city | district
+  parentId  String?  @map("parent_id")
+  parent    Region?  @relation("RegionChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Region[] @relation("RegionChildren")
+  sortOrder Int      @default(0) @map("sort_order")
+  status    String   @default("enabled")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  provinceUniversities University[] @relation("UniversityProvince")
+  cityUniversities     University[] @relation("UniversityCity")
+
+  @@unique([parentId, name, level])
+  @@index([level])
+  @@index([parentId])
+  @@map("regions")
+}
+
+model UniversityMajor {
+  id              String      @id @default(uuid())
+  universityId    String      @map("university_id")
+  university      University  @relation(fields: [universityId], references: [id], onDelete: Cascade)
+  majorId         String?     @map("major_id")
+  major           Major?      @relation(fields: [majorId], references: [id], onDelete: SetNull)
+  majorName       String      @map("major_name")
+  majorCode       String?     @map("major_code")
+  collegeName     String?     @map("college_name")
+  degreeType      String?     @map("degree_type")
+  duration        String?
+  tuition         Int?
+  subjectLimit    String?     @map("subject_limit")
+  featureTags     String      @default("[]") @map("feature_tags")
+  strengthLevel   String?     @map("strength_level")
+  employmentNote  String?     @map("employment_note")
+  status          String      @default("enabled")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  admissionScores AdmissionScore[]
+
+  @@unique([universityId, majorName])
+  @@index([majorId])
+  @@index([majorName])
+  @@map("university_majors")
+}
+
+model AdmissionScore {
+  id             String      @id @default(uuid())
+  universityId   String?     @map("university_id")
+  university     University? @relation(fields: [universityId], references: [id], onDelete: SetNull)
+  universityMajorId String?          @map("university_major_id")
+  universityMajor   UniversityMajor? @relation(fields: [universityMajorId], references: [id], onDelete: SetNull)
+  universityName String      @map("university_name")
+  province       String
+  year           Int
+  batch          String?
+  subjectType    String      @map("subject_type")
+  majorName      String?     @map("major_name")
+  lineType       String      @default("unknown") @map("line_type")
+  groupCode      String?     @map("group_code")
+  groupName      String?     @map("group_name")
+  subjectRequirement String? @map("subject_requirement")
+  minScore       Int?        @map("min_score")
+  minRank        Int?        @map("min_rank")
+  avgScore       Int?        @map("avg_score")
+  planCount      Int?        @map("plan_count")
+  sourceName     String?     @map("source_name")
+  sourceUrl      String?     @map("source_url")
+  sourceType     String?     @map("source_type")
+  isPartial      Boolean     @default(false) @map("is_partial")
+  dataQuality    String      @default("unknown") @map("data_quality")
+  rawData        String?     @map("raw_data")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  @@index([province, year, subjectType])
+  @@index([universityName])
+  @@index([universityId])
+  @@index([universityMajorId])
+  @@index([lineType])
+  @@index([sourceType])
+  @@index([year, province, subjectType, lineType])
+  @@map("admission_scores")
+}
+
+model Major {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  category        String?
+  degreeType      String?  @map("degree_type")
+  description     String?
+  employment      String?
+  riskLevel       String?  @map("risk_level")
+  recommendedFor  String?  @map("recommended_for")
+  avoidFor        String?  @map("avoid_for")
+  tags            String   @default("[]")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  universityMajors UniversityMajor[]
+
+  @@index([category])
+  @@map("majors")
+}
+
+model VolunteerReport {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  province       String
+  year           Int
+  subjectType    String   @map("subject_type")
+  score          Int
+  rank           Int?
+  input          String
+  result         String
+  markdownReport String   @map("markdown_report")
+  pointsCost     Int      @map("points_cost")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([province, year, subjectType])
+  @@map("volunteer_reports")
+}
+
+model ScoreRank {
+  id             String   @id @default(uuid())
+  province       String
+  year           Int
+  subjectType    String   @map("subject_type")
+  score          Int
+  rank           Int
+  sameScoreCount Int?     @map("same_score_count")
+  sourceName     String?  @map("source_name")
+  sourceUrl      String?  @map("source_url")
+  sourceType     String?  @map("source_type")
+  rawData        String?  @map("raw_data")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([province, year, subjectType, score])
+  @@index([province, year, subjectType])
+  @@map("score_ranks")
+}
+
 model Admin {
   id        String    @id @default(uuid())
   username  String    @unique
@@ -240,4 +554,18 @@ model Admin {
   updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@map("admins")
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  key       String   @unique    // slug: gaokao, kaoyan, zhiye, bimian
+  label     String              // display: 智能选校, 考研规划, 职业方向, 专业避坑
+  icon      String?             // Element Plus icon name
+  sortOrder Int      @default(0) @map("sort_order")
+  isDefault Boolean  @default(false) @map("is_default")
+  status    String   @default("enabled")  // enabled | disabled
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("categories")
 }

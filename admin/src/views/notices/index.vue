@@ -79,5 +79,5 @@ onMounted(load);
 
 <style lang="scss" scoped>
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-h2 { color: #e8eaf0; margin: 0; }
+h2 { margin: 0; }
 </style>

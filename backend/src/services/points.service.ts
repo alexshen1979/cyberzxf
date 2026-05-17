@@ -1,6 +1,6 @@
 import { prisma } from '../utils/prisma';
 import { AppError } from '../middleware/errorHandler';
-import { config } from '../config';
+import { getPointSettings } from './point-config.service';
 
 // 查询用户点数余额
 export async function getBalance(userId: string) {
@@ -90,8 +90,9 @@ export async function chargePoints(
   orderId: string
 ) {
   const totalPoints = amount + bonusPoints;
+  const settings = await getPointSettings();
   const expiredAt = new Date();
-  expiredAt.setDate(expiredAt.getDate() + config.points.expireDays);
+  expiredAt.setDate(expiredAt.getDate() + settings.expireDays);
 
   await prisma.$transaction(async (tx) => {
     let account = await tx.pointsAccount.findUnique({ where: { userId } });

@@ -31,21 +31,7 @@
 import { ref, onMounted } from 'vue';
 import { api } from '@/api';
 
-const categories = [
-  { key: '', label: '全部' },
-  { key: 'gaokao', label: '高考志愿' },
-  { key: 'kaoyan', label: '考研规划' },
-  { key: 'zhiye', label: '职业发展' },
-  { key: 'bimian', label: '专业避坑' },
-];
-
-const categoryLabels: Record<string, string> = {
-  gaokao: '高考志愿',
-  kaoyan: '考研规划',
-  zhiye: '职业发展',
-  bimian: '专业避坑',
-};
-
+const categories = ref<Array<{ key: string; label: string }>>([]);
 const activeCategory = ref('');
 const articles = ref<any[]>([]);
 const page = ref(1);
@@ -53,7 +39,8 @@ const hasMore = ref(true);
 const defaultCover = '/static/images/article-default.png';
 
 function categoryLabel(key: string) {
-  return categoryLabels[key] || key;
+  const cat = categories.value.find(c => c.key === key);
+  return cat?.label || key;
 }
 
 function switchCategory(key: string) {
@@ -80,7 +67,16 @@ function goDetail(id: string) {
   uni.navigateTo({ url: `/pages/articles/detail?id=${id}` });
 }
 
+async function loadCategories() {
+  try {
+    const res = await api.categories.list();
+    const list = res.data as any[];
+    categories.value = [{ key: '', label: '全部' }, ...(list || [])];
+  } catch { /* keep empty */ }
+}
+
 onMounted(() => {
+  loadCategories();
   loadArticles();
 });
 </script>

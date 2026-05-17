@@ -2,11 +2,14 @@ import { Context } from 'koa';
 import {
   consult as aiConsult,
   streamConsult as aiStreamConsult,
+  localFallbackConsult,
+  sanitizeAiOutput,
   getUserHistory,
   getSessionHistory,
 } from '../services/ai.service';
 import { prisma } from '../utils/prisma';
 import { createLogger } from '../utils/logger';
+import { AppError } from '../middleware/errorHandler';
 
 const logger = createLogger('ai-ctrl');
 
@@ -53,8 +56,10 @@ export async function streamConsult(ctx: Context) {
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+  ctx.status = 200;
   ctx.respond = false;
   const { res } = ctx;
+  res.statusCode = 200;
 
   let fullAnswer = '';
   let actualModel = '';
@@ -93,8 +98,6 @@ export async function streamConsult(ctx: Context) {
             const delta = parsed.choices?.[0]?.delta?.content;
             if (delta) {
               fullAnswer += delta;
-              // 转发增量内容给客户端
-              res.write(`data: ${JSON.stringify({ content: delta })}\n\n`);
             }
           } catch {
             // 非 JSON 行跳过
@@ -105,20 +108,27 @@ export async function streamConsult(ctx: Context) {
 
     actualModel = result.model;
     actualCost = result.pointsCost;
+    fullAnswer = sanitizeAiOutput(fullAnswer);
 
     // 保存咨询记录
-    await prisma.consultationRecord.create({
-      data: {
-        userId,
-        sessionId: result.sessionId,
-        question,
-        answer: fullAnswer,
-        model: actualModel,
-        pointsCost: actualCost,
-        channel: channel || 'miniprogram',
-        type: type || 'normal',
-      },
-    });
+    if (!isAnonymous) {
+      await prisma.consultationRecord.create({
+        data: {
+          userId,
+          sessionId: result.sessionId,
+          question,
+          answer: fullAnswer,
+          model: actualModel,
+          pointsCost: actualCost,
+          channel: channel || 'miniprogram',
+          type: type || 'normal',
+        },
+      });
+    }
+
+    for (const part of chunkText(fullAnswer)) {
+      res.write(`data: ${JSON.stringify({ content: part })}\n\n`);
+    }
 
     // 发送完成信号
     res.write(`data: ${JSON.stringify({
@@ -131,13 +141,51 @@ export async function streamConsult(ctx: Context) {
 
   } catch (err: any) {
     logger.error('流式响应错误: %s', err.message);
-    res.write(`data: ${JSON.stringify({ error: err.message || 'AI 服务暂时不可用' })}\n\n`);
+    try {
+      if (err instanceof AppError && !['AI_API_ERROR', 'AI_NO_STREAM'].includes(err.code)) {
+        throw err;
+      }
+      const fallback = await localFallbackConsult({
+        userId,
+        question,
+        channel: channel || 'miniprogram',
+        type: type || 'normal',
+        sessionId,
+        context,
+        isAnonymous,
+      });
+      for (const part of chunkText(fallback.answer)) {
+        res.write(`data: ${JSON.stringify({ content: part })}\n\n`);
+      }
+      res.write(`data: ${JSON.stringify({
+        done: true,
+        pointsCost: fallback.pointsCost,
+        model: fallback.model,
+        sessionId: fallback.sessionId,
+      })}\n\n`);
+    } catch (fallbackErr: any) {
+      logger.error('流式兜底响应错误: %s', fallbackErr.message);
+      res.write(`data: ${JSON.stringify({ error: fallbackErr.message || err.message || 'AI 服务暂时不可用' })}\n\n`);
+    }
     res.end();
   }
 }
 
+function chunkText(text: string) {
+  const chunks: string[] = [];
+  const content = text || '';
+  for (let i = 0; i < content.length; i += 24) {
+    chunks.push(content.slice(i, i + 24));
+  }
+  return chunks.length ? chunks : [''];
+}
+
 export async function getHistory(ctx: Context) {
-  const userId = ctx.state.user.userId;
+  const userId = ctx.state.user?.userId;
+  if (!userId) {
+    ctx.body = { success: true, data: { list: [], total: 0 } };
+    return;
+  }
   const page = parseInt((ctx.query.page as string) || '1', 10);
   const pageSize = parseInt((ctx.query.pageSize as string) || '20', 10);
 
@@ -146,13 +194,22 @@ export async function getHistory(ctx: Context) {
 }
 
 export async function getSession(ctx: Context) {
+  const userId = ctx.state.user?.userId;
+  if (!userId) {
+    ctx.body = { success: true, data: [] };
+    return;
+  }
   const sessionId = ctx.params.sessionId;
   const history = await getSessionHistory(sessionId);
   ctx.body = { success: true, data: history };
 }
 
 export async function getQuickQuestions(ctx: Context) {
+  const { category } = ctx.query as Record<string, string>;
+  const where: any = { enabled: true };
+  if (category) where.category = category;
   const questions = await prisma.quickQuestion.findMany({
+    where,
     orderBy: { sortOrder: 'asc' },
   });
   ctx.body = { success: true, data: questions };

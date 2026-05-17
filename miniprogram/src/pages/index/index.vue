@@ -10,22 +10,53 @@
       </view>
     </view>
 
+    <!-- Slogan -->
+    <view class="slogan-bar">
+      <text class="slogan-title">拉平信息差，拒绝迷茫，多些清晰</text>
+      <text class="slogan-sub">把关键选择拆成看得懂的依据和下一步</text>
+    </view>
+
     <!-- 问候语 -->
     <view class="greeting-section">
       <text class="greeting-hi">你好，{{ userStore.userInfo?.nickname || '同学' }}</text>
+      <text class="greeting-sub">把志愿填报从"问 AI"变成"做决策"</text>
     </view>
 
     <!-- 未登录提示 -->
     <view class="login-banner" v-if="!userStore.isLogin">
-      <text class="login-text">
-        剩余免费提问 {{ Math.max(0, freeAskLimit - freeCount) }} 次 · 登录后获得更多点数和深度分析
-      </text>
+      <text class="login-text">免费提问 {{ Math.max(0, freeAskLimit - freeCount) }}/{{ freeAskLimit }} 次 · 登录解锁深度分析</text>
       <text class="login-link" @click="handleLogin">登录 →</text>
     </view>
 
-    <!-- 新对话入口 -->
+    <view class="volunteer-entry">
+      <view>
+        <text class="entry-kicker">核心工具</text>
+        <text class="entry-title">位次志愿规划</text>
+        <text class="entry-desc">输入省份、分数、位次，生成可追溯的冲稳保方案，并检查调剂、选科和体检风险。</text>
+      </view>
+      <view class="entry-btn" @click="goVolunteer">
+        <text>开始分析</text>
+      </view>
+    </view>
+
+    <view class="proof-grid">
+      <view class="proof-item">
+        <text class="proof-title">历年录取线</text>
+        <text class="proof-desc">不是只听 AI 猜</text>
+      </view>
+      <view class="proof-item">
+        <text class="proof-title">专业组风险</text>
+        <text class="proof-desc">调剂范围单独看</text>
+      </view>
+      <view class="proof-item">
+        <text class="proof-title">报告可追问</text>
+        <text class="proof-desc">拿方案继续细化</text>
+      </view>
+    </view>
+
+    <!-- 追问入口 -->
     <view class="prompt-area">
-      <text class="prompt-label">开始一个新问题</text>
+      <text class="prompt-label">已有困惑？直接追问</text>
 
       <!-- 分类选择 -->
       <view class="cat-row">
@@ -34,9 +65,11 @@
           :key="cat.key"
           class="cat-chip"
           :class="{ active: activeCategory === cat.key }"
+          :style="activeCategory === cat.key ? { color: catColor(cat.key).deep, borderColor: catColor(cat.key).border, background: catColor(cat.key).light } : {}"
           @click="activeCategory = cat.key"
         >
-          <text>{{ cat.icon }} {{ cat.label }}</text>
+          <CategoryIcon :name="cat.icon" :color="catColor(cat.key).deep" :bg="catColor(cat.key).light" :active="activeCategory === cat.key" />
+          <text>{{ cat.label }}</text>
         </view>
       </view>
 
@@ -95,20 +128,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
+import { onPullDownRefresh } from '@dcloudio/uni-app';
 import { useUserStore } from '@/store/user';
 import { api } from '@/api';
+import CategoryIcon from '@/components/CategoryIcon.vue';
 
 const userStore = useUserStore();
 
-const categories = [
-  { key: 'gaokao', icon: '🎓', label: '智能选校' },
-  { key: 'kaoyan', icon: '📚', label: '考研规划' },
-  { key: 'zhiye', icon: '💼', label: '职业方向' },
-  { key: 'bimian', icon: '🔍', label: '专业避坑' },
-];
-
-const activeCategory = ref('gaokao');
+const categories = ref<Array<{ key: string; icon: string; label: string }>>([]);
+const activeCategory = ref('');
 const question = ref('');
 const showLoginModal = ref(false);
 const freeCount = ref(0);
@@ -124,8 +153,41 @@ const defaultQuestions = [
 
 const quickQuestions = ref<Array<{ id: string; question: string }>>([]);
 
-onMounted(async () => {
+const CAT_PALETTE = [
+  { deep: '#2563eb', light: '#eff6ff', border: '#93c5fd' },
+  { deep: '#d97706', light: '#fffbeb', border: '#fcd34d' },
+  { deep: '#7c3aed', light: '#f5f3ff', border: '#c4b5fd' },
+  { deep: '#059669', light: '#ecfdf5', border: '#6ee7b7' },
+  { deep: '#dc2626', light: '#fef2f2', border: '#fca5a5' },
+  { deep: '#475569', light: '#f1f5f9', border: '#cbd5e1' },
+  { deep: '#0891b2', light: '#ecfeff', border: '#67e8f9' },
+  { deep: '#db2777', light: '#fdf2f8', border: '#f9a8d4' },
+];
+
+const categoryColorIndex = computed(() => {
+  const map: Record<string, number> = {};
+  categories.value.forEach((cat, i) => {
+    map[cat.key] = i;
+  });
+  return map;
+});
+
+function catColor(key: string) {
+  const idx = categoryColorIndex.value[key] != null ? categoryColorIndex.value[key] : 0;
+  return CAT_PALETTE[idx % CAT_PALETTE.length];
+}
+
+async function initHome() {
   freeCount.value = parseInt(uni.getStorageSync('free_ask_count') || '0');
+  // 加载分类
+  try {
+    const res = await api.categories.list();
+    if ((res.data as any[])?.length > 0) {
+      categories.value = res.data as any[];
+      const def = categories.value.find((c: any) => c.isDefault);
+      activeCategory.value = def?.key || categories.value[0]?.key || '';
+    }
+  } catch { /* keep defaults */ }
   // 从后台获取免费提问次数配置
   try {
     const cfg = await api.config.getPublic();
@@ -143,6 +205,16 @@ onMounted(async () => {
   } catch {
     quickQuestions.value = defaultQuestions;
   }
+}
+
+onMounted(initHome);
+
+onPullDownRefresh(async () => {
+  try {
+    await Promise.all([initHome(), userStore.checkNotices(), userStore.fetchBalance()]);
+  } finally {
+    uni.stopPullDownRefresh();
+  }
 });
 
 // 登录后重置免费次数
@@ -155,7 +227,7 @@ watch(() => userStore.isLogin, (val) => {
 });
 
 function handleLogin() {
-  userStore.silentLogin();
+  userStore.loginWithWechatProfile();
 }
 
 function handleAsk() {
@@ -196,6 +268,10 @@ function goRecharge() {
 function goNotices() {
   uni.navigateTo({ url: '/pages/notices/index' });
 }
+
+function goVolunteer() {
+  uni.switchTab({ url: '/pages/volunteer/index' });
+}
 </script>
 
 <style lang="scss" scoped>
@@ -234,38 +310,146 @@ function goNotices() {
   color: $text-secondary;
 }
 
+// ─── Slogan ───────────────────────────────────
+.slogan-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  padding: 16rpx 20rpx;
+  margin-bottom: 32rpx;
+  border-radius: $radius-md;
+  background: linear-gradient(135deg, rgba($brand, 0.06), rgba($secondary, 0.06));
+  border-left: 6rpx solid $brand;
+}
+
+.slogan-title {
+  font-size: 30rpx;
+  font-weight: 800;
+  color: $brand;
+}
+
+.slogan-sub {
+  font-size: 22rpx;
+  color: $text-tertiary;
+}
+
 // ─── Greeting ────────────────────────────────
 .greeting-section {
   margin-bottom: 24rpx;
 }
 
 .greeting-hi {
-  font-size: 52rpx;
+  font-size: 48rpx;
   font-weight: 700;
   color: $text-primary;
   letter-spacing: -1rpx;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.greeting-sub {
+  display: block;
+  margin-top: 8rpx;
+  color: $text-secondary;
+  font-size: $font-sm;
+}
+
+.volunteer-entry {
+  @include card;
+  padding: $spacing-md;
+  margin-bottom: $spacing-md;
+  display: flex;
+  justify-content: space-between;
+  gap: $spacing-md;
+  align-items: center;
+}
+
+.entry-kicker {
+  display: block;
+  color: $brand;
+  font-size: $font-xs;
+  font-weight: 800;
+  margin-bottom: 6rpx;
+}
+
+.entry-title {
+  display: block;
+  color: $text-primary;
+  font-size: 40rpx;
+  font-weight: 850;
+}
+
+.entry-desc {
+  display: block;
+  margin-top: 8rpx;
+  color: $text-secondary;
+  font-size: $font-sm;
+  line-height: 1.55;
+}
+
+.entry-btn {
+  flex-shrink: 0;
+  padding: 18rpx 24rpx;
+  border-radius: $radius-md;
+  background: $brand;
+  color: #fff;
+  font-size: $font-sm;
+  font-weight: 800;
+}
+
+.proof-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.proof-item {
+  @include card;
+  padding: $spacing-sm;
+}
+
+.proof-title {
+  display: block;
+  color: $text-primary;
+  font-size: $font-xs;
+  font-weight: 800;
+}
+
+.proof-desc {
+  display: block;
+  margin-top: 4rpx;
+  color: $text-tertiary;
+  font-size: 20rpx;
+  line-height: 1.3;
 }
 
 // ─── Login banner ────────────────────────────
 .login-banner {
   background: $brand-light;
   border-radius: 12rpx;
-  padding: 16rpx 20rpx;
-  margin-bottom: 32rpx;
+  padding: 12rpx 16rpx;
+  margin-bottom: 24rpx;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8rpx;
 }
 
 .login-text {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: $brand;
+  flex: 1;
+  min-width: 0;
+  @include text-ellipsis;
 }
 
 .login-link {
-  font-size: 24rpx;
+  font-size: 22rpx;
   color: $brand;
-  font-weight: 600;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 // ─── Prompt area ─────────────────────────────
@@ -286,25 +470,28 @@ function goNotices() {
 }
 
 .cat-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12rpx;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   margin-bottom: 24rpx;
 }
 
 .cat-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
   padding: 16rpx 0;
   border-radius: 16rpx;
   font-size: 26rpx;
   color: $text-secondary;
   background: $bg-page;
   border: 1rpx solid transparent;
-  text-align: center;
+  width: calc((100% - 16rpx) / 2);
+  box-sizing: border-box;
+  margin-bottom: 16rpx;
 
   &.active {
-    background: $brand-light;
-    border-color: rgba($brand, 0.2);
-    color: $brand;
     font-weight: 600;
   }
 }

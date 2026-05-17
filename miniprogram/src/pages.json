@@ -7,19 +7,21 @@
   },
   "pages": [
     {
-      "path": "pages/consult/index",
+      "path": "pages/volunteer/index",
       "style": {
-        "navigationBarTitleText": "AI 升学咨询",
+        "navigationBarTitleText": "AI 志愿分析",
         "navigationBarBackgroundColor": "#ffffff",
-        "navigationBarTextStyle": "black"
+        "navigationBarTextStyle": "black",
+        "enablePullDownRefresh": true
       }
     },
     {
       "path": "pages/index/index",
       "style": {
-        "navigationBarTitleText": "赛博张老师",
+        "navigationBarTitleText": "涨识",
         "navigationBarBackgroundColor": "#ffffff",
-        "navigationBarTextStyle": "black"
+        "navigationBarTextStyle": "black",
+        "enablePullDownRefresh": true
       }
     },
     {
@@ -63,6 +65,15 @@
       }
     },
     {
+      "path": "pages/distribution/index",
+      "style": {
+        "navigationBarTitleText": "我的分享码",
+        "navigationBarBackgroundColor": "#ffffff",
+        "navigationBarTextStyle": "black",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
       "path": "pages/orders/index",
       "style": {
         "navigationBarTitleText": "订单管理",
@@ -75,7 +86,8 @@
       "style": {
         "navigationBarTitleText": "个人中心",
         "navigationBarBackgroundColor": "#ffffff",
-        "navigationBarTextStyle": "black"
+        "navigationBarTextStyle": "black",
+        "enablePullDownRefresh": true
       }
     },
     {
@@ -99,6 +111,40 @@
       "style": {
         "navigationBarTitleText": "知识库",
         "navigationBarBackgroundColor": "#ffffff",
+        "navigationBarTextStyle": "black",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/consult/index",
+      "style": {
+        "navigationBarTitleText": "AI 追问",
+        "navigationBarBackgroundColor": "#ffffff",
+        "navigationBarTextStyle": "black",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/volunteer/report",
+      "style": {
+        "navigationBarTitleText": "志愿分析报告",
+        "navigationBarBackgroundColor": "#ffffff",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/universities/detail",
+      "style": {
+        "navigationBarTitleText": "院校详情",
+        "navigationBarBackgroundColor": "#ffffff",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/auth/index",
+      "style": {
+        "navigationBarTitleText": "微信登录",
+        "navigationBarBackgroundColor": "#ffffff",
         "navigationBarTextStyle": "black"
       }
     },
@@ -113,40 +159,40 @@
   ],
   "globalStyle": {
     "navigationBarBackgroundColor": "#ffffff",
-    "navigationBarTitleText": "赛博张老师",
+    "navigationBarTitleText": "涨识",
     "navigationBarTextStyle": "black",
     "backgroundColor": "#f8fafc",
     "backgroundColorTop": "#f8fafc",
     "backgroundColorBottom": "#f8fafc"
   },
   "tabBar": {
-    "color": "#94a3b8",
-    "selectedColor": "#3b82f6",
+    "color": "#64748b",
+    "selectedColor": "#7c3aed",
     "backgroundColor": "#ffffff",
     "borderStyle": "white",
     "list": [
       {
+        "pagePath": "pages/volunteer/index",
+        "iconPath": "/static/icons/chat.png",
+        "selectedIconPath": "/static/icons/chat-active.png",
+        "text": "志愿分析"
+      },
+      {
         "pagePath": "pages/consult/index",
-        "iconPath": "static/icons/chat.png",
-        "selectedIconPath": "static/icons/chat-active.png",
-        "text": "AI咨询"
+        "iconPath": "/static/icons/article.png",
+        "selectedIconPath": "/static/icons/article-active.png",
+        "text": "AI追问"
       },
       {
         "pagePath": "pages/knowledge/index",
-        "iconPath": "static/icons/knowledge.png",
-        "selectedIconPath": "static/icons/knowledge-active.png",
-        "text": "知识库"
-      },
-      {
-        "pagePath": "pages/articles/index",
-        "iconPath": "static/icons/article.png",
-        "selectedIconPath": "static/icons/article-active.png",
-        "text": "干货"
+        "iconPath": "/static/icons/knowledge.png",
+        "selectedIconPath": "/static/icons/knowledge-active.png",
+        "text": "资料库"
       },
       {
         "pagePath": "pages/profile/index",
-        "iconPath": "static/icons/user.png",
-        "selectedIconPath": "static/icons/user-active.png",
+        "iconPath": "/static/icons/user.png",
+        "selectedIconPath": "/static/icons/user-active.png",
         "text": "我的"
       }
     ]

@@ -1,13 +1,30 @@
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
+!**/.env.example
 .env.local
+servers.md
+memories.md
+.claude/settings.local.json
 *.log
 .DS_Store
 Thumbs.db
+.cache/
+backend/.cache/
+*.cpuprofile
+*.db
+*.db-*
+*.db.*
+*.sqlite
+*.sqlite3
+certs/
+*.pem
+*.p12
+*.key
 
 # Prisma
-backend/prisma/migrations/
 
 # IDE
 .idea/

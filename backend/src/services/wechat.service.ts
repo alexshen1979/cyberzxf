@@ -67,8 +67,8 @@ export async function handleMessage(xmlData: any): Promise<string> {
       return handleEvent(parsed, user.id);
     default:
       return buildTextReply(parsed,
-        '欢迎关注赛博张老师！\n\n' +
-        '🤖 直接发送文字或语音，即可获得张雪峰风格的高考志愿、考研规划、职业规划 AI 咨询服务。\n\n' +
+        '欢迎关注涨识！\n\n' +
+        '🤖 直接发送文字或语音，即可获得高考志愿、考研规划、职业规划 AI 咨询服务。\n\n' +
         '💡 快捷指令：\n' +
         '- 发送「点数」查看余额\n' +
         '- 发送「充值」获取充值入口\n' +
@@ -98,7 +98,7 @@ async function handleTextMessage(parsed: any, userId: string): Promise<string> {
       {
         title: '您的咨询点数不足',
         description: `当前剩余 ${balance} 点，普通问答需要 5 点。点击进入小程序充值。`,
-        picUrl: 'https://cdn.cyberzhang.com/recharge-banner.jpg',
+        picUrl: 'https://cdn.zhangshi.com/recharge-banner.jpg',
         url: '',
       },
     ]);
@@ -145,14 +145,13 @@ async function handleEvent(parsed: any, userId: string): Promise<string> {
   switch (event) {
     case 'subscribe':
       return buildTextReply(parsed,
-        '🎓 欢迎关注赛博张老师！\n\n' +
-        '我是用AI复刻的张雪峰老师，专注于：\n' +
+        '🎓 欢迎关注涨识！\n\n' +
+        '我是赛博张老师，专注于：\n' +
         '📚 高考志愿填报分析\n' +
         '🎯 考研院校专业推荐\n' +
         '💼 职业规划避坑指南\n' +
         '🔍 大学专业深度解析\n\n' +
-        '新用户已自动赠送 10 免费咨询点数，直接发送问题即可开始！\n\n' +
-        '📌 所有回答仅作参考，请结合实际情况决策。'
+        '新用户已自动赠送 100 免费咨询点数，直接发送问题即可开始！'
       );
 
     case 'unsubscribe':
@@ -200,7 +199,7 @@ async function handleQuickCommand(
 
   if (cmd === '帮助' || cmd === 'help' || cmd === '？') {
     return buildTextReply(parsed,
-      '🤖 赛博张老师使用指南：\n\n' +
+      '🤖 涨识使用指南：\n\n' +
       '1️⃣ 直接发送问题，如：\n' +
       '  "理科580分能上什么大学"\n' +
       '  "计算机专业哪些学校好"\n' +

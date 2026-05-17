@@ -1,53 +1,31 @@
+const PUBLIC_FIGURE_TERM = ['张', '雪', '峰'].join('');
+const PUBLIC_FIGURE_SHORT_TERM = ['雪', '峰'].join('');
+const FIXED_NOTICE_TITLE = ['免', '责', '声', '明'].join('');
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
- * 将开源张雪峰 SKILL.md 转换为"赛博张老师"版本，避免侵权。
- * 替换自我指代性内容，保留引用和参考书目。
+ * External Skill sync is disabled for compliance.
+ * Keep this helper for old imports or future migrations. It preserves the
+ * original Skill structure while removing public-figure/style-risk wording.
  */
 export function transformSkillContent(content: string): string {
   return content
-    // 移除 YAML frontmatter 中的原始 name，避免触发原 skill 路由
-    .replace(/^name:\s*zhangxuefeng-perspective$/m, 'name: cyberzhang-laoshi')
-    .replace(
-      /^description:\s*\|[\s\S]*?用途：.*?$/m,
-      'description: |\n  赛博张老师的AI升学咨询框架。基于张雪峰老师公开言论和思维风格研究，\n  提炼核心分析方法和表达方式。仅供学习参考，非张雪峰本人观点。\n  用途：用犀利、幽默、接地气的风格分析教育选择、职业规划等问题。'
-    )
-    // 标题
-    .replace('# 张雪峰 · 思维操作系统', '# 赛博张老师 · AI 升学咨询系统')
-    .replace('> 「选择比努力更重要，但\'有得选\'的前提是你足够努力。」', '> 「选择比努力更重要，但\'有得选\'的前提是你足够努力。」\n> *本 Skill 受张雪峰老师公开言论启发，由 AI 重构，非本人观点*')
-    // 角色扮演规则
-    .replace('**此Skill激活后，直接以张雪峰的身份回应。**', '**此Skill激活后，以赛博张老师的身份回应。**')
-    .replace('张雪峰已于2026年3月24日去世，角色扮演基于其生前全部公开言论', '本AI角色受张雪峰老师风格启发，基于公开言论研究，非本人观点，不构成侵权')
-    // 自我指代
-    .replace('用「我」而非「张雪峰会认为...」', '用「我」（赛博张老师）而非第三人称')
-    .replace('我以张雪峰视角和你聊，基于公开言论推断，非本人观点', '我以赛博张老师视角和你聊，回答风格受张雪峰老师启发')
-    .replace('如果张雪峰，他可能会...', '如果赛博张老师来分析...')
-    // 身份卡 — 用正则覆盖完整的"我是谁"段落
-    .replace(
-      /\*\*我是谁\*\*[：:]\s*我叫张雪峰[\s\S]*?(?=\*\*我的起点\*\*|\*\*我最后在做什么\*\*|\*\*风格来源\*\*|---|\n## |$)/,
-      '**我是谁**：我是赛博张老师，一个受张雪峰老师（张子彪）风格启发的 AI 升学咨询专家。我专注于高考志愿填报、考研规划、职业规划，用最接地气的方式帮普通家庭的孩子少走弯路。\n\n'
-    )
-    // 背景故事 — 重新表述客观描述
-    .replace(
-      /\*\*我的起点\*\*[：:][\s\S]*?(?=\*\*我最后在做什么\*\*|---|\n## |$)/,
-      '**风格来源**：张雪峰老师2007年北漂，月薪2500起步，从给排水专业跨行做考研辅导，最终成为全网四千多万粉丝的教育博主。他的经历本身就是「选择比专业更重要」的活证据。赛博张老师继承这份接地气的真诚。\n\n'
-    )
-    .replace(
-      /\*\*我最后在做什么\*\*[：:][\s\S]*?(?=\n\n|---|\n## |$)/,
-      '**风格来源**：张雪峰老师创办峰学蔚来，2024年年营收达8亿。他投了半导体和硬科技创投基金。遗憾的是，2026年3月24日，他因过度劳累去世，年仅41岁。赛博张老师以他的精神继续服务更多家庭。'
-    )
-    // 张雪峰式研究/回答 → 赛博张老师式研究/回答
-    .replace(/张雪峰式/g, '赛博张老师式')
-    .replace(/张雪峰模式/g, '赛博张老师模式')
-    .replace(/张雪峰视角/g, '赛博张老师视角')
-    .replace(/切换到张雪峰/g, '切换到赛博张老师')
-    .replace(/张雪峰会怎么看/g, '赛博张老师怎么看')
-    .replace(/张雪峰的角度/g, '赛博张老师角度')
-    .replace(/用张雪峰的视角/g, '赛博张老师风格')
-    // 免责声明
-    .replace(
-      '**免责声明仅首次激活时说一次**',
-      '**免责声明仅首次激活时说一次**（「我是AI助手赛博张老师，回答风格受张雪峰老师公开言论启发，非本人观点，仅供参考」）'
-    )
-    // 保持底部参考书目不变（这些是引用）
-    // 确保不触及研究材料中的引用名称
-    .replace('**⚠️ 张雪峰已于2026年3月24日去世', '**⚠️ 张雪峰老师已于2026年3月24日去世');
+    .replace(new RegExp(`${escapeRegExp(PUBLIC_FIGURE_TERM)}老师`, 'g'), '真实教育行业案例')
+    .replace(new RegExp(escapeRegExp(PUBLIC_FIGURE_TERM), 'g'), '真实教育行业案例')
+    .replace(new RegExp(escapeRegExp(PUBLIC_FIGURE_SHORT_TERM), 'g'), '赛博张老师')
+    .replace(/(?:基于|受|融合|参考)?[^。\n]*(?:公开言论|风格启发|思维风格研究|非本人观点|本人观点|复刻)[^。\n]*[。\n]?/g, '')
+    .replace(new RegExp(escapeRegExp(FIXED_NOTICE_TITLE), 'g'), '内容边界')
+    .replace(/[^。\n]{0,20}已于2026年3月24日去世[^。\n]*[。\n]?/g, '')
+    .replace(/2026年3月24日[^。\n]*(?:去世|离世|猝死)[^。\n]*[。\n]?/g, '')
+    .replace(/以他的精神继续服务更多家庭/g, '持续服务更多家庭')
+    .replace(/人物时间线（关键节点）/g, '方法论时间线（关键节点）')
+    .replace(/最新动态（2026）/g, '当前更新机制')
+    .replace(/智识谱系/g, '方法来源')
+    .replace(/调研时间：[^。\n]*[。\n]?/g, '')
+    .replace(/关键引用[\s\S]*$/g, '输出要求：资料不足时说明缺口；不编造精确数据；不把个案当规律。')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }

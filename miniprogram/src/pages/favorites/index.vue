@@ -3,7 +3,7 @@
     <view class="fav-list">
       <view class="fav-card card" v-for="item in favorites" :key="item.id" @click="goDetail(item)">
         <view class="fav-header">
-          <text class="fav-type" :class="item.targetType">{{ item.targetType === 'article' ? '文章' : '咨询' }}</text>
+          <text class="fav-type" :class="item.targetType">{{ typeLabel(item.targetType) }}</text>
           <text class="fav-date">{{ formatDate(item.createdAt) }}</text>
         </view>
         <text class="fav-title">{{ item.title }}</text>
@@ -51,10 +51,19 @@ async function removeFav(id: string) {
 function goDetail(item: any) {
   if (item.targetType === 'article') {
     uni.navigateTo({ url: `/pages/articles/detail?id=${item.targetId}` });
+  } else if (item.targetType === 'knowledge') {
+    uni.setStorageSync('open_knowledge_id', item.targetId);
+    uni.switchTab({ url: '/pages/knowledge/index' });
   } else {
     userStore.loadSessionId = item.targetId;
     uni.switchTab({ url: '/pages/consult/index' });
   }
+}
+
+function typeLabel(type: string) {
+  if (type === 'article') return '文章';
+  if (type === 'knowledge') return '资料';
+  return '咨询';
 }
 
 function formatDate(d: string) {
@@ -71,6 +80,7 @@ onMounted(load);
 .fav-type { font-size: $font-xs; padding: 2rpx 12rpx; border-radius: 4rpx; }
 .fav-type.article { background: rgba(0,245,255,0.1); color: $primary; }
 .fav-type.consultation { background: rgba(124,58,237,0.1); color: $secondary; }
+.fav-type.knowledge { background: rgba(15,118,110,0.10); color: #0f766e; }
 .fav-date { font-size: $font-xs; color: $text-dim; }
 .fav-title { font-size: $font-md; font-weight: 600; display: block; margin-bottom: 4rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fav-summary { font-size: $font-xs; color: $text-secondary; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

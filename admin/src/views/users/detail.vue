@@ -43,6 +43,5 @@ onMounted(async () => {
 </script>
 
 <style lang="scss" scoped>
-h2, h3 { color: #e8eaf0; }
-.info-card { background: #1a1f4a; border-color: #1e2550; }
+.info-card { }
 </style>

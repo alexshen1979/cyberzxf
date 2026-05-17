@@ -2,36 +2,11 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { transformSkillContent } from '../src/utils/skillTransform';
 
 const prisma = new PrismaClient();
 
-const GITHUB_SKILL_URL = 'https://raw.githubusercontent.com/alchaincyf/zhangxuefeng-skill/main/SKILL.md';
-
-function loadLocalDefaultSkill(): string {
-  const filePath = resolve(__dirname, 'default-skill.md');
-  return readFileSync(filePath, 'utf8');
-}
-
-async function fetchSkillFromGitHub(): Promise<string | null> {
-  try {
-    const res = await fetch(GITHUB_SKILL_URL, { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) {
-      console.warn(`⚠️  获取 GitHub SKILL.md 失败: HTTP ${res.status}`);
-      return null;
-    }
-    const content = await res.text();
-    if (!content || content.length < 500) {
-      console.warn('⚠️  获取的 SKILL.md 内容过短，使用本地版本');
-      return null;
-    }
-    const transformed = transformSkillContent(content);
-    console.log(`✅ 从 GitHub 获取 SKILL.md 成功 (${content.length} → ${transformed.length} 字符)`);
-    return transformed;
-  } catch (err: any) {
-    console.warn(`⚠️  获取 GitHub SKILL.md 失败: ${err?.message || String(err)}`);
-    return null;
-  }
+function defaultSkillPrompt() {
+  return readFileSync(resolve(__dirname, 'default-skill.md'), 'utf8');
 }
 
 async function main() {
@@ -48,17 +23,15 @@ async function main() {
     console.log('✅ 默认管理员已创建 (admin / admin123)');
   }
 
-  // 默认 Skill：张雪峰升学咨询
+  // 默认 Skill：赛博张老师
   const existingSkill = await prisma.skill.findFirst({ where: { isDefault: true } });
   if (!existingSkill) {
-    // 优先从 GitHub 获取最新版（自动转换），失败则用本地预转换版本
-    const githubContent = await fetchSkillFromGitHub();
-    const systemPrompt = githubContent || loadLocalDefaultSkill();
+    const systemPrompt = defaultSkillPrompt();
 
     await prisma.skill.create({
       data: {
-        name: '张雪峰升学咨询',
-        description: '赛博张老师 AI 升学咨询框架。基于张雪峰老师公开言论研究，融合5个核心心智模型、8条决策启发式、完整表达DNA。',
+        name: '赛博张老师',
+        description: '涨识小程序里的默认回答 Skill，聚焦高考志愿、考研规划和职业选择。',
         systemPrompt,
         model: 'deepseek-chat',
         temperature: 0.7,
@@ -74,7 +47,49 @@ async function main() {
         sortOrder: 0,
       },
     });
-    console.log(`✅ 默认 Skill "张雪峰升学咨询" 已创建 (${githubContent ? 'GitHub 最新版' : '本地预置版'}, ${systemPrompt.length} 字符)`);
+    console.log(`✅ 默认 Skill "赛博张老师" 已创建 (${systemPrompt.length} 字符)`);
+  }
+
+  // 默认分类
+  const defaultCategories = [
+    { key: 'gaokao', label: '智能选校', icon: 'School', sortOrder: 1, isDefault: true },
+    { key: 'kaoyan', label: '考研规划', icon: 'Reading', sortOrder: 2 },
+    { key: 'zhiye', label: '职业方向', icon: 'Briefcase', sortOrder: 3 },
+    { key: 'bimian', label: '专业避坑', icon: 'View', sortOrder: 4 },
+  ];
+  for (const cat of defaultCategories) {
+    const existingCat = await prisma.category.findUnique({ where: { key: cat.key } });
+    if (!existingCat) {
+      await prisma.category.create({ data: cat });
+      console.log(`✅ 分类 "${cat.label}" (${cat.key}) 已创建`);
+    }
+  }
+
+  await prisma.pointSetting.upsert({
+    where: { id: 'default' },
+    update: {},
+    create: {
+      id: 'default',
+      freeGift: 100,
+      defaultCost: 5,
+      deepAnalysisCost: 18,
+      volunteerAnalysisCost: 38,
+      expireDays: 365,
+    },
+  });
+
+  const defaultProducts = [
+    { id: 'pkg_120', name: '120 咨询点数', description: '首充体验，适合生成报告后继续追问', price: 1990, originalPrice: 2990, points: 120, bonus: 0, sortOrder: 10, enabled: true },
+    { id: 'pkg_280', name: '240 咨询点数 + 赠40点', description: '推荐套餐，适合志愿季集中使用', price: 3990, originalPrice: 5990, points: 240, bonus: 40, sortOrder: 20, enabled: true },
+    { id: 'pkg_560', name: '480 咨询点数 + 赠80点', description: '适合多省市、多院校反复对比', price: 6990, originalPrice: 9990, points: 480, bonus: 80, sortOrder: 30, enabled: true },
+    { id: 'pkg_1000', name: '800 咨询点数 + 赠200点', description: '家庭规划包，适合长期升学咨询', price: 9990, originalPrice: 14990, points: 800, bonus: 200, sortOrder: 40, enabled: true },
+  ];
+  for (const product of defaultProducts) {
+    await prisma.rechargeProduct.upsert({
+      where: { id: product.id },
+      update: {},
+      create: product,
+    });
   }
 }
 

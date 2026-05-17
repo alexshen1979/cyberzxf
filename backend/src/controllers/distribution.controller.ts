@@ -1,0 +1,69 @@
+import { Context } from 'koa';
+import {
+  applyDistributor,
+  createDistributorForAdmin,
+  getDistributionDashboardForAdmin,
+  getDistributionSettingsForAdmin,
+  getMyDistribution,
+  getMyDistributionCommissions,
+  getMyDistributionQrCode,
+  listCommissionsForAdmin,
+  listDistributorsForAdmin,
+  listLevelOneDistributorsForAdmin,
+  updateDistributionSettingsForAdmin,
+  updateDistributorForAdmin,
+} from '../services/distribution.service';
+
+export async function me(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  ctx.body = { success: true, data: await getMyDistribution(userId) };
+}
+
+export async function apply(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  ctx.body = { success: true, data: await applyDistributor(userId) };
+}
+
+export async function qrcode(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  ctx.body = { success: true, data: await getMyDistributionQrCode(userId) };
+}
+
+export async function commissions(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  const page = parseInt((ctx.query.page as string) || '1', 10);
+  const pageSize = parseInt((ctx.query.pageSize as string) || '20', 10);
+  ctx.body = { success: true, data: await getMyDistributionCommissions(userId, page, pageSize) };
+}
+
+export async function adminSettings(ctx: Context) {
+  ctx.body = { success: true, data: await getDistributionSettingsForAdmin() };
+}
+
+export async function adminUpdateSettings(ctx: Context) {
+  ctx.body = { success: true, data: await updateDistributionSettingsForAdmin(ctx.request.body as Record<string, any>) };
+}
+
+export async function adminDashboard(ctx: Context) {
+  ctx.body = { success: true, data: await getDistributionDashboardForAdmin() };
+}
+
+export async function adminDistributors(ctx: Context) {
+  ctx.body = { success: true, data: await listDistributorsForAdmin(ctx.query as Record<string, any>) };
+}
+
+export async function adminLevelOneDistributors(ctx: Context) {
+  ctx.body = { success: true, data: await listLevelOneDistributorsForAdmin() };
+}
+
+export async function adminCreateDistributor(ctx: Context) {
+  ctx.body = { success: true, data: await createDistributorForAdmin(ctx.request.body as Record<string, any>) };
+}
+
+export async function adminUpdateDistributor(ctx: Context) {
+  ctx.body = { success: true, data: await updateDistributorForAdmin(ctx.params.id, ctx.request.body as Record<string, any>) };
+}
+
+export async function adminCommissions(ctx: Context) {
+  ctx.body = { success: true, data: await listCommissionsForAdmin(ctx.query as Record<string, any>) };
+}

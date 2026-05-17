@@ -25,7 +25,6 @@
       </el-col>
     </el-row>
 
-    <!-- 数据导出 -->
     <div class="export-section">
       <h3>数据导出</h3>
       <div class="export-btns">
@@ -78,8 +77,8 @@ onMounted(async () => {
 });
 
 function initCharts() {
-  const darkTheme = {
-    textStyle: { color: '#8890b0' },
+  const baseTheme = {
+    textStyle: { color: '#64748b' },
     grid: { top: 10, right: 20, bottom: 30, left: 50 },
   };
 
@@ -90,25 +89,31 @@ function initCharts() {
   if (userChartRef.value) {
     userChart = echarts.init(userChartRef.value);
     userChart.setOption({
-      ...darkTheme,
-      xAxis: { data: labels, axisLine: { lineStyle: { color: '#1e2550' } } },
-      yAxis: { axisLine: { lineStyle: { color: '#1e2550' } }, splitLine: { lineStyle: { color: '#1e2550' } } },
-      series: [{ data: userValues, type: 'line', smooth: true,
-        lineStyle: { color: '#00f5ff' }, itemStyle: { color: '#00f5ff' },
-        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1,
-          [{ offset: 0, color: 'rgba(0,245,255,0.3)' }, { offset: 1, color: 'rgba(0,245,255,0)' }]) } }],
+      ...baseTheme,
+      xAxis: { data: labels, axisLine: { lineStyle: { color: '#e2e8f0' } } },
+      yAxis: { axisLine: { lineStyle: { color: '#e2e8f0' } }, splitLine: { lineStyle: { color: '#f1f5f9' } } },
+      series: [{
+        data: userValues, type: 'line', smooth: true,
+        lineStyle: { color: '#3b82f6' }, itemStyle: { color: '#3b82f6' },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(59,130,246,0.15)' }, { offset: 1, color: 'rgba(59,130,246,0)' },
+        ]) },
+      }],
     });
   }
 
   if (consultChartRef.value) {
     consultChart = echarts.init(consultChartRef.value);
     consultChart.setOption({
-      ...darkTheme,
-      xAxis: { data: labels, axisLine: { lineStyle: { color: '#1e2550' } } },
-      yAxis: { axisLine: { lineStyle: { color: '#1e2550' } }, splitLine: { lineStyle: { color: '#1e2550' } } },
-      series: [{ data: consultValues, type: 'bar',
-        itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1,
-          [{ offset: 0, color: '#7c3aed' }, { offset: 1, color: '#a78bfa' }]) } }],
+      ...baseTheme,
+      xAxis: { data: labels, axisLine: { lineStyle: { color: '#e2e8f0' } } },
+      yAxis: { axisLine: { lineStyle: { color: '#e2e8f0' } }, splitLine: { lineStyle: { color: '#f1f5f9' } } },
+      series: [{
+        data: consultValues, type: 'bar',
+        itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#3b82f6' }, { offset: 1, color: '#93c5fd' },
+        ]) },
+      }],
     });
   }
 }
@@ -131,41 +136,44 @@ async function handleExport(type: string) {
 
 <style lang="scss" scoped>
 .stat-card {
-  background: #1a1f4a;
-  border: 1px solid #1e2550;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
   border-radius: 12px;
   padding: 20px;
+  box-shadow: var(--el-box-shadow-lighter);
 }
 
 .stat-label {
   font-size: 13px;
-  color: #8890b0;
+  color: var(--el-text-color-secondary);
   margin-bottom: 8px;
 }
 
 .stat-value {
   font-size: 28px;
   font-weight: 700;
-  color: #00f5ff;
+  color: var(--el-color-primary);
 }
 
 .stat-sub {
   font-size: 12px;
-  color: #5a6080;
+  color: var(--el-text-color-secondary);
   margin-top: 4px;
 }
 
 .chart-card {
-  background: #1a1f4a;
-  border: 1px solid #1e2550;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
   border-radius: 12px;
   padding: 20px;
   min-height: 300px;
+  box-shadow: var(--el-box-shadow-lighter);
 
   h3 {
-    color: #e8eaf0;
+    color: var(--el-text-color-primary);
     margin: 0 0 16px;
     font-size: 16px;
+    font-weight: 600;
   }
 }
 
@@ -175,15 +183,17 @@ async function handleExport(type: string) {
 
 .export-section {
   margin-top: 24px;
-  background: #1a1f4a;
-  border: 1px solid #1e2550;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
   border-radius: 12px;
   padding: 20px;
+  box-shadow: var(--el-box-shadow-lighter);
 
   h3 {
-    color: #e8eaf0;
+    color: var(--el-text-color-primary);
     margin: 0 0 16px;
     font-size: 16px;
+    font-weight: 600;
   }
 }
 

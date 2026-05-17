@@ -10,6 +10,7 @@
         <text class="order-product">{{ order.productName }}</text>
         <text class="order-amount">¥{{ (order.amount / 100).toFixed(2) }}</text>
       </view>
+      <text class="order-transaction" v-if="order.transactionId">微信交易号：{{ order.transactionId }}</text>
       <text class="order-time">{{ formatTime(order.createdAt) }}</text>
     </view>
     <view class="empty" v-if="orders.length === 0">
@@ -53,6 +54,7 @@ onMounted(async () => {
 .order-body { display: flex; justify-content: space-between; margin-bottom: 4rpx; }
 .order-product { font-size: $font-md; }
 .order-amount { font-size: $font-lg; font-weight: 700; color: $primary; }
+.order-transaction { display: block; font-size: $font-xs; color: $text-secondary; margin-bottom: 4rpx; }
 .order-time { font-size: $font-xs; color: $text-dim; }
 .empty { text-align: center; padding: 120rpx 0; color: $text-dim; }
 </style>

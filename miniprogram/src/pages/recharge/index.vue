@@ -20,13 +20,18 @@
         </view>
         <view class="product-detail">
           <text class="product-name">{{ p.name }}</text>
+          <text class="product-desc" v-if="p.description">{{ p.description }}</text>
           <view class="product-bonus" v-if="p.bonus > 0">
-            <text>🎁 赠送 {{ p.bonus }} 点</text>
+            <text>赠送 {{ p.bonus }} 点</text>
           </view>
         </view>
         <view class="product-price">
-          <text class="price-symbol">¥</text>
-          <text class="price-value">{{ p.price }}</text>
+          <text class="original-price" v-if="hasDiscount(p)">¥{{ formatPrice(p.originalPrice) }}</text>
+          <view class="discount-price">
+            <text class="price-symbol">¥</text>
+            <text class="price-value">{{ formatPrice(p.price) }}</text>
+          </view>
+          <text class="discount-tag" v-if="hasDiscount(p)">省 ¥{{ formatPrice(Number(p.originalPrice) - p.price) }}</text>
         </view>
         <view class="check-mark" v-if="selectedProduct?.id === p.id">✓</view>
       </view>
@@ -34,7 +39,7 @@
 
     <!-- 合规文案 -->
     <view class="compliance-notice">
-      <text>📌 温馨提示：</text>
+      <text>温馨提示：</text>
       <text>· 咨询点数仅用于本平台 AI 咨询服务，不可转让、不可提现</text>
       <text>· 充值后点数有效期为 1 年</text>
       <text>· 未成年人请在监护人指导下进行充值</text>
@@ -42,7 +47,7 @@
 
     <!-- 支付按钮 -->
     <view class="pay-btn safe-area-bottom" :class="{ disabled: !selectedProduct || paying }" @click="handlePay">
-      <text>{{ paying ? '支付中...' : `确认支付 ¥${selectedProduct?.price || '0.00'}` }}</text>
+      <text>{{ paying ? '支付中...' : `确认支付 ¥${formatPrice(selectedProduct?.price || 0)}` }}</text>
     </view>
   </view>
 </template>
@@ -58,8 +63,10 @@ const products = ref<Array<{
   id: string;
   name: string;
   price: number;
+  originalPrice?: number | null;
   points: number;
   bonus: number;
+  description?: string;
 }>>([]);
 
 const selectedProduct = ref<any>(null);
@@ -79,34 +86,79 @@ async function handlePay() {
   paying.value = true;
 
   try {
-    // 创建订单
+    if (!userStore.isLogin) {
+      await userStore.loginWithWechatProfile();
+      return;
+    }
+
     const orderRes = await api.payment.createOrder(selectedProduct.value.id);
+    const payParams = orderRes.data.payParams;
+    if (!payParams) {
+      uni.showToast({ title: '支付参数生成失败', icon: 'none' });
+      return;
+    }
 
-    // 调起微信支付
-    // TODO: 实际对接微信虚拟支付 API
-    // uni.requestPayment({
-    //   timeStamp: '',
-    //   nonceStr: '',
-    //   package: '',
-    //   signType: 'RSA',
-    //   paySign: '',
-    //   success: async () => {
-    //     await userStore.fetchBalance();
-    //     uni.showToast({ title: '充值成功', icon: 'success' });
-    //     setTimeout(() => uni.navigateBack(), 1500);
-    //   },
-    //   fail: () => {
-    //     uni.showToast({ title: '支付取消', icon: 'none' });
-    //   },
-    // });
+    await requestWechatPayment(payParams);
+    const paid = await waitOrderPaid(orderRes.data.orderNo);
+    await refreshBalanceAfterPayment();
 
-    uni.showToast({ title: '支付功能接入中...', icon: 'none' });
-
+    if (paid) {
+      uni.showToast({ title: '充值已到账', icon: 'success' });
+      setTimeout(() => uni.navigateBack(), 1200);
+    } else {
+      uni.showToast({ title: '支付成功，到账稍后刷新', icon: 'none' });
+    }
   } catch (e: any) {
-    uni.showToast({ title: e.message || '支付失败', icon: 'error' });
+    const message = e?.errMsg?.includes('cancel')
+      ? '支付已取消'
+      : (e?.response?.data?.message || e?.message || '支付失败');
+    uni.showToast({ title: message, icon: 'none' });
   } finally {
     paying.value = false;
   }
+}
+
+function requestWechatPayment(payParams: {
+  timeStamp: string;
+  nonceStr: string;
+  package: string;
+  signType: 'RSA';
+  paySign: string;
+}) {
+  return new Promise<void>((resolve, reject) => {
+    uni.requestPayment(Object.assign({}, payParams, {
+      success: () => resolve(),
+      fail: reject,
+    } as any));
+  });
+}
+
+async function waitOrderPaid(orderNo: string) {
+  for (let i = 0; i < 18; i += 1) {
+    const res = await api.payment.getOrder(orderNo);
+    if (res.data.status === 'paid') return true;
+    if (res.data.status === 'failed') return false;
+    await new Promise(resolve => setTimeout(resolve, i < 6 ? 1000 : 1500));
+  }
+  return false;
+}
+
+async function refreshBalanceAfterPayment() {
+  for (let i = 0; i < 5; i += 1) {
+    await userStore.fetchBalance();
+    if (i < 4) {
+      await new Promise(resolve => setTimeout(resolve, 800));
+    }
+  }
+}
+
+function formatPrice(price?: number | null) {
+  const n = Number(price || 0);
+  return n.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+}
+
+function hasDiscount(product: { price: number; originalPrice?: number | null }) {
+  return Number(product.originalPrice || 0) > product.price;
 }
 </script>
 
@@ -115,6 +167,9 @@ async function handlePay() {
 .recharge-page {
   padding: $spacing-md;
   min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(236, 253, 245, 0.64), rgba(248, 250, 252, 0) 320rpx),
+    $bg-page;
 }
 
 .balance-card {
@@ -168,8 +223,8 @@ async function handlePay() {
   transition: border-color 0.2s;
 
   &.selected {
-    border-color: $primary;
-    box-shadow: $shadow-glow;
+    border-color: rgba(34, 197, 94, 0.45);
+    box-shadow: 0 12rpx 36rpx rgba(34, 197, 94, 0.10);
   }
 }
 
@@ -181,7 +236,7 @@ async function handlePay() {
 .product-points-num {
   font-size: $font-xl;
   font-weight: 800;
-  color: $primary;
+  color: #059669;
   display: block;
 }
 
@@ -198,15 +253,37 @@ async function handlePay() {
 .product-name {
   font-size: $font-md;
   font-weight: 500;
+  color: $text-primary;
+  display: block;
+}
+
+.product-desc {
+  display: block;
+  margin-top: 4rpx;
+  font-size: $font-xs;
+  color: $text-tertiary;
 }
 
 .product-bonus {
   font-size: $font-xs;
-  color: $accent;
-  margin-top: 4rpx;
+  color: #b45309;
+  margin-top: 8rpx;
 }
 
 .product-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 132rpx;
+}
+
+.original-price {
+  font-size: $font-xs;
+  color: $text-dim;
+  text-decoration: line-through;
+}
+
+.discount-price {
   display: flex;
   align-items: baseline;
 }
@@ -219,7 +296,17 @@ async function handlePay() {
 .price-value {
   font-size: $font-xl;
   font-weight: 700;
-  color: $primary;
+  color: #047857;
+}
+
+.discount-tag {
+  margin-top: 4rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 999rpx;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 20rpx;
+  line-height: 1.5;
 }
 
 .check-mark {
@@ -228,8 +315,8 @@ async function handlePay() {
   right: 0;
   width: 48rpx;
   height: 48rpx;
-  background: $primary;
-  color: $bg-primary;
+  background: #22c55e;
+  color: #ffffff;
   border-radius: 0 $radius-md 0 $radius-md;
   @include flex-center;
   font-size: $font-sm;
@@ -251,7 +338,8 @@ async function handlePay() {
 }
 
 .pay-btn {
-  @include gradient-btn;
+  background: linear-gradient(135deg, #059669, #14b8a6);
+  color: #fff;
   margin-top: $spacing-lg;
   padding: $spacing-md;
   border-radius: $radius-lg;

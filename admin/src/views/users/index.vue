@@ -61,6 +61,6 @@ onMounted(load);
 </script>
 
 <style lang="scss" scoped>
-h2 { color: #e8eaf0; margin-bottom: 20px; }
+h2 { margin-bottom: 20px; }
 .search-bar { margin-bottom: 16px; }
 </style>

@@ -1,11 +1,11 @@
--- 赛博张老师 - 数据库初始化脚本
+-- 涨识 - 数据库初始化脚本
 -- MySQL 8.0+
 
-CREATE DATABASE IF NOT EXISTS cyberzhang
+CREATE DATABASE IF NOT EXISTS zhangshi
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE cyberzhang;
+USE zhangshi;
 
 -- 用户表
 CREATE TABLE users (

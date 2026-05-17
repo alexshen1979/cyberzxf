@@ -1,58 +1,67 @@
 version: '3.8'
 
 services:
-  # 后端服务（SQLite，零外部依赖）
   backend:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
-    container_name: cyberzhang-backend
+    container_name: zhangshi-backend
     restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: file:/data/cyberzhang.db
+      DATABASE_URL: file:/data/zhangshi.db
       JWT_SECRET: ${JWT_SECRET}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      JWT_EXPIRES_IN: 7d
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-      WECHAT_MINI_APPID: ${WECHAT_MINI_APPID}
-      WECHAT_MINI_SECRET: ${WECHAT_MINI_SECRET}
-      WECHAT_MP_APPID: ${WECHAT_MP_APPID}
-      WECHAT_MP_SECRET: ${WECHAT_MP_SECRET}
-      WECHAT_MP_TOKEN: ${WECHAT_MP_TOKEN}
+      WECHAT_MINI_APPID: ${WECHAT_MINI_APPID:-}
+      WECHAT_MINI_SECRET: ${WECHAT_MINI_SECRET:-}
+      WECHAT_MP_APPID: ${WECHAT_MP_APPID:-}
+      WECHAT_MP_SECRET: ${WECHAT_MP_SECRET:-}
+      WECHAT_MP_TOKEN: ${WECHAT_MP_TOKEN:-}
+      WECHAT_MP_AES_KEY: ${WECHAT_MP_AES_KEY:-}
     volumes:
       - backend_data:/data
-    ports:
-      - "3000:3000"
+    networks:
+      - zhangshi-net
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  # 管理后台（Nginx 托管静态文件）
   admin:
     build:
       context: ../admin
       dockerfile: ../docker/Dockerfile.admin
-    container_name: cyberzhang-admin
+    container_name: zhangshi-admin
     restart: unless-stopped
-    ports:
-      - "8080:80"
+    networks:
+      - zhangshi-net
 
-  # Nginx 反向代理
   nginx:
     image: nginx:alpine
-    container_name: cyberzhang-nginx
+    container_name: zhangshi-nginx
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_www:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
     depends_on:
       - backend
       - admin
+    networks:
+      - zhangshi-net
 
 volumes:
   backend_data:
+  certbot_www:
+  certbot_conf:
+
+networks:
+  zhangshi-net:
+    driver: bridge
