@@ -245,6 +245,10 @@ export const api = {
       request({ url: '/distribution/bind-referral', method: 'POST', data: { referralCode } }),
     commissions: (page = 1, pageSize = 20) =>
       request({ url: `/distribution/commissions?page=${page}&pageSize=${pageSize}` }),
+    withdrawals: (page = 1, pageSize = 20) =>
+      request({ url: `/distribution/withdrawals?page=${page}&pageSize=${pageSize}` }),
+    applyWithdrawal: (amount: number, remark?: string) =>
+      request({ url: '/distribution/withdrawals', method: 'POST', data: { amount, remark } }),
   },
 
   // AI 高考志愿分析

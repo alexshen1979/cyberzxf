@@ -45,6 +45,46 @@
       </view>
     </view>
 
+    <view class="withdraw-card" v-if="isActive">
+      <view class="section-head">
+        <text class="section-title">佣金提现</text>
+        <text class="section-action" @click="loadWithdrawals">刷新</text>
+      </view>
+      <view class="withdraw-grid">
+        <view>
+          <text class="withdraw-value">{{ formatMoney(stats.availableWithdrawalAmount || 0) }}</text>
+          <text class="withdraw-label">可提现</text>
+        </view>
+        <view>
+          <text class="withdraw-value">{{ formatMoney(stats.lockedWithdrawalAmount || 0) }}</text>
+          <text class="withdraw-label">提现中</text>
+        </view>
+        <view>
+          <text class="withdraw-value">{{ formatMoney(stats.paidWithdrawalAmount || 0) }}</text>
+          <text class="withdraw-label">已提现</text>
+        </view>
+      </view>
+      <view class="withdraw-tip">最低 {{ formatMoney(stats.minWithdrawalAmount || 1000) }} 可申请；新佣金满 {{ stats.withdrawalFreezeDays ?? 7 }} 天后可提现。</view>
+      <view class="withdraw-form">
+        <input class="withdraw-input" v-model="withdrawAmountInput" type="digit" placeholder="输入提现金额" />
+        <view class="primary-btn withdraw-btn" :class="{ disabled: withdrawing }" @click="applyWithdrawal">
+          <text>{{ withdrawing ? '提交中' : '申请提现' }}</text>
+        </view>
+      </view>
+      <view class="withdraw-actions">
+        <text @click="fillAllWithdrawal">全部提现</text>
+      </view>
+      <view class="empty-list" v-if="withdrawals.length === 0">暂无提现记录</view>
+      <view class="withdraw-item" v-for="item in withdrawals" :key="item.id">
+        <view>
+          <text class="commission-title">{{ withdrawalStatusLabel(item.status) }}</text>
+          <text class="commission-sub">{{ item.withdrawalNo }} · {{ formatDate(item.requestedAt || item.createdAt) }}</text>
+          <text class="commission-sub" v-if="item.adminRemark">{{ item.adminRemark }}</text>
+        </view>
+        <text class="commission-amount">{{ formatMoney(item.amount) }}</text>
+      </view>
+    </view>
+
     <view class="bind-card">
       <view class="section-head">
         <text class="section-title">邀请我的人</text>
@@ -128,12 +168,15 @@ import { recordShare, withShareRef } from '@/utils/share';
 const userStore = useUserStore();
 const data = ref<any>(null);
 const commissions = ref<any[]>([]);
+const withdrawals = ref<any[]>([]);
 const applying = ref(false);
+const withdrawing = ref(false);
 const qrcodeLoading = ref(false);
 const qrcodeUrl = ref('');
 const canvasQrVisible = ref(false);
 const referralCodeInput = ref('');
 const bindingReferral = ref(false);
+const withdrawAmountInput = ref('');
 
 const distributor = computed(() => data.value?.distributor || null);
 const stats = computed(() => data.value?.stats || {});
@@ -195,7 +238,7 @@ async function loadAll() {
   }
   await loadQrcode(false);
   if (isActive.value) {
-    await loadCommissions();
+    await Promise.all([loadCommissions(), loadWithdrawals()]);
   }
 }
 
@@ -251,6 +294,45 @@ async function loadCommissions() {
   if (!distributor.value || !isActive.value) return;
   const res = await api.distribution.commissions(1, 20);
   commissions.value = (res.data as any).list || [];
+}
+
+async function loadWithdrawals() {
+  if (!distributor.value || !isActive.value) return;
+  const res = await api.distribution.withdrawals(1, 20);
+  withdrawals.value = (res.data as any).list || [];
+}
+
+function fillAllWithdrawal() {
+  const amount = Number(stats.value.availableWithdrawalAmount || 0);
+  if (amount <= 0) {
+    uni.showToast({ title: '暂无可提现佣金', icon: 'none' });
+    return;
+  }
+  withdrawAmountInput.value = (amount / 100).toFixed(2);
+}
+
+async function applyWithdrawal() {
+  if (withdrawing.value) return;
+  const amount = Math.round(Number(withdrawAmountInput.value || 0) * 100);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    uni.showToast({ title: '请输入提现金额', icon: 'none' });
+    return;
+  }
+  if (amount < Number(stats.value.minWithdrawalAmount || 1000)) {
+    uni.showToast({ title: `最低${formatMoney(stats.value.minWithdrawalAmount || 1000)}可提现`, icon: 'none' });
+    return;
+  }
+  withdrawing.value = true;
+  try {
+    await api.distribution.applyWithdrawal(amount);
+    withdrawAmountInput.value = '';
+    uni.showToast({ title: '提现申请已提交', icon: 'success' });
+    await loadAll();
+  } catch (e: any) {
+    uni.showToast({ title: e.message || '申请失败', icon: 'none' });
+  } finally {
+    withdrawing.value = false;
+  }
 }
 
 async function copyShareCode() {
@@ -403,6 +485,15 @@ function commissionSourceText(item: any) {
   return `${userName} 充值 ${orderAmount}，产生分销佣金`;
 }
 
+function withdrawalStatusLabel(status: string) {
+  if (status === 'pending') return '待审核';
+  if (status === 'approved') return '已通过，待打款';
+  if (status === 'paid') return '已打款';
+  if (status === 'rejected') return '已驳回';
+  if (status === 'failed') return '打款失败';
+  return status || '-';
+}
+
 function formatMoney(value: number) {
   return `¥${(Number(value || 0) / 100).toFixed(2)}`;
 }
@@ -490,6 +581,7 @@ onShareTimeline(() => {
 .bind-card,
 .info-card,
 .qr-card,
+.withdraw-card,
 .commission-card {
   margin-top: $spacing-md;
   padding: 26rpx;
@@ -557,6 +649,73 @@ onShareTimeline(() => {
 .stat-label {
   display: block;
   margin-top: 6rpx;
+}
+
+.withdraw-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12rpx;
+}
+
+.withdraw-grid > view {
+  padding: 18rpx 10rpx;
+  border-radius: 16rpx;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.withdraw-value {
+  display: block;
+  color: #0f766e;
+  font-size: 30rpx;
+  font-weight: 900;
+}
+
+.withdraw-label,
+.withdraw-tip,
+.withdraw-actions {
+  color: $text-tertiary;
+  font-size: $font-xs;
+}
+
+.withdraw-label {
+  display: block;
+  margin-top: 6rpx;
+}
+
+.withdraw-tip {
+  margin-top: 14rpx;
+  line-height: 1.5;
+}
+
+.withdraw-form {
+  display: grid;
+  grid-template-columns: 1fr 180rpx;
+  gap: 12rpx;
+  margin-top: 18rpx;
+  align-items: center;
+}
+
+.withdraw-input {
+  height: 76rpx;
+  padding: 0 20rpx;
+  border-radius: 16rpx;
+  background: #f8fafc;
+  color: $text-primary;
+  font-size: $font-sm;
+  box-sizing: border-box;
+}
+
+.withdraw-btn {
+  height: 76rpx;
+  line-height: 76rpx;
+}
+
+.withdraw-actions {
+  margin-top: 12rpx;
+  text-align: right;
+  color: #0f766e;
+  font-weight: 800;
 }
 
 .info-row {
@@ -770,6 +929,7 @@ onShareTimeline(() => {
   font-size: $font-sm;
 }
 
+.withdraw-item,
 .commission-item {
   display: flex;
   justify-content: space-between;

@@ -105,6 +105,8 @@ router.get('/distribution/qrcode', auth, distributionCtrl.qrcode);
 router.post('/distribution/share', auth, distributionCtrl.recordShare);
 router.post('/distribution/bind-referral', auth, distributionCtrl.bindReferral);
 router.get('/distribution/commissions', auth, distributionCtrl.commissions);
+router.get('/distribution/withdrawals', auth, distributionCtrl.withdrawals);
+router.post('/distribution/withdrawals', auth, distributionCtrl.applyWithdrawal);
 
 // ─── 管理后台接口（需要 admin 权限） ─────────────────
 const admin = new Router({ prefix: '/admin' });
@@ -142,6 +144,8 @@ admin.get('/distribution/level-one', adminAuth, distributionCtrl.adminLevelOneDi
 admin.post('/distribution/distributors', adminAuth, distributionCtrl.adminCreateDistributor);
 admin.put('/distribution/distributors/:id', adminAuth, distributionCtrl.adminUpdateDistributor);
 admin.get('/distribution/commissions', adminAuth, distributionCtrl.adminCommissions);
+admin.get('/distribution/withdrawals', adminAuth, distributionCtrl.adminWithdrawals);
+admin.put('/distribution/withdrawals/:id', adminAuth, distributionCtrl.adminReviewWithdrawal);
 
 // 内容管理
 admin.get('/articles', adminAuth, articleCtrl.adminList);

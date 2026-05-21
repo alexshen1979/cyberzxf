@@ -28,6 +28,14 @@
           <el-input-number v-model="settingsForm.level2Percent" :min="0" :max="100" :precision="2" :step="1" />
           <span class="hint">%</span>
         </el-form-item>
+        <el-form-item label="最低提现">
+          <el-input-number v-model="settingsForm.minWithdrawalYuan" :min="1" :max="10000" :precision="2" :step="1" />
+          <span class="hint">元</span>
+        </el-form-item>
+        <el-form-item label="冻结天数">
+          <el-input-number v-model="settingsForm.withdrawalFreezeDays" :min="0" :max="90" :precision="0" :step="1" />
+          <span class="hint">天</span>
+        </el-form-item>
         <span class="formula">二级单成单时：二级拿 {{ settingsForm.level2Percent }}%，所属一级拿 {{ Math.max(0, settingsForm.level1Percent - settingsForm.level2Percent).toFixed(2) }}%</span>
       </el-form>
     </el-card>
@@ -156,7 +164,10 @@
       <template #header>
         <div class="card-head">
           <span>佣金流水</span>
-          <el-button @click="loadCommissions">刷新</el-button>
+          <div class="head-actions">
+            <el-button @click="loadCommissions">刷新佣金</el-button>
+            <el-button @click="loadWithdrawals">刷新提现</el-button>
+          </div>
         </div>
       </template>
       <el-table :data="commissions" v-loading="loadingCommissions" style="width: 100%">
@@ -198,6 +209,65 @@
         :page-size="commissionPageSize"
         layout="prev, pager, next"
         @current-change="loadCommissions"
+        class="pager"
+      />
+    </el-card>
+
+    <el-card class="panel-card">
+      <template #header>
+        <div class="card-head">
+          <span>提现申请</span>
+          <div class="head-actions">
+            <el-select v-model="withdrawalStatusFilter" placeholder="状态" clearable style="width: 140px" @change="loadWithdrawals">
+              <el-option label="待审核" value="pending" />
+              <el-option label="已通过" value="approved" />
+              <el-option label="已打款" value="paid" />
+              <el-option label="已驳回" value="rejected" />
+              <el-option label="打款失败" value="failed" />
+            </el-select>
+            <el-button @click="loadWithdrawals">刷新</el-button>
+          </div>
+        </div>
+      </template>
+      <el-table :data="withdrawals" v-loading="loadingWithdrawals" style="width: 100%" empty-text="暂无提现申请">
+        <el-table-column prop="withdrawalNo" label="提现单号" width="170" />
+        <el-table-column label="分销员" min-width="160">
+          <template #default="{ row }">
+            <div class="main-cell">
+              <strong>{{ row.distributor?.name || '-' }}</strong>
+              <span>{{ row.distributor?.code || '-' }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="金额" width="110">
+          <template #default="{ row }">
+            <strong>{{ formatMoney(row.amount) }}</strong>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="withdrawalTagType(row.status)" size="small">{{ withdrawalStatusLabel(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="adminRemark" label="备注" min-width="160" show-overflow-tooltip />
+        <el-table-column label="申请时间" width="170">
+          <template #default="{ row }">{{ formatTime(row.requestedAt || row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="240" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="row.status === 'pending'" type="success" link @click="reviewWithdrawal(row, 'approved')">通过</el-button>
+            <el-button v-if="row.status === 'pending'" type="danger" link @click="reviewWithdrawal(row, 'rejected')">驳回</el-button>
+            <el-button v-if="row.status === 'approved' || row.status === 'pending'" type="primary" link @click="reviewWithdrawal(row, 'paid')">标记已打款</el-button>
+            <el-button v-if="row.status === 'approved'" type="warning" link @click="reviewWithdrawal(row, 'failed')">打款失败</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-pagination
+        v-model:current-page="withdrawalPage"
+        :total="withdrawalTotal"
+        :page-size="withdrawalPageSize"
+        layout="prev, pager, next"
+        @current-change="loadWithdrawals"
         class="pager"
       />
     </el-card>
@@ -294,14 +364,19 @@
           />
         </el-tab-pane>
         <el-tab-pane label="提现流水" name="withdrawals">
-          <el-table :data="ledgerWithdrawals" style="width: 100%" empty-text="暂无提现流水">
+          <el-table :data="ledgerWithdrawals" v-loading="loadingLedgerWithdrawals" style="width: 100%" empty-text="暂无提现流水">
+            <el-table-column prop="withdrawalNo" label="提现单号" width="170" />
             <el-table-column prop="amount" label="提现金额" width="120">
               <template #default="{ row }">{{ formatMoney(row.amount || 0) }}</template>
             </el-table-column>
-            <el-table-column prop="status" label="状态" width="120" />
-            <el-table-column prop="remark" label="备注" min-width="180" />
+            <el-table-column label="状态" width="120">
+              <template #default="{ row }">
+                <el-tag :type="withdrawalTagType(row.status)" size="small">{{ withdrawalStatusLabel(row.status) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="adminRemark" label="备注" min-width="180" />
             <el-table-column label="时间" width="170">
-              <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+              <template #default="{ row }">{{ formatTime(row.requestedAt || row.createdAt) }}</template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
@@ -312,13 +387,15 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '@/api';
 
 const settingsForm = reactive({
   enabled: true,
   level1Percent: 50,
   level2Percent: 20,
+  minWithdrawalYuan: 10,
+  withdrawalFreezeDays: 7,
 });
 const savingSettings = ref(false);
 
@@ -336,6 +413,12 @@ const loadingCommissions = ref(false);
 const commissionPage = ref(1);
 const commissionPageSize = 20;
 const commissionTotal = ref(0);
+const withdrawals = ref<any[]>([]);
+const loadingWithdrawals = ref(false);
+const withdrawalPage = ref(1);
+const withdrawalPageSize = 20;
+const withdrawalTotal = ref(0);
+const withdrawalStatusFilter = ref('');
 
 const ledgerDialogVisible = ref(false);
 const ledgerDistributor = ref<any>(null);
@@ -346,6 +429,7 @@ const ledgerCommissionPage = ref(1);
 const ledgerCommissionPageSize = 10;
 const ledgerCommissionTotal = ref(0);
 const ledgerWithdrawals = ref<any[]>([]);
+const loadingLedgerWithdrawals = ref(false);
 
 const dialogVisible = ref(false);
 const savingDistributor = ref(false);
@@ -364,6 +448,8 @@ const statsCards = computed(() => [
   { label: '二级', value: dashboard.value.level2Count || 0 },
   { label: '推荐用户', value: dashboard.value.referralCount || 0 },
   { label: '佣金总额', value: formatMoney(dashboard.value.commissionAmount || 0) },
+  { label: '提现中', value: formatMoney(dashboard.value.pendingWithdrawalAmount || 0) },
+  { label: '已提现', value: formatMoney(dashboard.value.paidWithdrawalAmount || 0) },
 ]);
 
 async function loadSettings() {
@@ -372,6 +458,8 @@ async function loadSettings() {
     enabled: res.data.enabled,
     level1Percent: res.data.level1Percent,
     level2Percent: res.data.level2Percent,
+    minWithdrawalYuan: res.data.minWithdrawalYuan ?? ((res.data.minWithdrawalAmount || 1000) / 100),
+    withdrawalFreezeDays: res.data.withdrawalFreezeDays ?? 7,
   });
 }
 
@@ -386,6 +474,8 @@ async function saveSettings() {
       enabled: settingsForm.enabled,
       level1Rate: Math.round(settingsForm.level1Percent * 100),
       level2Rate: Math.round(settingsForm.level2Percent * 100),
+      minWithdrawalAmount: Math.round(settingsForm.minWithdrawalYuan * 100),
+      withdrawalFreezeDays: Math.round(settingsForm.withdrawalFreezeDays),
     });
     ElMessage.success('分销规则已保存');
     await loadSettings();
@@ -437,6 +527,21 @@ async function loadCommissions() {
   }
 }
 
+async function loadWithdrawals() {
+  loadingWithdrawals.value = true;
+  try {
+    const res = await api.distribution.withdrawals({
+      page: withdrawalPage.value,
+      pageSize: withdrawalPageSize,
+      status: withdrawalStatusFilter.value,
+    }) as any;
+    withdrawals.value = res.data.list;
+    withdrawalTotal.value = res.data.total;
+  } finally {
+    loadingWithdrawals.value = false;
+  }
+}
+
 async function openLedgerDialog(row: any) {
   ledgerDistributor.value = row;
   ledgerActiveTab.value = 'commissions';
@@ -445,7 +550,7 @@ async function openLedgerDialog(row: any) {
   ledgerCommissionTotal.value = 0;
   ledgerWithdrawals.value = [];
   ledgerDialogVisible.value = true;
-  await loadLedgerCommissions();
+  await Promise.all([loadLedgerCommissions(), loadLedgerWithdrawals()]);
 }
 
 async function loadLedgerCommissions() {
@@ -461,6 +566,21 @@ async function loadLedgerCommissions() {
     ledgerCommissionTotal.value = res.data.total;
   } finally {
     loadingLedgerCommissions.value = false;
+  }
+}
+
+async function loadLedgerWithdrawals() {
+  if (!ledgerDistributor.value?.id) return;
+  loadingLedgerWithdrawals.value = true;
+  try {
+    const res = await api.distribution.withdrawals({
+      page: 1,
+      pageSize: 50,
+      distributorId: ledgerDistributor.value.id,
+    }) as any;
+    ledgerWithdrawals.value = res.data.list;
+  } finally {
+    loadingLedgerWithdrawals.value = false;
   }
 }
 
@@ -527,6 +647,30 @@ async function reviewDistributor(row: any, status: 'active' | 'rejected') {
   }
 }
 
+async function reviewWithdrawal(row: any, status: 'approved' | 'rejected' | 'paid' | 'failed') {
+  const label = withdrawalStatusLabel(status);
+  let adminRemark = '';
+  try {
+    const result = await ElMessageBox.prompt(`请填写${label}备注，可留空`, '处理提现申请', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      inputPlaceholder: '备注',
+    });
+    adminRemark = result.value || '';
+  } catch {
+    return;
+  }
+
+  try {
+    await api.distribution.reviewWithdrawal(row.id, { status, adminRemark });
+    ElMessage.success(`已${label}`);
+    await Promise.all([loadWithdrawals(), loadDashboard()]);
+    if (ledgerDialogVisible.value) await loadLedgerWithdrawals();
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.message || '处理失败');
+  }
+}
+
 function levelLabel(level: number) {
   return level === 1 ? '一级' : '二级';
 }
@@ -552,6 +696,22 @@ function roleLabel(role: string) {
   return role;
 }
 
+function withdrawalStatusLabel(status: string) {
+  if (status === 'pending') return '待审核';
+  if (status === 'approved') return '已通过';
+  if (status === 'paid') return '已打款';
+  if (status === 'rejected') return '已驳回';
+  if (status === 'failed') return '打款失败';
+  return status || '-';
+}
+
+function withdrawalTagType(status: string) {
+  if (status === 'paid') return 'success';
+  if (status === 'pending' || status === 'approved') return 'warning';
+  if (status === 'rejected' || status === 'failed') return 'danger';
+  return 'info';
+}
+
 function formatMoney(value: number) {
   return `¥${(Number(value || 0) / 100).toFixed(2)}`;
 }
@@ -566,6 +726,7 @@ onMounted(() => {
   loadLevelOneOptions();
   loadDistributors();
   loadCommissions();
+  loadWithdrawals();
 });
 </script>
 
@@ -576,7 +737,7 @@ h2 {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 16px;
 }
@@ -604,6 +765,12 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .toolbar {

@@ -12,11 +12,14 @@ const SYSTEM_DISTRIBUTOR_ID = 'system-distributor';
 const SYSTEM_DISTRIBUTOR_CODE = 'SYSTEM';
 const DEFAULT_LEVEL1_RATE = 5000;
 const DEFAULT_LEVEL2_RATE = 2000;
+const DEFAULT_MIN_WITHDRAWAL_AMOUNT = 1000;
+const DEFAULT_WITHDRAWAL_FREEZE_DAYS = 7;
 const DAILY_SHARE_REWARD_POINTS = 10;
 const DAILY_SHARE_REWARD_SOURCE = 'daily_share_reward';
 const SHARE_REFERRAL_REWARD_POINTS = 20;
 const SHARE_REFERRAL_REWARD_SOURCE = 'share_referral_reward';
 const DIRECT_COMMISSION_ROLES = ['level1_direct', 'level2_direct'];
+const LOCKED_WITHDRAWAL_STATUSES = ['pending', 'approved'];
 
 let miniAccessTokenCache: { token: string; expiresAt: number } | null = null;
 
@@ -30,6 +33,8 @@ export async function ensureDistributionDefaults(db: any = prisma) {
         enabled: true,
         level1Rate: DEFAULT_LEVEL1_RATE,
         level2Rate: DEFAULT_LEVEL2_RATE,
+        minWithdrawalAmount: DEFAULT_MIN_WITHDRAWAL_AMOUNT,
+        withdrawalFreezeDays: DEFAULT_WITHDRAWAL_FREEZE_DAYS,
       },
     }),
     db.distributor.upsert({
@@ -344,6 +349,7 @@ export async function getMyDistribution(userId: string) {
     paidReferralCount,
     commissionTotal,
     commissionCount,
+    withdrawalSummary,
     teamReferralCount,
     shareReferralCount,
     shareRewardCount,
@@ -356,6 +362,7 @@ export async function getMyDistribution(userId: string) {
       _sum: { amount: true },
     }),
     prisma.distributionCommission.count({ where: { distributorId: distributor.id } }),
+    getDistributorWithdrawalSummary(distributor.id, setting),
     distributor.level === 1
       ? prisma.distributionReferral.count({ where: { firstLevelDistributorId: distributor.id } })
       : Promise.resolve(0),
@@ -372,7 +379,7 @@ export async function getMyDistribution(userId: string) {
       paidReferralCount,
       teamReferralCount,
       commissionCount,
-      commissionAmount: commissionTotal._sum.amount || 0,
+      ...withdrawalSummary,
       shareReferralCount,
       shareRewardCount,
     },
@@ -395,6 +402,66 @@ export async function getMyDistributionCommissions(userId: string, page = 1, pag
   });
 
   return listCommissionsByWhere({ distributorId: distributor.id }, page, pageSize);
+}
+
+export async function getMyDistributionWithdrawals(userId: string, page = 1, pageSize = 20) {
+  const distributor = await prisma.distributor.findUnique({ where: { userId } });
+  if (!distributor || distributor.status !== 'active') return { list: [], total: 0, page, pageSize };
+  return listWithdrawalsByWhere({ distributorId: distributor.id }, page, pageSize);
+}
+
+export async function applyDistributionWithdrawal(userId: string, input: Record<string, any> = {}) {
+  const { setting } = await ensureDistributionDefaults();
+  const distributor = await prisma.distributor.findUnique({
+    where: { userId },
+    include: { user: { select: { id: true, nickname: true, phone: true, miniOpenId: true, mpOpenId: true } } },
+  });
+  if (!distributor || distributor.status !== 'active') {
+    throw new AppError(403, '只有审核通过的分销员才能申请提现', 'DISTRIBUTOR_NOT_ACTIVE');
+  }
+
+  const amount = normalizeMoneyAmount(input.amount);
+  const minAmount = setting.minWithdrawalAmount || DEFAULT_MIN_WITHDRAWAL_AMOUNT;
+  if (amount < minAmount) {
+    throw new AppError(422, `提现金额不能低于 ${formatYuan(minAmount)}`, 'WITHDRAWAL_AMOUNT_TOO_LOW');
+  }
+
+  const summary = await getDistributorWithdrawalSummary(distributor.id, setting);
+  if (amount > summary.availableWithdrawalAmount) {
+    throw new AppError(422, '可提现余额不足', 'WITHDRAWAL_BALANCE_NOT_ENOUGH');
+  }
+
+  const todayStart = startOfShanghaiDay(new Date());
+  const todayCount = await prisma.distributionWithdrawal.count({
+    where: {
+      distributorId: distributor.id,
+      requestedAt: { gte: todayStart },
+    },
+  });
+  if (todayCount > 0) {
+    throw new AppError(429, '每天最多提交 1 次提现申请', 'WITHDRAWAL_DAILY_LIMIT');
+  }
+
+  const withdrawal = await prisma.distributionWithdrawal.create({
+    data: {
+      id: crypto.randomUUID(),
+      withdrawalNo: await generateWithdrawalNo(),
+      distributorId: distributor.id,
+      userId,
+      amount,
+      status: 'pending',
+      method: 'wechat_balance',
+      accountName: String(input.accountName || distributor.user?.nickname || distributor.user?.phone || distributor.name || '').trim().slice(0, 50) || null,
+      openId: distributor.user?.miniOpenId || distributor.user?.mpOpenId || null,
+      remark: String(input.remark || '').trim().slice(0, 200) || null,
+    },
+    include: withdrawalInclude(),
+  });
+
+  return {
+    withdrawal,
+    summary: await getDistributorWithdrawalSummary(distributor.id, setting),
+  };
 }
 
 export async function getMyDistributionQrCode(userId: string) {
@@ -930,8 +997,13 @@ export async function getDistributionSettingsForAdmin() {
 export async function updateDistributionSettingsForAdmin(input: Record<string, any>) {
   const level1Rate = normalizeRateBps(input.level1Rate);
   const level2Rate = normalizeRateBps(input.level2Rate);
+  const minWithdrawalAmount = normalizeMoneyAmount(input.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT, true);
+  const withdrawalFreezeDays = normalizeFreezeDays(input.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS);
   if (level1Rate < level2Rate) {
     throw new AppError(422, '一级分销比例不能低于二级分销比例', 'DISTRIBUTION_RATE_INVALID');
+  }
+  if (minWithdrawalAmount < 100) {
+    throw new AppError(422, '最低提现金额不能低于 1 元', 'WITHDRAWAL_MIN_AMOUNT_INVALID');
   }
 
   const setting = await prisma.distributionSetting.upsert({
@@ -940,12 +1012,16 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
       enabled: input.enabled !== false,
       level1Rate,
       level2Rate,
+      minWithdrawalAmount,
+      withdrawalFreezeDays,
     },
     create: {
       id: 'default',
       enabled: input.enabled !== false,
       level1Rate,
       level2Rate,
+      minWithdrawalAmount,
+      withdrawalFreezeDays,
     },
   });
   return formatDistributionSetting(setting);
@@ -960,6 +1036,8 @@ export async function getDistributionDashboardForAdmin() {
     referralCount,
     commissionCount,
     commissionTotal,
+    withdrawalTotal,
+    withdrawalPendingTotal,
   ] = await Promise.all([
     prisma.distributor.count({ where: { code: { not: SYSTEM_DISTRIBUTOR_CODE } } }),
     prisma.distributor.count({ where: { level: 1, code: { not: SYSTEM_DISTRIBUTOR_CODE } } }),
@@ -967,6 +1045,8 @@ export async function getDistributionDashboardForAdmin() {
     prisma.distributionReferral.count(),
     prisma.distributionCommission.count({ where: realDistributorCommissionWhere() }),
     prisma.distributionCommission.aggregate({ where: realDistributorCommissionWhere(), _sum: { amount: true } }),
+    prisma.distributionWithdrawal.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
+    prisma.distributionWithdrawal.aggregate({ where: { status: { in: ['pending', 'approved'] } }, _sum: { amount: true } }),
   ]);
 
   return {
@@ -976,6 +1056,8 @@ export async function getDistributionDashboardForAdmin() {
     referralCount,
     commissionCount,
     commissionAmount: commissionTotal._sum.amount || 0,
+    paidWithdrawalAmount: withdrawalTotal._sum.amount || 0,
+    pendingWithdrawalAmount: withdrawalPendingTotal._sum.amount || 0,
   };
 }
 
@@ -1192,6 +1274,53 @@ export async function listCommissionsForAdmin(params: Record<string, any>) {
   return listCommissionsByWhere(where, page, pageSize);
 }
 
+export async function listWithdrawalsForAdmin(params: Record<string, any>) {
+  const page = Math.max(1, parseInt(params.page || '1', 10));
+  const pageSize = Math.min(100, Math.max(1, parseInt(params.pageSize || '20', 10)));
+  const where: any = {};
+  if (params.distributorId) where.distributorId = String(params.distributorId);
+  if (params.status) where.status = String(params.status);
+  return listWithdrawalsByWhere(where, page, pageSize);
+}
+
+export async function reviewWithdrawalForAdmin(id: string, input: Record<string, any>) {
+  const status = normalizeWithdrawalStatus(input.status);
+  const withdrawal = await prisma.distributionWithdrawal.findUnique({
+    where: { id },
+    include: { distributor: true },
+  });
+  if (!withdrawal) throw new AppError(404, '提现申请不存在', 'WITHDRAWAL_NOT_FOUND');
+
+  if (withdrawal.status === 'paid') {
+    throw new AppError(409, '已打款的提现不能重复处理', 'WITHDRAWAL_ALREADY_PAID');
+  }
+
+  const now = new Date();
+  const data: any = {
+    status,
+    adminRemark: String(input.adminRemark || '').trim().slice(0, 200) || null,
+  };
+  if (status === 'approved') data.reviewedAt = withdrawal.reviewedAt || now;
+  if (status === 'rejected') data.reviewedAt = now;
+  if (status === 'paid') {
+    data.reviewedAt = withdrawal.reviewedAt || now;
+    data.paidAt = now;
+    data.transferNo = String(input.transferNo || withdrawal.transferNo || '').trim().slice(0, 100) || null;
+  }
+  if (status === 'failed') data.failedAt = now;
+
+  const updated = await prisma.distributionWithdrawal.update({
+    where: { id },
+    data,
+    include: withdrawalInclude(),
+  });
+
+  return {
+    withdrawal: updated,
+    summary: await getDistributorWithdrawalSummary(updated.distributorId),
+  };
+}
+
 function realDistributorCommissionWhere() {
   return { distributor: { code: { not: SYSTEM_DISTRIBUTOR_CODE } } };
 }
@@ -1305,6 +1434,93 @@ async function listCommissionsByWhere(where: any, page: number, pageSize: number
   };
 }
 
+async function listWithdrawalsByWhere(where: any, page: number, pageSize: number) {
+  const [list, total] = await Promise.all([
+    prisma.distributionWithdrawal.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: withdrawalInclude(),
+    }),
+    prisma.distributionWithdrawal.count({ where }),
+  ]);
+
+  return { list, total, page, pageSize };
+}
+
+function withdrawalInclude() {
+  return {
+    distributor: {
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        level: true,
+        user: { select: { id: true, nickname: true, phone: true, miniOpenId: true, mpOpenId: true } },
+      },
+    },
+  };
+}
+
+async function getDistributorWithdrawalSummary(distributorId: string, setting?: any) {
+  const currentSetting = setting || (await ensureDistributionDefaults()).setting;
+  const freezeDays = currentSetting.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS;
+  const availableBefore = new Date();
+  availableBefore.setDate(availableBefore.getDate() - freezeDays);
+
+  const [
+    commissionTotal,
+    availableCommissionTotal,
+    pendingWithdrawalTotal,
+    paidWithdrawalTotal,
+  ] = await Promise.all([
+    prisma.distributionCommission.aggregate({
+      where: { distributorId },
+      _sum: { amount: true },
+    }),
+    prisma.distributionCommission.aggregate({
+      where: {
+        distributorId,
+        createdAt: { lte: availableBefore },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.distributionWithdrawal.aggregate({
+      where: {
+        distributorId,
+        status: { in: LOCKED_WITHDRAWAL_STATUSES },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.distributionWithdrawal.aggregate({
+      where: {
+        distributorId,
+        status: 'paid',
+      },
+      _sum: { amount: true },
+    }),
+  ]);
+
+  const commissionAmount = commissionTotal._sum.amount || 0;
+  const settledCommissionAmount = availableCommissionTotal._sum.amount || 0;
+  const lockedWithdrawalAmount = pendingWithdrawalTotal._sum.amount || 0;
+  const paidWithdrawalAmount = paidWithdrawalTotal._sum.amount || 0;
+  const availableWithdrawalAmount = Math.max(0, settledCommissionAmount - lockedWithdrawalAmount - paidWithdrawalAmount);
+  const frozenCommissionAmount = Math.max(0, commissionAmount - settledCommissionAmount);
+
+  return {
+    commissionAmount,
+    settledCommissionAmount,
+    frozenCommissionAmount,
+    availableWithdrawalAmount,
+    lockedWithdrawalAmount,
+    paidWithdrawalAmount,
+    minWithdrawalAmount: currentSetting.minWithdrawalAmount || DEFAULT_MIN_WITHDRAWAL_AMOUNT,
+    withdrawalFreezeDays: freezeDays,
+  };
+}
+
 async function resolveLevel2ParentId(parentId?: string) {
   const { system } = await ensureDistributionDefaults();
   const id = String(parentId || system.id).trim();
@@ -1335,6 +1551,15 @@ async function generateUserShareCode(userId: string, db: any = prisma) {
     index += 1;
   }
   return code;
+}
+
+async function generateWithdrawalNo() {
+  const date = formatShanghaiDate(new Date()).replace(/-/g, '');
+  let withdrawalNo = '';
+  do {
+    withdrawalNo = `WD${date}${crypto.randomInt(100000, 999999)}`;
+  } while (await prisma.distributionWithdrawal.findUnique({ where: { withdrawalNo }, select: { id: true } }));
+  return withdrawalNo;
 }
 
 async function isShareOrDistributorCodeTaken(code: string, db: any = prisma) {
@@ -1381,6 +1606,11 @@ function formatShanghaiDate(date: Date) {
   }).format(date);
 }
 
+function startOfShanghaiDay(date: Date) {
+  const dateText = formatShanghaiDate(date);
+  return new Date(`${dateText}T00:00:00+08:00`);
+}
+
 function normalizeDistributorLevel(value: any) {
   const level = Number(value);
   if (level !== 1 && level !== 2) {
@@ -1403,13 +1633,42 @@ function normalizeRateBps(value: any) {
   return rate;
 }
 
+function normalizeMoneyAmount(value: any, allowZero = false) {
+  const amount = Math.round(Number(value));
+  if (!Number.isFinite(amount) || amount < (allowZero ? 0 : 1)) {
+    throw new AppError(422, '金额格式不正确', 'MONEY_AMOUNT_INVALID');
+  }
+  return amount;
+}
+
+function formatYuan(amount: number) {
+  return `${(Number(amount || 0) / 100).toFixed(2)} 元`;
+}
+
+function normalizeFreezeDays(value: any) {
+  const days = Math.round(Number(value));
+  if (!Number.isFinite(days) || days < 0 || days > 90) {
+    throw new AppError(422, '冻结天数必须在 0 到 90 天之间', 'WITHDRAWAL_FREEZE_DAYS_INVALID');
+  }
+  return days;
+}
+
+function normalizeWithdrawalStatus(value: any) {
+  const status = String(value || '').trim();
+  if (['approved', 'rejected', 'paid', 'failed'].includes(status)) return status;
+  throw new AppError(422, '提现状态不正确', 'WITHDRAWAL_STATUS_INVALID');
+}
+
 function formatDistributionSetting(setting: any) {
   return {
     enabled: setting.enabled,
     level1Rate: setting.level1Rate,
     level2Rate: setting.level2Rate,
+    minWithdrawalAmount: setting.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT,
+    withdrawalFreezeDays: setting.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS,
     level1Percent: setting.level1Rate / 100,
     level2Percent: setting.level2Rate / 100,
+    minWithdrawalYuan: (setting.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT) / 100,
   };
 }
 
@@ -1420,6 +1679,13 @@ function emptyDistributionStats() {
     teamReferralCount: 0,
     commissionCount: 0,
     commissionAmount: 0,
+    settledCommissionAmount: 0,
+    frozenCommissionAmount: 0,
+    availableWithdrawalAmount: 0,
+    lockedWithdrawalAmount: 0,
+    paidWithdrawalAmount: 0,
+    minWithdrawalAmount: DEFAULT_MIN_WITHDRAWAL_AMOUNT,
+    withdrawalFreezeDays: DEFAULT_WITHDRAWAL_FREEZE_DAYS,
     shareReferralCount: 0,
     shareRewardCount: 0,
   };

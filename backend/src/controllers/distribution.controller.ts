@@ -1,6 +1,7 @@
 import { Context } from 'koa';
 import {
   applyDistributor,
+  applyDistributionWithdrawal,
   bindShareReferral,
   createDistributorForAdmin,
   getDistributionDashboardForAdmin,
@@ -8,11 +9,14 @@ import {
   getMyDistribution,
   getMyDistributionCommissions,
   getMyDistributionQrCode,
+  getMyDistributionWithdrawals,
   listCommissionsForAdmin,
   listDistributorsForAdmin,
   listDistributorTreeForAdmin,
   listLevelOneDistributorsForAdmin,
+  listWithdrawalsForAdmin,
   recordUserShare,
+  reviewWithdrawalForAdmin,
   updateDistributionSettingsForAdmin,
   updateDistributorForAdmin,
 } from '../services/distribution.service';
@@ -50,6 +54,18 @@ export async function commissions(ctx: Context) {
   ctx.body = { success: true, data: await getMyDistributionCommissions(userId, page, pageSize) };
 }
 
+export async function withdrawals(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  const page = parseInt((ctx.query.page as string) || '1', 10);
+  const pageSize = parseInt((ctx.query.pageSize as string) || '20', 10);
+  ctx.body = { success: true, data: await getMyDistributionWithdrawals(userId, page, pageSize) };
+}
+
+export async function applyWithdrawal(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  ctx.body = { success: true, data: await applyDistributionWithdrawal(userId, ctx.request.body as Record<string, any>) };
+}
+
 export async function adminSettings(ctx: Context) {
   ctx.body = { success: true, data: await getDistributionSettingsForAdmin() };
 }
@@ -84,4 +100,12 @@ export async function adminUpdateDistributor(ctx: Context) {
 
 export async function adminCommissions(ctx: Context) {
   ctx.body = { success: true, data: await listCommissionsForAdmin(ctx.query as Record<string, any>) };
+}
+
+export async function adminWithdrawals(ctx: Context) {
+  ctx.body = { success: true, data: await listWithdrawalsForAdmin(ctx.query as Record<string, any>) };
+}
+
+export async function adminReviewWithdrawal(ctx: Context) {
+  ctx.body = { success: true, data: await reviewWithdrawalForAdmin(ctx.params.id, ctx.request.body as Record<string, any>) };
 }

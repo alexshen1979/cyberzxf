@@ -65,6 +65,8 @@ export const api = {
     createDistributor: (data: any) => http.post('/admin/distribution/distributors', data),
     updateDistributor: (id: string, data: any) => http.put(`/admin/distribution/distributors/${id}`, data),
     commissions: (params?: any) => http.get('/admin/distribution/commissions', { params }),
+    withdrawals: (params?: any) => http.get('/admin/distribution/withdrawals', { params }),
+    reviewWithdrawal: (id: string, data: any) => http.put(`/admin/distribution/withdrawals/${id}`, data),
   },
   articles: {
     list: (params?: any) => http.get('/admin/articles', { params }),
