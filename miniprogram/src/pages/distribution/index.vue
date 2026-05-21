@@ -45,46 +45,6 @@
       </view>
     </view>
 
-    <view class="withdraw-card" v-if="isActive">
-      <view class="section-head">
-        <text class="section-title">佣金提现</text>
-        <text class="section-action" @click="loadWithdrawals">刷新</text>
-      </view>
-      <view class="withdraw-grid">
-        <view>
-          <text class="withdraw-value">{{ formatMoney(stats.availableWithdrawalAmount || 0) }}</text>
-          <text class="withdraw-label">可提现</text>
-        </view>
-        <view>
-          <text class="withdraw-value">{{ formatMoney(stats.lockedWithdrawalAmount || 0) }}</text>
-          <text class="withdraw-label">提现中</text>
-        </view>
-        <view>
-          <text class="withdraw-value">{{ formatMoney(stats.paidWithdrawalAmount || 0) }}</text>
-          <text class="withdraw-label">已提现</text>
-        </view>
-      </view>
-      <view class="withdraw-tip">最低 {{ formatMoney(stats.minWithdrawalAmount || 1000) }} 可申请；新佣金满 {{ stats.withdrawalFreezeDays ?? 7 }} 天后可提现。</view>
-      <view class="withdraw-form">
-        <input class="withdraw-input" v-model="withdrawAmountInput" type="digit" placeholder="输入提现金额" />
-        <view class="primary-btn withdraw-btn" :class="{ disabled: withdrawing }" @click="applyWithdrawal">
-          <text>{{ withdrawing ? '提交中' : '申请提现' }}</text>
-        </view>
-      </view>
-      <view class="withdraw-actions">
-        <text @click="fillAllWithdrawal">全部提现</text>
-      </view>
-      <view class="empty-list" v-if="withdrawals.length === 0">暂无提现记录</view>
-      <view class="withdraw-item" v-for="item in withdrawals" :key="item.id">
-        <view>
-          <text class="commission-title">{{ withdrawalStatusLabel(item.status) }}</text>
-          <text class="commission-sub">{{ item.withdrawalNo }} · {{ formatDate(item.requestedAt || item.createdAt) }}</text>
-          <text class="commission-sub" v-if="item.adminRemark">{{ item.adminRemark }}</text>
-        </view>
-        <text class="commission-amount">{{ formatMoney(item.amount) }}</text>
-      </view>
-    </view>
-
     <view class="bind-card">
       <view class="section-head">
         <text class="section-title">邀请我的人</text>
@@ -137,6 +97,45 @@
       <view class="status-card pending" v-if="isPending">
         <text class="empty-title">申请已提交，等待后台审核</text>
         <text class="empty-desc">邀请码仍可正常追踪和领取每日分享点数；审核通过后，符合规则的首单才会产生分销佣金。</text>
+      </view>
+      <view class="withdraw-card" v-if="isActive">
+        <view class="section-head">
+          <text class="section-title">佣金提现</text>
+          <text class="section-action" @click="loadWithdrawals">刷新</text>
+        </view>
+        <view class="withdraw-grid">
+          <view>
+            <text class="withdraw-value">{{ formatMoney(stats.availableWithdrawalAmount || 0) }}</text>
+            <text class="withdraw-label">可提现</text>
+          </view>
+          <view>
+            <text class="withdraw-value">{{ formatMoney(stats.lockedWithdrawalAmount || 0) }}</text>
+            <text class="withdraw-label">提现中</text>
+          </view>
+          <view>
+            <text class="withdraw-value">{{ formatMoney(stats.paidWithdrawalAmount || 0) }}</text>
+            <text class="withdraw-label">已提现</text>
+          </view>
+        </view>
+        <view class="withdraw-tip">最低 {{ formatMoney(stats.minWithdrawalAmount || 1000) }} 可申请；新佣金满 {{ stats.withdrawalFreezeDays ?? 7 }} 天后可提现。</view>
+        <view class="withdraw-form">
+          <input class="withdraw-input" v-model="withdrawAmountInput" type="digit" placeholder="输入提现金额" />
+          <view class="primary-btn withdraw-btn" :class="{ disabled: withdrawing }" @click="applyWithdrawal">
+            <text>{{ withdrawing ? '提交中' : '申请提现' }}</text>
+          </view>
+        </view>
+        <view class="withdraw-actions">
+          <text @click="fillAllWithdrawal">全部提现</text>
+        </view>
+        <view class="empty-list" v-if="withdrawals.length === 0">暂无提现记录</view>
+        <view class="withdraw-item" v-for="item in withdrawals" :key="item.id">
+          <view>
+            <text class="commission-title">{{ withdrawalStatusLabel(item.status) }}</text>
+            <text class="commission-sub">{{ item.withdrawalNo }} · {{ formatDate(item.requestedAt || item.createdAt) }}</text>
+            <text class="commission-sub" v-if="item.adminRemark">{{ item.adminRemark }}</text>
+          </view>
+          <text class="commission-amount">{{ formatMoney(item.amount) }}</text>
+        </view>
       </view>
       <view class="commission-card" v-if="isActive">
         <view class="section-head">
