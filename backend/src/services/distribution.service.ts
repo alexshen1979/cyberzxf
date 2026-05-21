@@ -1069,7 +1069,10 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
 }
 
 export async function getDistributionDashboardForAdmin() {
-  await ensureDistributionDefaults();
+  const { setting } = await ensureDistributionDefaults();
+  const freezeDays = setting.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS;
+  const availableBefore = new Date();
+  availableBefore.setDate(availableBefore.getDate() - freezeDays);
   const [
     distributorCount,
     level1Count,
@@ -1077,6 +1080,7 @@ export async function getDistributionDashboardForAdmin() {
     referralCount,
     commissionCount,
     commissionTotal,
+    settledCommissionTotal,
     withdrawalTotal,
     withdrawalPendingTotal,
   ] = await Promise.all([
@@ -1086,9 +1090,18 @@ export async function getDistributionDashboardForAdmin() {
     prisma.distributionReferral.count(),
     prisma.distributionCommission.count({ where: realDistributorCommissionWhere() }),
     prisma.distributionCommission.aggregate({ where: realDistributorCommissionWhere(), _sum: { amount: true } }),
+    prisma.distributionCommission.aggregate({
+      where: {
+        ...realDistributorCommissionWhere(),
+        createdAt: { lte: availableBefore },
+      },
+      _sum: { amount: true },
+    }),
     prisma.distributionWithdrawal.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
     prisma.distributionWithdrawal.aggregate({ where: { status: { in: ['pending', 'approved'] } }, _sum: { amount: true } }),
   ]);
+  const commissionAmount = commissionTotal._sum.amount || 0;
+  const settledCommissionAmount = settledCommissionTotal._sum.amount || 0;
 
   return {
     distributorCount,
@@ -1096,9 +1109,12 @@ export async function getDistributionDashboardForAdmin() {
     level2Count,
     referralCount,
     commissionCount,
-    commissionAmount: commissionTotal._sum.amount || 0,
+    commissionAmount,
+    settledCommissionAmount,
+    frozenCommissionAmount: Math.max(0, commissionAmount - settledCommissionAmount),
     paidWithdrawalAmount: withdrawalTotal._sum.amount || 0,
     pendingWithdrawalAmount: withdrawalPendingTotal._sum.amount || 0,
+    withdrawalFreezeDays: freezeDays,
   };
 }
 

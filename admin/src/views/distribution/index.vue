@@ -2,10 +2,34 @@
   <div class="distribution-page">
     <h2>推荐合作</h2>
 
-    <div class="stat-grid">
-      <el-card v-for="item in statsCards" :key="item.label" class="stat-card">
-        <span class="stat-label">{{ item.label }}</span>
+    <div class="stat-overview">
+      <el-card class="stat-card people-stat-card">
+        <div class="stat-card-head">
+          <span class="stat-label">合作人员</span>
+          <span class="stat-note">特邀合作伙伴 + 涨识推荐官</span>
+        </div>
+        <strong>{{ dashboard.distributorCount || 0 }}</strong>
+        <div class="people-breakdown">
+          <div>
+            <span>特邀合作伙伴</span>
+            <strong>{{ dashboard.level1Count || 0 }}</strong>
+          </div>
+          <span class="people-plus">+</span>
+          <div>
+            <span>涨识推荐官</span>
+            <strong>{{ dashboard.level2Count || 0 }}</strong>
+          </div>
+        </div>
+      </el-card>
+      <el-card v-for="item in metricCards" :key="item.label" class="stat-card">
+        <div class="stat-card-head">
+          <span class="stat-label">{{ item.label }}</span>
+          <el-tooltip v-if="item.tip" :content="item.tip" placement="top">
+            <el-icon class="stat-help"><QuestionFilled /></el-icon>
+          </el-tooltip>
+        </div>
         <strong>{{ item.value }}</strong>
+        <span v-if="item.note" class="stat-note">{{ item.note }}</span>
       </el-card>
     </div>
 
@@ -85,7 +109,7 @@
                   </template>
                 </el-table-column>
                 <el-table-column prop="code" label="邀请码" width="130" />
-                <el-table-column label="推荐用户" width="100">
+                <el-table-column label="合作推荐用户" width="120">
                   <template #default="{ row: child }">{{ child._count?.referrals || 0 }}</template>
                 </el-table-column>
                 <el-table-column label="奖励单" width="90">
@@ -128,7 +152,7 @@
         <el-table-column label="所属特邀伙伴" min-width="150">
           <template #default>--</template>
         </el-table-column>
-        <el-table-column label="推荐用户" width="100">
+        <el-table-column label="合作推荐用户" width="120">
           <template #default="{ row }">{{ row._count?.referrals || 0 }}</template>
         </el-table-column>
         <el-table-column label="推荐官" width="100">
@@ -400,6 +424,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { QuestionFilled } from '@element-plus/icons-vue';
 import { api } from '@/api';
 
 const settingsForm = reactive({
@@ -457,12 +482,18 @@ const distributorForm = reactive({
   newUserGiftOverride: null as number | null,
 });
 
-const statsCards = computed(() => [
-  { label: '合作人员', value: dashboard.value.distributorCount || 0 },
-  { label: '特邀伙伴', value: dashboard.value.level1Count || 0 },
-  { label: '推荐官', value: dashboard.value.level2Count || 0 },
-  { label: '推荐用户', value: dashboard.value.referralCount || 0 },
+const metricCards = computed(() => [
+  {
+    label: '合作推荐用户',
+    value: dashboard.value.referralCount || 0,
+    tip: '通过特邀合作伙伴或涨识推荐官邀请码建立推荐合作关系的用户，不包含普通邀请注册。',
+  },
   { label: '奖励总额', value: formatMoney(dashboard.value.commissionAmount || 0) },
+  {
+    label: '待结算',
+    value: formatMoney(dashboard.value.frozenCommissionAmount || 0),
+    note: `未满 ${dashboard.value.withdrawalFreezeDays ?? settingsForm.withdrawalFreezeDays} 天冻结期`,
+  },
   { label: '提现中', value: formatMoney(dashboard.value.pendingWithdrawalAmount || 0) },
   { label: '已提现', value: formatMoney(dashboard.value.paidWithdrawalAmount || 0) },
 ]);
@@ -757,7 +788,7 @@ h2 {
   margin-bottom: 20px;
 }
 
-.stat-grid {
+.stat-overview {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 14px;
@@ -765,15 +796,88 @@ h2 {
 }
 
 .stat-card {
+  min-width: 0;
+  min-height: 118px;
+
   .stat-label {
-    display: block;
     color: var(--el-text-color-secondary);
     font-size: 13px;
-    margin-bottom: 8px;
   }
 
   strong {
     font-size: 22px;
+  }
+}
+
+.people-stat-card {
+  grid-column: span 2;
+}
+
+.stat-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stat-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.stat-help {
+  color: var(--el-text-color-secondary);
+  cursor: help;
+}
+
+.people-breakdown {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color-lighter);
+
+  div {
+    flex: 1;
+    min-width: 0;
+  }
+
+  span {
+    display: block;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+
+  strong {
+    display: block;
+    margin-top: 4px;
+    font-size: 18px;
+  }
+}
+
+.people-plus {
+  flex: none;
+  color: var(--el-text-color-placeholder);
+}
+
+@media (max-width: 1280px) {
+  .stat-overview {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .stat-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .people-stat-card {
+    grid-column: span 2;
   }
 }
 
