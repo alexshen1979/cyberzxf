@@ -1,5 +1,5 @@
 import Router from '@koa/router';
-import { auth, optionalAuth, adminAuth } from '../middleware/auth';
+import { auth, optionalAuth, adminAuth, adminContentAuth } from '../middleware/auth';
 import * as authCtrl from '../controllers/auth.controller';
 import * as aiCtrl from '../controllers/ai.controller';
 import * as pointsCtrl from '../controllers/points.controller';
@@ -154,23 +154,23 @@ admin.put('/articles/:id', adminAuth, articleCtrl.update);
 admin.delete('/articles/:id', adminAuth, articleCtrl.remove);
 
 // 快捷提问管理
-admin.get('/quick-questions', adminAuth, adminCtrl.getQuickQuestions);
-admin.post('/quick-questions', adminAuth, adminCtrl.createQuickQuestion);
-admin.put('/quick-questions/:id', adminAuth, adminCtrl.updateQuickQuestion);
-admin.delete('/quick-questions/:id', adminAuth, adminCtrl.deleteQuickQuestion);
+admin.get('/quick-questions', adminContentAuth, adminCtrl.getQuickQuestions);
+admin.post('/quick-questions', adminContentAuth, adminCtrl.createQuickQuestion);
+admin.put('/quick-questions/:id', adminContentAuth, adminCtrl.updateQuickQuestion);
+admin.delete('/quick-questions/:id', adminContentAuth, adminCtrl.deleteQuickQuestion);
 
 // 自动回复规则管理
-admin.get('/auto-reply', adminAuth, adminCtrl.getAutoReplyRules);
-admin.post('/auto-reply', adminAuth, adminCtrl.createAutoReplyRule);
-admin.put('/auto-reply/:id', adminAuth, adminCtrl.updateAutoReplyRule);
-admin.delete('/auto-reply/:id', adminAuth, adminCtrl.deleteAutoReplyRule);
+admin.get('/auto-reply', adminContentAuth, adminCtrl.getAutoReplyRules);
+admin.post('/auto-reply', adminContentAuth, adminCtrl.createAutoReplyRule);
+admin.put('/auto-reply/:id', adminContentAuth, adminCtrl.updateAutoReplyRule);
+admin.delete('/auto-reply/:id', adminContentAuth, adminCtrl.deleteAutoReplyRule);
 
 // 知识库管理
-admin.get('/knowledge', adminAuth, knowledgeCtrl.adminList);
-admin.get('/knowledge/:id', adminAuth, knowledgeCtrl.adminDetail);
-admin.post('/knowledge', adminAuth, knowledgeCtrl.create);
-admin.put('/knowledge/:id', adminAuth, knowledgeCtrl.update);
-admin.delete('/knowledge/:id', adminAuth, knowledgeCtrl.remove);
+admin.get('/knowledge', adminContentAuth, knowledgeCtrl.adminList);
+admin.get('/knowledge/:id', adminContentAuth, knowledgeCtrl.adminDetail);
+admin.post('/knowledge', adminContentAuth, knowledgeCtrl.create);
+admin.put('/knowledge/:id', adminContentAuth, knowledgeCtrl.update);
+admin.delete('/knowledge/:id', adminContentAuth, knowledgeCtrl.remove);
 
 // AI 配置
 admin.get('/ai-config', adminAuth, adminCtrl.getAiConfig);
@@ -198,22 +198,25 @@ admin.get('/export/orders', adminAuth, adminCtrl.exportOrders);
 admin.get('/export/consultations', adminAuth, adminCtrl.exportConsultations);
 
 // 公众号菜单管理
-admin.get('/wechat-menu', adminAuth, adminCtrl.getWechatMenu);
-admin.post('/wechat-menu/sync', adminAuth, adminCtrl.syncWechatMenu);
+admin.get('/wechat-menu', adminContentAuth, adminCtrl.getWechatMenu);
+admin.post('/wechat-menu/sync', adminContentAuth, adminCtrl.syncWechatMenu);
 
 // 管理员账号
 admin.post('/admins/login', adminCtrl.adminLogin);
 admin.post('/admins', adminAuth, adminCtrl.createAdmin);
+admin.get('/admins', adminAuth, adminCtrl.listAdmins);
+admin.put('/admins/:id', adminAuth, adminCtrl.updateAdmin);
+admin.delete('/admins/:id', adminAuth, adminCtrl.deleteAdmin);
 
 // 院校库管理
-admin.get('/universities', adminAuth, uniCtrl.adminList);
-admin.post('/universities', adminAuth, uniCtrl.create);
-admin.put('/universities/:id', adminAuth, uniCtrl.update);
-admin.delete('/universities/:id', adminAuth, uniCtrl.remove);
+admin.get('/universities', adminContentAuth, uniCtrl.adminList);
+admin.post('/universities', adminContentAuth, uniCtrl.create);
+admin.put('/universities/:id', adminContentAuth, uniCtrl.update);
+admin.delete('/universities/:id', adminContentAuth, uniCtrl.remove);
 
 // 省市区域管理
 admin.get('/regions', adminAuth, regionCtrl.adminList);
-admin.get('/regions/tree', adminAuth, regionCtrl.adminTree);
+admin.get('/regions/tree', adminContentAuth, regionCtrl.adminTree);
 admin.post('/regions/sync-universities', adminAuth, regionCtrl.syncFromUniversities);
 admin.post('/regions', adminAuth, regionCtrl.create);
 admin.put('/regions/:id', adminAuth, regionCtrl.update);
@@ -226,7 +229,7 @@ admin.post('/score-ranks', adminAuth, volunteerCtrl.createScoreRank);
 admin.post('/score-ranks/import', adminAuth, volunteerCtrl.importScoreRanks);
 admin.put('/score-ranks/:id', adminAuth, volunteerCtrl.updateScoreRank);
 admin.delete('/score-ranks/:id', adminAuth, volunteerCtrl.deleteScoreRank);
-admin.get('/admission-scores', adminAuth, volunteerCtrl.adminAdmissionScores);
+admin.get('/admission-scores', adminContentAuth, volunteerCtrl.adminAdmissionScores);
 admin.get('/admission-scores/auto-fill/status', adminAuth, volunteerCtrl.admissionAutoFillStatus);
 admin.post('/admission-scores/auto-fill/start', adminAuth, volunteerCtrl.startAdmissionAutoFillTask);
 admin.post('/admission-scores/auto-fill/stop', adminAuth, volunteerCtrl.stopAdmissionAutoFillTask);
@@ -244,28 +247,28 @@ admin.post('/art-admission-scores', adminAuth, volunteerCtrl.createArtAdmissionS
 admin.post('/art-admission-scores/import', adminAuth, volunteerCtrl.importArtAdmissionScores);
 admin.put('/art-admission-scores/:id', adminAuth, volunteerCtrl.updateArtAdmissionScore);
 admin.delete('/art-admission-scores/:id', adminAuth, volunteerCtrl.deleteArtAdmissionScore);
-admin.get('/majors', adminAuth, volunteerCtrl.adminMajors);
-admin.post('/majors', adminAuth, volunteerCtrl.createMajor);
-admin.post('/majors/import', adminAuth, volunteerCtrl.importMajors);
-admin.put('/majors/:id', adminAuth, volunteerCtrl.updateMajor);
-admin.delete('/majors/:id', adminAuth, volunteerCtrl.deleteMajor);
-admin.get('/university-majors', adminAuth, volunteerCtrl.adminUniversityMajors);
-admin.post('/university-majors', adminAuth, volunteerCtrl.createUniversityMajor);
-admin.post('/university-majors/import', adminAuth, volunteerCtrl.importUniversityMajors);
-admin.put('/university-majors/:id', adminAuth, volunteerCtrl.updateUniversityMajor);
-admin.delete('/university-majors/:id', adminAuth, volunteerCtrl.deleteUniversityMajor);
+admin.get('/majors', adminContentAuth, volunteerCtrl.adminMajors);
+admin.post('/majors', adminContentAuth, volunteerCtrl.createMajor);
+admin.post('/majors/import', adminContentAuth, volunteerCtrl.importMajors);
+admin.put('/majors/:id', adminContentAuth, volunteerCtrl.updateMajor);
+admin.delete('/majors/:id', adminContentAuth, volunteerCtrl.deleteMajor);
+admin.get('/university-majors', adminContentAuth, volunteerCtrl.adminUniversityMajors);
+admin.post('/university-majors', adminContentAuth, volunteerCtrl.createUniversityMajor);
+admin.post('/university-majors/import', adminContentAuth, volunteerCtrl.importUniversityMajors);
+admin.put('/university-majors/:id', adminContentAuth, volunteerCtrl.updateUniversityMajor);
+admin.delete('/university-majors/:id', adminContentAuth, volunteerCtrl.deleteUniversityMajor);
 
 // 分类管理
-admin.get('/categories', adminAuth, categoryCtrl.adminList);
+admin.get('/categories', adminContentAuth, categoryCtrl.adminList);
 admin.post('/categories', adminAuth, categoryCtrl.create);
 admin.put('/categories/set-default/:id', adminAuth, categoryCtrl.setDefault);
 admin.put('/categories/:id', adminAuth, categoryCtrl.update);
 admin.delete('/categories/:id', adminAuth, categoryCtrl.remove);
 
 // 全网搜索智能添加
-admin.post('/web-search', adminAuth, webScrapeCtrl.webSearch);
-admin.post('/web-scrape', adminAuth, webScrapeCtrl.webScrape);
-admin.post('/web-polish', adminAuth, webScrapeCtrl.webPolish);
+admin.post('/web-search', adminContentAuth, webScrapeCtrl.webSearch);
+admin.post('/web-scrape', adminContentAuth, webScrapeCtrl.webScrape);
+admin.post('/web-polish', adminContentAuth, webScrapeCtrl.webPolish);
 
 router.use(admin.routes());
 

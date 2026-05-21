@@ -29,18 +29,7 @@ export async function auth(ctx: Context, next: Next) {
 
 // 仅管理端鉴权
 export async function adminAuth(ctx: Context, next: Next) {
-  const token = extractToken(ctx);
-
-  if (!token) {
-    throw new AppError(401, '请先登录', 'UNAUTHORIZED');
-  }
-
-  let payload: JwtPayload;
-  try {
-    payload = jwt.verify(token, config.jwt.secret) as JwtPayload;
-  } catch {
-    throw new AppError(401, '登录已过期，请重新登录', 'TOKEN_EXPIRED');
-  }
+  const payload = verifyAdminToken(ctx);
 
   if (!payload.role || !['admin', 'super_admin'].includes(payload.role)) {
     throw new AppError(403, '无管理员权限', 'FORBIDDEN');
@@ -48,6 +37,32 @@ export async function adminAuth(ctx: Context, next: Next) {
 
   ctx.state.user = payload;
   await next();
+}
+
+// 管理员或编辑鉴权：供内容管理、公众号管理等受限后台模块使用
+export async function adminContentAuth(ctx: Context, next: Next) {
+  const payload = verifyAdminToken(ctx);
+
+  if (!payload.role || !['admin', 'super_admin', 'editor'].includes(payload.role)) {
+    throw new AppError(403, '无后台权限', 'FORBIDDEN');
+  }
+
+  ctx.state.user = payload;
+  await next();
+}
+
+function verifyAdminToken(ctx: Context): JwtPayload {
+  const token = extractToken(ctx);
+
+  if (!token) {
+    throw new AppError(401, '请先登录', 'UNAUTHORIZED');
+  }
+
+  try {
+    return jwt.verify(token, config.jwt.secret) as JwtPayload;
+  } catch {
+    throw new AppError(401, '登录已过期，请重新登录', 'TOKEN_EXPIRED');
+  }
 }
 
 // 可选鉴权（不强制要求登录，但若提供了 token 则解析）

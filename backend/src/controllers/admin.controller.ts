@@ -57,6 +57,14 @@ function validateAdminShareCode(value: string) {
   }
 }
 
+function normalizeAdminRole(value: any) {
+  const role = String(value || '').trim();
+  if (!['admin', 'editor'].includes(role)) {
+    throw new AppError(422, '管理员角色参数错误', 'ADMIN_ROLE_INVALID');
+  }
+  return role;
+}
+
 // ─── 管理员登录 ─────────────────────────────────────
 
 export async function adminLogin(ctx: Context) {
@@ -87,11 +95,118 @@ export async function adminLogin(ctx: Context) {
 
 export async function createAdmin(ctx: Context) {
   const { username, password, role } = ctx.request.body as any;
-  const hashed = await bcrypt.hash(password, 10);
-  const admin = await prisma.admin.create({
-    data: { username, password: hashed, role },
+  const normalizedUsername = String(username || '').trim();
+  if (!/^[A-Za-z0-9_-]{3,32}$/.test(normalizedUsername)) {
+    throw new AppError(422, '账号只能包含字母、数字、下划线或短横线，长度 3-32 位', 'ADMIN_USERNAME_INVALID');
+  }
+  if (String(password || '').length < 6) {
+    throw new AppError(422, '密码至少 6 位', 'ADMIN_PASSWORD_INVALID');
+  }
+  const normalizedRole = normalizeAdminRole(role || 'editor');
+  try {
+    const hashed = await bcrypt.hash(password, 10);
+    const admin = await prisma.admin.create({
+      data: { username: normalizedUsername, password: hashed, role: normalizedRole },
+    });
+    ctx.body = { success: true, data: sanitizeAdmin(admin) };
+  } catch (err: any) {
+    if (err?.code === 'P2002') {
+      throw new AppError(409, '账号已存在', 'ADMIN_USERNAME_TAKEN');
+    }
+    throw err;
+  }
+}
+
+export async function listAdmins(ctx: Context) {
+  const admins = await prisma.admin.findMany({
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      username: true,
+      role: true,
+      status: true,
+      lastLogin: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
-  ctx.body = { success: true, data: { id: admin.id, username: admin.username, role: admin.role } };
+  ctx.body = { success: true, data: admins };
+}
+
+export async function updateAdmin(ctx: Context) {
+  const adminId = ctx.params.id;
+  const { password, role, status } = ctx.request.body as any;
+  const data: any = {};
+
+  if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'role')) {
+    data.role = normalizeAdminRole(role);
+  }
+  if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'status')) {
+    const normalizedStatus = Number(status);
+    if (![0, 1].includes(normalizedStatus)) {
+      throw new AppError(422, '账号状态参数错误', 'ADMIN_STATUS_INVALID');
+    }
+    data.status = normalizedStatus;
+  }
+  if (password) {
+    if (String(password).length < 6) {
+      throw new AppError(422, '密码至少 6 位', 'ADMIN_PASSWORD_INVALID');
+    }
+    data.password = await bcrypt.hash(String(password), 10);
+  }
+
+  if (!Object.keys(data).length) {
+    throw new AppError(422, '没有可更新的字段', 'ADMIN_UPDATE_EMPTY');
+  }
+
+  if (adminId === ctx.state.user?.userId && data.status === 0) {
+    throw new AppError(422, '不能禁用当前登录账号', 'ADMIN_DISABLE_SELF');
+  }
+
+  const activeAdminCount = await prisma.admin.count({ where: { role: { in: ['admin', 'super_admin'] }, status: 1 } });
+  const current = await prisma.admin.findUnique({ where: { id: adminId } });
+  if (!current) throw new AppError(404, '管理员账号不存在', 'ADMIN_NOT_FOUND');
+  const willRemainFullAdmin = current.status === 1 && ['admin', 'super_admin'].includes(current.role)
+    && (data.status ?? current.status) === 1
+    && ['admin', 'super_admin'].includes(data.role ?? current.role);
+  if (!willRemainFullAdmin && activeAdminCount <= 1 && current.status === 1 && ['admin', 'super_admin'].includes(current.role)) {
+    throw new AppError(422, '至少保留一个启用的管理员账号', 'ADMIN_LAST_FULL_ADMIN');
+  }
+
+  const admin = await prisma.admin.update({
+    where: { id: adminId },
+    data,
+  });
+  ctx.body = { success: true, data: sanitizeAdmin(admin) };
+}
+
+export async function deleteAdmin(ctx: Context) {
+  const adminId = ctx.params.id;
+  if (adminId === ctx.state.user?.userId) {
+    throw new AppError(422, '不能删除当前登录账号', 'ADMIN_DELETE_SELF');
+  }
+  const current = await prisma.admin.findUnique({ where: { id: adminId } });
+  if (!current) throw new AppError(404, '管理员账号不存在', 'ADMIN_NOT_FOUND');
+  if (current.status === 1 && ['admin', 'super_admin'].includes(current.role)) {
+    const activeAdminCount = await prisma.admin.count({ where: { role: { in: ['admin', 'super_admin'] }, status: 1 } });
+    if (activeAdminCount <= 1) {
+      throw new AppError(422, '至少保留一个启用的管理员账号', 'ADMIN_LAST_FULL_ADMIN');
+    }
+  }
+  await prisma.admin.delete({ where: { id: adminId } });
+  ctx.body = { success: true };
+}
+
+function sanitizeAdmin(admin: any) {
+  return {
+    id: admin.id,
+    username: admin.username,
+    role: admin.role,
+    status: admin.status,
+    lastLogin: admin.lastLogin,
+    createdAt: admin.createdAt,
+    updatedAt: admin.updatedAt,
+  };
 }
 
 // ─── 用户管理 ───────────────────────────────────────
@@ -320,14 +435,11 @@ export async function getUserDetail(ctx: Context) {
 }
 
 export async function updateUser(ctx: Context) {
-  const { nickname, phone, status, shareCode } = ctx.request.body as any;
+  const { nickname, status, shareCode } = ctx.request.body as any;
   const data: any = {};
 
   if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'nickname')) {
     data.nickname = String(nickname || '').trim() || null;
-  }
-  if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'phone')) {
-    data.phone = String(phone || '').trim() || null;
   }
   if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'status')) {
     const normalizedStatus = Number(status);

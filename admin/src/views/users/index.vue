@@ -7,9 +7,14 @@
     <el-table :data="users" style="width: 100%" v-loading="loading">
       <el-table-column label="用户" min-width="220">
         <template #default="{ row }">
-          <div class="main-cell">
-            <strong>{{ userLabel(row) }}</strong>
-            <span>{{ row.id }}</span>
+          <div class="user-cell">
+            <el-avatar :src="row.avatar || ''" :size="38">
+              {{ avatarText(row) }}
+            </el-avatar>
+            <div class="main-cell">
+              <strong>{{ userLabel(row) }}</strong>
+              <span>{{ row.id }}</span>
+            </div>
           </div>
         </template>
       </el-table-column>
@@ -67,9 +72,6 @@
         <el-form-item label="昵称">
           <el-input v-model="editForm.nickname" placeholder="可留空" />
         </el-form-item>
-        <el-form-item label="手机号">
-          <el-input v-model="editForm.phone" placeholder="可留空" />
-        </el-form-item>
         <el-form-item label="邀请码" required>
           <el-input v-model="editForm.shareCode" maxlength="32" placeholder="4-32 位字母、数字、下划线或短横线" />
           <span class="form-hint">保存后新分享使用这个邀请码，历史邀请记录保持原记录。</span>
@@ -106,7 +108,6 @@ const savingUser = ref(false);
 const editUser = ref<any>(null);
 const editForm = reactive({
   nickname: '',
-  phone: '',
   shareCode: '',
   status: 1,
 });
@@ -132,11 +133,14 @@ function inviterLabel(row: any) {
   return referrer.nickname || referrer.phone || referrer.shareCode || referrer.id || '系统';
 }
 
+function avatarText(row: any) {
+  return String(row.nickname || row.phone || row.shareCode || row.id || '用').slice(0, 1).toUpperCase();
+}
+
 function openEditDialog(row: any) {
   editUser.value = row;
   Object.assign(editForm, {
     nickname: row.nickname || '',
-    phone: row.phone || '',
     shareCode: row.shareCode || '',
     status: row.status ?? 1,
   });
@@ -155,7 +159,6 @@ async function saveUser() {
   try {
     await api.users.update(editUser.value.id, {
       nickname: editForm.nickname.trim(),
-      phone: editForm.phone.trim(),
       shareCode,
       status: editForm.status,
     });
@@ -208,6 +211,11 @@ h2 { margin-bottom: 20px; }
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.4;
+}
+.user-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .main-cell {
   display: flex;

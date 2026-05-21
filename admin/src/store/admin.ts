@@ -5,9 +5,11 @@ import { api } from '@/api';
 export const useAdminStore = defineStore('admin', () => {
   const token = ref(localStorage.getItem('admin_token') || '');
   const username = ref(localStorage.getItem('admin_username') || '');
-  const role = ref('');
+  const role = ref(localStorage.getItem('admin_role') || '');
 
   const isLogin = computed(() => !!token.value);
+  const isFullAdmin = computed(() => role.value !== 'editor');
+  const isEditor = computed(() => role.value === 'editor');
 
   async function login(loginUsername: string, password: string) {
     const res = await api.admin.login(loginUsername, password);
@@ -16,6 +18,7 @@ export const useAdminStore = defineStore('admin', () => {
     role.value = res.data.role;
     localStorage.setItem('admin_token', res.data.token);
     localStorage.setItem('admin_username', res.data.username);
+    localStorage.setItem('admin_role', res.data.role);
   }
 
   function logout() {
@@ -24,7 +27,8 @@ export const useAdminStore = defineStore('admin', () => {
     role.value = '';
     localStorage.removeItem('admin_token');
     localStorage.removeItem('admin_username');
+    localStorage.removeItem('admin_role');
   }
 
-  return { token, username, role, isLogin, login, logout };
+  return { token, username, role, isLogin, isFullAdmin, isEditor, login, logout };
 });

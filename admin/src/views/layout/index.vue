@@ -19,34 +19,40 @@
           router
           background-color="transparent"
         >
-          <el-menu-item index="/dashboard">
+          <el-menu-item v-if="store.isFullAdmin" index="/dashboard">
             <template #title>
               <el-icon><DataAnalysis /></el-icon>
               <span>数据大盘</span>
             </template>
           </el-menu-item>
-          <el-menu-item index="/users">
+          <el-menu-item v-if="store.isFullAdmin" index="/users">
             <template #title>
               <el-icon><User /></el-icon>
               <span>用户管理</span>
             </template>
           </el-menu-item>
-          <el-menu-item index="/points">
+          <el-menu-item v-if="store.isFullAdmin" index="/points">
             <template #title>
               <el-icon><Coin /></el-icon>
               <span>点数管理</span>
             </template>
           </el-menu-item>
-          <el-menu-item index="/orders">
+          <el-menu-item v-if="store.isFullAdmin" index="/orders">
             <template #title>
               <el-icon><Tickets /></el-icon>
               <span>订单管理</span>
             </template>
           </el-menu-item>
-          <el-menu-item index="/distribution">
+          <el-menu-item v-if="store.isFullAdmin" index="/distribution">
             <template #title>
               <el-icon><Share /></el-icon>
               <span>推荐合作</span>
+            </template>
+          </el-menu-item>
+          <el-menu-item v-if="store.isFullAdmin" index="/admins">
+            <template #title>
+              <el-icon><Setting /></el-icon>
+              <span>管理员账号</span>
             </template>
           </el-menu-item>
 
@@ -55,22 +61,22 @@
               <el-icon><Document /></el-icon>
               <span>内容管理</span>
             </template>
-            <el-menu-item index="/content/articles">
+            <el-menu-item v-if="store.isFullAdmin" index="/content/articles">
               <span>干货文库</span>
             </el-menu-item>
             <el-menu-item index="/content/quick-questions">
               <span>快捷提问</span>
             </el-menu-item>
-            <el-menu-item index="/content/auto-reply">
+            <el-menu-item v-if="store.isFullAdmin" index="/content/auto-reply">
               <span>自动回复</span>
             </el-menu-item>
             <el-menu-item index="/content/knowledge">
               <span>知识库</span>
             </el-menu-item>
-            <el-menu-item index="/content/categories">
+            <el-menu-item v-if="store.isFullAdmin" index="/content/categories">
               <span>分类管理</span>
             </el-menu-item>
-            <el-menu-item index="/content/regions">
+            <el-menu-item v-if="store.isFullAdmin" index="/content/regions">
               <span>省市管理</span>
             </el-menu-item>
             <el-menu-item index="/content/universities">
@@ -79,30 +85,30 @@
             <el-menu-item index="/content/majors">
               <span>专业库</span>
             </el-menu-item>
-            <el-menu-item index="/content/score-ranks">
+            <el-menu-item v-if="store.isFullAdmin" index="/content/score-ranks">
               <span>一分一段表</span>
             </el-menu-item>
-            <el-menu-item index="/content/admission-scores">
+            <el-menu-item v-if="store.isFullAdmin" index="/content/admission-scores">
               <span>录取分数线</span>
             </el-menu-item>
-            <el-menu-item index="/content/art-admission-rules">
+            <el-menu-item v-if="store.isFullAdmin" index="/content/art-admission-rules">
               <span>艺术类规则</span>
             </el-menu-item>
-            <el-menu-item index="/content/art-admission-scores">
+            <el-menu-item v-if="store.isFullAdmin" index="/content/art-admission-scores">
               <span>艺术类投档线</span>
             </el-menu-item>
-            <el-menu-item index="/content/volunteer-data">
+            <el-menu-item v-if="store.isFullAdmin" index="/content/volunteer-data">
               <span>志愿报告</span>
             </el-menu-item>
           </el-sub-menu>
 
-          <el-menu-item index="/ai-config">
+          <el-menu-item v-if="store.isFullAdmin" index="/ai-config">
             <template #title>
               <el-icon><Cpu /></el-icon>
               <span>AI 配置</span>
             </template>
           </el-menu-item>
-          <el-menu-item index="/skills">
+          <el-menu-item v-if="store.isFullAdmin" index="/skills">
             <template #title>
               <el-icon><MagicStick /></el-icon>
               <span>Skill 管理</span>
@@ -114,7 +120,7 @@
               <span>公众号管理</span>
             </template>
           </el-menu-item>
-          <el-menu-item index="/notices">
+          <el-menu-item v-if="store.isFullAdmin" index="/notices">
             <template #title>
               <el-icon><Bell /></el-icon>
               <span>系统公告</span>
@@ -129,6 +135,7 @@
       <el-header class="topbar">
         <span class="topbar-title">{{ currentTitle }}</span>
         <div class="topbar-right">
+          <span class="topbar-role">{{ roleLabel }}</span>
           <span class="topbar-user">{{ store.username }}</span>
           <el-button class="logout-btn" @click="handleLogout">退出登录</el-button>
         </div>
@@ -146,7 +153,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAdminStore } from '@/store/admin';
 import {
   School, DataAnalysis, User, Coin, Tickets, Document,
-  Cpu, MagicStick, ChatDotRound, Bell, Share,
+  Cpu, MagicStick, ChatDotRound, Bell, Share, Setting,
 } from '@element-plus/icons-vue';
 
 const route = useRoute();
@@ -155,6 +162,7 @@ const store = useAdminStore();
 
 const activeMenu = computed(() => route.path);
 const currentTitle = computed(() => route.meta.title || '管理后台');
+const roleLabel = computed(() => (store.isEditor ? '编辑' : '管理员'));
 
 function handleLogout() {
   store.logout();
@@ -304,7 +312,15 @@ function handleLogout() {
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+}
+
+.topbar-role {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-regular);
+  font-size: 12px;
 }
 
 .topbar-user {

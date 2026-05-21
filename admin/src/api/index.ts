@@ -28,6 +28,10 @@ export const api = {
   admin: {
     login: (username: string, password: string) =>
       http.post('/admin/admins/login', { username, password }),
+    list: () => http.get('/admin/admins'),
+    create: (data: any) => http.post('/admin/admins', data),
+    update: (id: string, data: any) => http.put(`/admin/admins/${id}`, data),
+    delete: (id: string) => http.delete(`/admin/admins/${id}`),
   },
   dashboard: {
     get: () => http.get('/admin/dashboard'),
