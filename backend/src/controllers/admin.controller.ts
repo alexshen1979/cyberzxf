@@ -44,6 +44,19 @@ function safePathSegment(value: string) {
   return String(value || '').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 120) || 'unknown';
 }
 
+function normalizeAdminShareCode(value: any) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function validateAdminShareCode(value: string) {
+  if (!value) {
+    throw new AppError(422, '邀请码不能为空', 'SHARE_CODE_REQUIRED');
+  }
+  if (!/^[A-Z0-9_-]{4,32}$/.test(value)) {
+    throw new AppError(422, '邀请码只能包含字母、数字、下划线或短横线，长度 4-32 位', 'SHARE_CODE_INVALID');
+  }
+}
+
 // ─── 管理员登录 ─────────────────────────────────────
 
 export async function adminLogin(ctx: Context) {
@@ -307,17 +320,66 @@ export async function getUserDetail(ctx: Context) {
 }
 
 export async function updateUser(ctx: Context) {
-  const { nickname, phone, status } = ctx.request.body as any;
+  const { nickname, phone, status, shareCode } = ctx.request.body as any;
+  const data: any = {};
+
+  if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'nickname')) {
+    data.nickname = String(nickname || '').trim() || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'phone')) {
+    data.phone = String(phone || '').trim() || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'status')) {
+    const normalizedStatus = Number(status);
+    if (![0, 1].includes(normalizedStatus)) {
+      throw new AppError(422, '用户状态参数错误', 'USER_STATUS_INVALID');
+    }
+    data.status = normalizedStatus;
+  }
+  if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'shareCode')) {
+    const normalizedShareCode = normalizeAdminShareCode(shareCode);
+    validateAdminShareCode(normalizedShareCode);
+
+    const [duplicateUser, duplicateDistributor] = await Promise.all([
+      prisma.user.findFirst({
+        where: {
+          shareCode: normalizedShareCode,
+          id: { not: ctx.params.id },
+        },
+        select: { id: true },
+      }),
+      prisma.distributor.findUnique({
+        where: { code: normalizedShareCode },
+        select: { id: true },
+      }),
+    ]);
+    if (duplicateUser || duplicateDistributor) {
+      throw new AppError(409, '邀请码已被占用，请换一个', 'SHARE_CODE_TAKEN');
+    }
+    data.shareCode = normalizedShareCode;
+  }
+
+  if (!Object.keys(data).length) {
+    ctx.status = 422;
+    ctx.body = { success: false, message: '没有可更新的字段' };
+    return;
+  }
+
   try {
     const user = await prisma.user.update({
       where: { id: ctx.params.id },
-      data: { nickname, phone, status },
+      data,
     });
     ctx.body = { success: true, data: user };
   } catch (err: any) {
     if (err?.code === 'P2025') {
       ctx.status = 404;
       ctx.body = { success: false, message: '用户不存在' };
+      return;
+    }
+    if (err?.code === 'P2002') {
+      ctx.status = 409;
+      ctx.body = { success: false, message: '邀请码已被占用，请换一个' };
       return;
     }
     throw err;
