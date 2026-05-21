@@ -6,6 +6,7 @@ import { createLogger } from '../utils/logger';
 import { findOrCreateByMpOpenId } from './auth.service';
 import { consult } from './ai.service';
 import { getBalance } from './points.service';
+import { getPointSettings } from './point-config.service';
 
 const logger = createLogger('wechat');
 
@@ -143,7 +144,8 @@ async function handleEvent(parsed: any, userId: string): Promise<string> {
   const event = parsed.event;
 
   switch (event) {
-    case 'subscribe':
+    case 'subscribe': {
+      const settings = await getPointSettings();
       return buildTextReply(parsed,
         '🎓 欢迎关注涨识！\n\n' +
         '我是赛博张老师，专注于：\n' +
@@ -151,8 +153,9 @@ async function handleEvent(parsed: any, userId: string): Promise<string> {
         '🎯 考研院校专业推荐\n' +
         '💼 职业规划避坑指南\n' +
         '🔍 大学专业深度解析\n\n' +
-        '新用户已自动赠送 100 免费咨询点数，直接发送问题即可开始！'
+        `新用户已自动赠送 ${settings.freeGift} 免费咨询点数，直接发送问题即可开始！`
       );
+    }
 
     case 'unsubscribe':
       logger.info('用户取消关注: %s', userId);

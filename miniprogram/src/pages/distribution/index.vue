@@ -23,7 +23,7 @@
         <text class="invite-code-value">{{ shareCode || '正在生成...' }}</text>
         <text class="copy-code" @click.stop="copyShareCode">复制</text>
       </view>
-      <view class="reward-tip">每天分享可领 {{ dailyShareRewardPoints }} 点；好友通过你的码注册，再赠送 {{ referralRewardPoints }} 点。</view>
+      <view class="reward-tip">{{ rewardTipText }}</view>
       <view class="action-row">
         <view class="secondary-btn" @click="copyShareCode">复制邀请码</view>
         <button class="primary-btn button-reset" open-type="share">分享给朋友</button>
@@ -195,8 +195,14 @@ const shareReferral = computed(() => data.value?.shareReferral || null);
 const canApplyDistribution = computed(() => data.value?.canApply === true);
 const shareCode = computed(() => data.value?.shareCode || userStore.userInfo?.shareCode || '');
 const sharePath = computed(() => data.value?.sharePath || withShareRef('pages/volunteer/index'));
-const dailyShareRewardPoints = computed(() => data.value?.dailyShareRewardPoints || 10);
-const referralRewardPoints = computed(() => data.value?.referralRewardPoints || 20);
+const dailyShareRewardPoints = computed(() => data.value?.dailyShareRewardPoints ?? 10);
+const referralRewardPoints = computed(() => data.value?.referralRewardPoints ?? 20);
+const rewardTipText = computed(() => {
+  const tips = [];
+  if (dailyShareRewardPoints.value > 0) tips.push(`每天分享可领 ${dailyShareRewardPoints.value} 点`);
+  if (referralRewardPoints.value > 0) tips.push(`好友通过你的码注册，再赠送 ${referralRewardPoints.value} 点`);
+  return tips.length ? tips.join('；') : '邀请码可用于好友注册追踪。';
+});
 const inviterText = computed(() => {
   const referral = shareReferral.value;
   if (!referral) return '';

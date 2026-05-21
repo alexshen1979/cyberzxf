@@ -173,6 +173,8 @@ export const api = {
       request<{
         freeAskLimit: number;
         freeGift: number;
+        dailyShareReward: number;
+        referralReward: number;
         volunteerAnalysisCost: number;
         volunteerReportPdfCost: number;
         volunteerReportImageCost: number;

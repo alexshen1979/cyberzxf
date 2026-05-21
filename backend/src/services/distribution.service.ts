@@ -14,9 +14,9 @@ const DEFAULT_LEVEL1_RATE = 5000;
 const DEFAULT_LEVEL2_RATE = 2000;
 const DEFAULT_MIN_WITHDRAWAL_AMOUNT = 1000;
 const DEFAULT_WITHDRAWAL_FREEZE_DAYS = 7;
-const DAILY_SHARE_REWARD_POINTS = 10;
+const DEFAULT_DAILY_SHARE_REWARD_POINTS = 10;
 const DAILY_SHARE_REWARD_SOURCE = 'daily_share_reward';
-const SHARE_REFERRAL_REWARD_POINTS = 20;
+const DEFAULT_SHARE_REFERRAL_REWARD_POINTS = 20;
 const SHARE_REFERRAL_REWARD_SOURCE = 'share_referral_reward';
 const DIRECT_COMMISSION_ROLES = ['level1_direct', 'level2_direct'];
 const LOCKED_WITHDRAWAL_STATUSES = ['pending', 'approved'];
@@ -33,6 +33,8 @@ export async function ensureDistributionDefaults(db: any = prisma) {
         enabled: true,
         level1Rate: DEFAULT_LEVEL1_RATE,
         level2Rate: DEFAULT_LEVEL2_RATE,
+        dailyShareReward: DEFAULT_DAILY_SHARE_REWARD_POINTS,
+        referralReward: DEFAULT_SHARE_REFERRAL_REWARD_POINTS,
         minWithdrawalAmount: DEFAULT_MIN_WITHDRAWAL_AMOUNT,
         withdrawalFreezeDays: DEFAULT_WITHDRAWAL_FREEZE_DAYS,
       },
@@ -81,6 +83,25 @@ export async function createReferralForNewUser(db: any, userId: string, referral
   await createShareReferralAndReward(db, userId, referrerUserId, code);
 
   return createDistributionReferralFromDistributor(db, userId, distributor, code);
+}
+
+export async function resolveNewUserGiftPoints(db: any, userId: string, referralCode?: string, defaultGift?: number) {
+  const settings = await getPointSettings();
+  const fallbackGift = normalizePointAmount(defaultGift ?? settings.freeGift, '新用户赠送点数');
+  const code = normalizeDistributorCode(referralCode);
+  if (!code) return fallbackGift;
+
+  const resolved = await resolveReferralCode(db, userId, code);
+  const distributor = resolved?.distributor;
+  const levelOne = distributor?.level === 1
+    ? distributor
+    : (distributor?.parent || (distributor?.parentId
+      ? await db.distributor.findUnique({ where: { id: distributor.parentId } })
+      : null));
+  const override = levelOne?.level === 1 ? levelOne.newUserGiftOverride : null;
+  return override === null || override === undefined
+    ? fallbackGift
+    : normalizePointAmount(override, '特邀合作伙伴新用户赠点');
 }
 
 async function createDistributionReferralFromDistributor(db: any, userId: string, distributor: any, sourceCode?: string) {
@@ -288,7 +309,7 @@ export async function bindShareReferral(userId: string, referralCode?: string) {
     return {
       shareReferral,
       distributionReferral,
-      rewardPoints: SHARE_REFERRAL_REWARD_POINTS,
+      rewardPoints: getReferralRewardPoints(await getCurrentDistributionSetting(tx)),
     };
   });
 }
@@ -387,8 +408,8 @@ export async function getMyDistribution(userId: string) {
     shareCode: user.shareCode,
     sharePath: buildSharePath(user.shareCode),
     distributorShareCode: distributor.code,
-    dailyShareRewardPoints: DAILY_SHARE_REWARD_POINTS,
-    referralRewardPoints: SHARE_REFERRAL_REWARD_POINTS,
+    dailyShareRewardPoints: getDailyShareRewardPoints(setting),
+    referralRewardPoints: getReferralRewardPoints(setting),
     canApply: false,
   };
 }
@@ -484,13 +505,15 @@ export async function getMyDistributionQrCode(userId: string) {
 
 export async function recordUserShare(userId: string, input: Record<string, any> = {}) {
   const user = await ensureUserShareCode(userId);
+  const { setting } = await ensureDistributionDefaults();
+  const rewardPoints = getDailyShareRewardPoints(setting);
   const channel = normalizeShareChannel(input.channel);
   const path = normalizeSharePath(input.path);
   const rewardable = channel === 'friend' || channel === 'timeline';
   const now = new Date();
   const rewardDate = formatShanghaiDate(now);
 
-  if (!rewardable) {
+  if (!rewardable || rewardPoints <= 0) {
     await prisma.shareEvent.create({
       data: {
         userId,
@@ -549,7 +572,7 @@ export async function recordUserShare(userId: string, input: Record<string, any>
     const updated = await tx.pointsAccount.update({
       where: { userId },
       data: {
-        balance: { increment: DAILY_SHARE_REWARD_POINTS },
+        balance: { increment: rewardPoints },
         expiredAt,
       },
     });
@@ -559,18 +582,18 @@ export async function recordUserShare(userId: string, input: Record<string, any>
         id: transactionId,
         userId,
         type: 'gift',
-        amount: DAILY_SHARE_REWARD_POINTS,
+        amount: rewardPoints,
         balanceAfter: updated.balance,
         source: DAILY_SHARE_REWARD_SOURCE,
         sourceId: `${userId}:${rewardDate}`,
-        remark: `每日分享赠送 ${DAILY_SHARE_REWARD_POINTS} 点`,
+        remark: `每日分享赠送 ${rewardPoints} 点`,
       },
     });
     await tx.dailyShareReward.create({
       data: {
         userId,
         rewardDate,
-        points: DAILY_SHARE_REWARD_POINTS,
+        points: rewardPoints,
         transactionId,
       },
     });
@@ -581,7 +604,7 @@ export async function recordUserShare(userId: string, input: Record<string, any>
         channel,
         path,
         rewarded: true,
-        rewardPoints: DAILY_SHARE_REWARD_POINTS,
+        rewardPoints,
       },
     });
     return { awarded: true, alreadyRewarded: false, balanceAfter: updated.balance };
@@ -590,7 +613,7 @@ export async function recordUserShare(userId: string, input: Record<string, any>
   return {
     awarded: result.awarded,
     alreadyRewarded: result.alreadyRewarded,
-    points: result.awarded ? DAILY_SHARE_REWARD_POINTS : 0,
+    points: result.awarded ? rewardPoints : 0,
     balanceAfter: result.balanceAfter,
     rewardDate,
     shareCode: user.shareCode,
@@ -636,6 +659,10 @@ async function createShareReferralAndReward(db: any, userId: string, referrerUse
 }
 
 async function grantShareReferralReward(db: any, referrerUserId: string, shareReferralId: string) {
+  const distributionSetting = await getCurrentDistributionSetting(db);
+  const rewardPoints = getReferralRewardPoints(distributionSetting);
+  if (rewardPoints <= 0) return null;
+
   const settings = await getPointSettings();
   const now = new Date();
   const expiredAt = new Date(now);
@@ -656,7 +683,7 @@ async function grantShareReferralReward(db: any, referrerUserId: string, shareRe
   const updated = await db.pointsAccount.update({
     where: { userId: referrerUserId },
     data: {
-      balance: { increment: SHARE_REFERRAL_REWARD_POINTS },
+      balance: { increment: rewardPoints },
       expiredAt,
     },
   });
@@ -666,11 +693,11 @@ async function grantShareReferralReward(db: any, referrerUserId: string, shareRe
       id: crypto.randomUUID(),
       userId: referrerUserId,
       type: 'gift',
-      amount: SHARE_REFERRAL_REWARD_POINTS,
+      amount: rewardPoints,
       balanceAfter: updated.balance,
       source: SHARE_REFERRAL_REWARD_SOURCE,
       sourceId: shareReferralId,
-      remark: `邀请新用户注册赠送 ${SHARE_REFERRAL_REWARD_POINTS} 点`,
+      remark: `邀请新用户注册赠送 ${rewardPoints} 点`,
     },
   });
 }
@@ -997,6 +1024,8 @@ export async function getDistributionSettingsForAdmin() {
 export async function updateDistributionSettingsForAdmin(input: Record<string, any>) {
   const level1Rate = normalizeRateBps(input.level1Rate);
   const level2Rate = normalizeRateBps(input.level2Rate);
+  const dailyShareReward = normalizePointAmount(input.dailyShareReward ?? DEFAULT_DAILY_SHARE_REWARD_POINTS, '每日分享赠点');
+  const referralReward = normalizePointAmount(input.referralReward ?? DEFAULT_SHARE_REFERRAL_REWARD_POINTS, '好友注册奖励');
   const minWithdrawalAmount = normalizeMoneyAmount(input.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT, true);
   const withdrawalFreezeDays = normalizeFreezeDays(input.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS);
   if (level1Rate < level2Rate) {
@@ -1012,6 +1041,8 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
       enabled: input.enabled !== false,
       level1Rate,
       level2Rate,
+      dailyShareReward,
+      referralReward,
       minWithdrawalAmount,
       withdrawalFreezeDays,
     },
@@ -1020,6 +1051,8 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
       enabled: input.enabled !== false,
       level1Rate,
       level2Rate,
+      dailyShareReward,
+      referralReward,
       minWithdrawalAmount,
       withdrawalFreezeDays,
     },
@@ -1182,7 +1215,7 @@ export async function listLevelOneDistributorsForAdmin() {
   return prisma.distributor.findMany({
     where: { level: 1, status: 'active', code: { not: SYSTEM_DISTRIBUTOR_CODE } },
     orderBy: [{ code: 'asc' }],
-    select: { id: true, name: true, code: true, userId: true },
+    select: { id: true, name: true, code: true, userId: true, newUserGiftOverride: true },
   });
 }
 
@@ -1203,6 +1236,7 @@ export async function createDistributorForAdmin(input: Record<string, any>) {
     ? await resolveDistributorParentFromShareReferral(prisma, userId)
     : null;
   const parentId = level === 2 ? await resolveLevel2ParentId(input.parentId || invitedParentId) : null;
+  const newUserGiftOverride = level === 1 ? normalizeOptionalPointAmount(input.newUserGiftOverride, '特邀合作伙伴新用户赠点') : null;
   const distributor = await prisma.distributor.create({
     data: {
       userId,
@@ -1211,6 +1245,7 @@ export async function createDistributorForAdmin(input: Record<string, any>) {
       level,
       parentId,
       status,
+      newUserGiftOverride,
       approvedAt: status === 'active' ? new Date() : null,
     },
   });
@@ -1243,11 +1278,15 @@ export async function updateDistributorForAdmin(id: string, input: Record<string
   data.level = nextLevel;
   if (nextLevel === 1) {
     data.parentId = null;
+    if (input.newUserGiftOverride !== undefined) {
+      data.newUserGiftOverride = normalizeOptionalPointAmount(input.newUserGiftOverride, '特邀合作伙伴新用户赠点');
+    }
   } else {
     const invitedParentId = data.status === 'active' || (!data.status && distributor.status === 'active')
       ? await resolveDistributorParentFromShareReferral(prisma, distributor.userId)
       : null;
     data.parentId = await resolveLevel2ParentId(input.parentId || invitedParentId || distributor.parentId);
+    data.newUserGiftOverride = null;
   }
 
   return prisma.$transaction(async (tx) => {
@@ -1633,6 +1672,19 @@ function normalizeRateBps(value: any) {
   return rate;
 }
 
+function normalizePointAmount(value: any, label: string) {
+  const points = Math.round(Number(value));
+  if (!Number.isFinite(points) || points < 0 || points > 100000) {
+    throw new AppError(422, `${label}必须是 0-100000 之间的整数`, 'POINT_AMOUNT_INVALID');
+  }
+  return points;
+}
+
+function normalizeOptionalPointAmount(value: any, label: string) {
+  if (value === null || value === undefined || value === '') return null;
+  return normalizePointAmount(value, label);
+}
+
 function normalizeMoneyAmount(value: any, allowZero = false) {
   const amount = Math.round(Number(value));
   if (!Number.isFinite(amount) || amount < (allowZero ? 0 : 1)) {
@@ -1664,12 +1716,27 @@ function formatDistributionSetting(setting: any) {
     enabled: setting.enabled,
     level1Rate: setting.level1Rate,
     level2Rate: setting.level2Rate,
+    dailyShareReward: getDailyShareRewardPoints(setting),
+    referralReward: getReferralRewardPoints(setting),
     minWithdrawalAmount: setting.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT,
     withdrawalFreezeDays: setting.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS,
     level1Percent: setting.level1Rate / 100,
     level2Percent: setting.level2Rate / 100,
     minWithdrawalYuan: (setting.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT) / 100,
   };
+}
+
+async function getCurrentDistributionSetting(db: any = prisma) {
+  const setting = await db.distributionSetting.findUnique({ where: { id: 'default' } });
+  return setting || (await ensureDistributionDefaults(db)).setting;
+}
+
+function getDailyShareRewardPoints(setting: any) {
+  return normalizePointAmount(setting?.dailyShareReward ?? DEFAULT_DAILY_SHARE_REWARD_POINTS, '每日分享赠点');
+}
+
+function getReferralRewardPoints(setting: any) {
+  return normalizePointAmount(setting?.referralReward ?? DEFAULT_SHARE_REFERRAL_REWARD_POINTS, '好友注册奖励');
 }
 
 function emptyDistributionStats() {
@@ -1705,8 +1772,8 @@ async function buildShareOnlyDistribution(userId: string, user: any, setting: an
     shareReferral: formatShareReferral(shareReferral),
     shareCode: user.shareCode,
     sharePath: buildSharePath(user.shareCode),
-    dailyShareRewardPoints: DAILY_SHARE_REWARD_POINTS,
-    referralRewardPoints: SHARE_REFERRAL_REWARD_POINTS,
+    dailyShareRewardPoints: getDailyShareRewardPoints(setting),
+    referralRewardPoints: getReferralRewardPoints(setting),
     canApply,
   };
 }

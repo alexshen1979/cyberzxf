@@ -9,7 +9,7 @@ import { syncMenu as syncWechatMenuService } from '../services/wechat.service';
 import { getBalance } from '../services/points.service';
 import { getRevenueStats } from '../services/payment.service';
 import { createLogger } from '../utils/logger';
-import { ensureDistributionDefaults } from '../services/distribution.service';
+import { ensureDistributionDefaults, getDistributionSettingsForAdmin } from '../services/distribution.service';
 import {
   createRechargeProduct,
   deleteRechargeProduct,
@@ -891,15 +891,18 @@ export async function deleteRechargeProductForAdmin(ctx: Context) {
 // ─── 公共配置（供小程序读取） ──────────────────────────
 
 export async function getPublicConfig(ctx: Context) {
-  const [aiConfig, pointSettings] = await Promise.all([
+  const [aiConfig, pointSettings, distributionSettings] = await Promise.all([
     prisma.aiConfig.findFirst(),
     getPointSettings(),
+    getDistributionSettingsForAdmin(),
   ]);
   ctx.body = {
     success: true,
     data: {
       freeAskLimit: aiConfig?.freeAskLimit ?? 2,
       freeGift: pointSettings.freeGift,
+      dailyShareReward: distributionSettings.dailyShareReward,
+      referralReward: distributionSettings.referralReward,
       volunteerAnalysisCost: pointSettings.volunteerAnalysisCost,
       volunteerReportPdfCost: pointSettings.volunteerReportPdfCost,
       volunteerReportImageCost: pointSettings.volunteerReportImageCost,

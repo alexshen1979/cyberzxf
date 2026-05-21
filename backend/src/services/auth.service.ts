@@ -5,7 +5,7 @@ import { config } from '../config';
 import axios from 'axios';
 import { getWechatMiniProgramCredentials } from './payment.service';
 import { getPointSettings } from './point-config.service';
-import { createReferralForNewUser, ensureUserShareCode } from './distribution.service';
+import { createReferralForNewUser, ensureUserShareCode, resolveNewUserGiftPoints } from './distribution.service';
 
 let accessTokenCache: { token: string; expiresAt: number } | null = null;
 
@@ -82,7 +82,7 @@ export async function loginByMiniProgram(code: string, profile?: { nickName?: st
           ...(phone ? { phone } : {}),
         },
       });
-      await giftNewUserPoints(newUser.id, tx);
+      await giftNewUserPoints(newUser.id, tx, referralCode);
       await createReferralForNewUser(tx, newUser.id, referralCode);
       return ensureUserShareCode(newUser.id, tx);
     });
@@ -139,22 +139,23 @@ export async function findOrCreateByMpOpenId(mpOpenId: string, unionId?: string)
 }
 
 // 新用户赠送免费点数（可选事务客户端）
-async function giftNewUserPoints(userId: string, tx?: any) {
+async function giftNewUserPoints(userId: string, tx?: any, referralCode?: string) {
   const db = tx || prisma;
   const settings = await getPointSettings();
+  const giftPoints = await resolveNewUserGiftPoints(db, userId, referralCode, settings.freeGift);
   const expiredAt = new Date();
   expiredAt.setDate(expiredAt.getDate() + settings.expireDays);
 
   await db.pointsAccount.create({
-    data: { userId, balance: settings.freeGift, expiredAt },
+    data: { userId, balance: giftPoints, expiredAt },
   });
 
   await db.pointsTransaction.create({
     data: {
       userId,
       type: 'gift',
-      amount: settings.freeGift,
-      balanceAfter: settings.freeGift,
+      amount: giftPoints,
+      balanceAfter: giftPoints,
       source: 'system',
       remark: '新用户注册赠送',
     },

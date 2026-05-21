@@ -28,6 +28,14 @@
           <el-input-number v-model="settingsForm.level2Percent" :min="0" :max="100" :precision="2" :step="1" />
           <span class="hint">%</span>
         </el-form-item>
+        <el-form-item label="每日分享赠点">
+          <el-input-number v-model="settingsForm.dailyShareReward" :min="0" :max="100000" :precision="0" :step="1" />
+          <span class="hint">点，每人每天最多一次</span>
+        </el-form-item>
+        <el-form-item label="好友注册奖励">
+          <el-input-number v-model="settingsForm.referralReward" :min="0" :max="100000" :precision="0" :step="1" />
+          <span class="hint">点，好友通过邀请码注册后赠送给邀请人</span>
+        </el-form-item>
         <el-form-item label="最低提现">
           <el-input-number v-model="settingsForm.minWithdrawalYuan" :min="1" :max="10000" :precision="2" :step="1" />
           <span class="hint">元</span>
@@ -291,6 +299,10 @@
             <el-option v-for="item in levelOneOptions" :key="item.id" :label="`${item.name}（${item.code}）`" :value="item.id" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="distributorForm.level === 1" label="新用户赠点">
+          <el-input-number v-model="distributorForm.newUserGiftOverride" :min="0" :max="100000" :precision="0" :step="1" />
+          <span class="hint">留空使用点数管理里的系统默认值；设置后，该特邀伙伴及其推荐官邀请的新用户按此值赠送</span>
+        </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="distributorForm.status" style="width: 100%">
             <el-option label="待审核" value="pending" />
@@ -394,6 +406,8 @@ const settingsForm = reactive({
   enabled: true,
   level1Percent: 50,
   level2Percent: 20,
+  dailyShareReward: 10,
+  referralReward: 20,
   minWithdrawalYuan: 10,
   withdrawalFreezeDays: 7,
 });
@@ -440,6 +454,7 @@ const distributorForm = reactive({
   level: 2,
   parentId: '',
   status: 'active',
+  newUserGiftOverride: null as number | null,
 });
 
 const statsCards = computed(() => [
@@ -458,6 +473,8 @@ async function loadSettings() {
     enabled: res.data.enabled,
     level1Percent: res.data.level1Percent,
     level2Percent: res.data.level2Percent,
+    dailyShareReward: res.data.dailyShareReward ?? 10,
+    referralReward: res.data.referralReward ?? 20,
     minWithdrawalYuan: res.data.minWithdrawalYuan ?? ((res.data.minWithdrawalAmount || 1000) / 100),
     withdrawalFreezeDays: res.data.withdrawalFreezeDays ?? 7,
   });
@@ -474,6 +491,8 @@ async function saveSettings() {
       enabled: settingsForm.enabled,
       level1Rate: Math.round(settingsForm.level1Percent * 100),
       level2Rate: Math.round(settingsForm.level2Percent * 100),
+      dailyShareReward: Math.round(Number(settingsForm.dailyShareReward || 0)),
+      referralReward: Math.round(Number(settingsForm.referralReward || 0)),
       minWithdrawalAmount: Math.round(settingsForm.minWithdrawalYuan * 100),
       withdrawalFreezeDays: Math.round(settingsForm.withdrawalFreezeDays),
     });
@@ -592,6 +611,7 @@ function openDistributorDialog(row?: any) {
     level: row.level,
     parentId: row.parentId || '',
     status: row.status || 'active',
+    newUserGiftOverride: row.newUserGiftOverride ?? null,
   } : {
     id: '',
     userId: '',
@@ -599,6 +619,7 @@ function openDistributorDialog(row?: any) {
     level: 2,
     parentId: '',
     status: 'active',
+    newUserGiftOverride: null,
   });
   dialogVisible.value = true;
 }
@@ -616,6 +637,7 @@ async function saveDistributor() {
       level: distributorForm.level,
       parentId: distributorForm.level === 2 ? distributorForm.parentId : null,
       status: distributorForm.status,
+      newUserGiftOverride: distributorForm.level === 1 ? (distributorForm.newUserGiftOverride ?? null) : null,
     };
     if (distributorForm.id) {
       await api.distribution.updateDistributor(distributorForm.id, payload);
