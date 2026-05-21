@@ -109,6 +109,10 @@
             <text class="withdraw-label">可提现</text>
           </view>
           <view>
+            <text class="withdraw-value">{{ formatMoney(stats.frozenCommissionAmount || 0) }}</text>
+            <text class="withdraw-label">待结算</text>
+          </view>
+          <view>
             <text class="withdraw-value">{{ formatMoney(stats.lockedWithdrawalAmount || 0) }}</text>
             <text class="withdraw-label">提现中</text>
           </view>
@@ -652,7 +656,7 @@ onShareTimeline(() => {
 
 .withdraw-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 12rpx;
 }
 
