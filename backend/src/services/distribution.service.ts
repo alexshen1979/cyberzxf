@@ -80,9 +80,9 @@ export async function createReferralForNewUser(db: any, userId: string, referral
   if (!resolved) return null;
   const { referrerUserId, distributor } = resolved;
 
-  await createShareReferralAndReward(db, userId, referrerUserId, code);
+  const shareReferral = await createShareReferralAndReward(db, userId, referrerUserId, code);
 
-  return createDistributionReferralFromDistributor(db, userId, distributor, code);
+  return createDistributionReferralFromDistributor(db, userId, distributor, code, shareReferral.createdAt);
 }
 
 export async function resolveNewUserGiftPoints(db: any, userId: string, referralCode?: string, defaultGift?: number) {
@@ -104,20 +104,21 @@ export async function resolveNewUserGiftPoints(db: any, userId: string, referral
     : normalizePointAmount(override, '特邀合作伙伴新用户赠点');
 }
 
-async function createDistributionReferralFromDistributor(db: any, userId: string, distributor: any, sourceCode?: string) {
+async function createDistributionReferralFromDistributor(db: any, userId: string, distributor: any, sourceCode?: string, relationshipCreatedAt?: Date | string | null) {
   if (!distributor || distributor.status !== 'active' || distributor.userId === userId) return null;
 
   const existing = await db.distributionReferral.findUnique({ where: { userId } });
   if (existing) return existing;
 
   const { system } = await ensureDistributionDefaults(db);
+  const createdAt = relationshipCreatedAt ? new Date(relationshipCreatedAt) : new Date();
   const firstLevelDistributorId = distributor.level === 1
     ? distributor.id
     : distributor.parentId || system.id;
 
   await db.user.update({
     where: { id: userId },
-    data: { referredByDistributorId: distributor.id, referredAt: new Date() },
+    data: { referredByDistributorId: distributor.id, referredAt: createdAt },
   });
 
   return db.distributionReferral.create({
@@ -127,6 +128,7 @@ async function createDistributionReferralFromDistributor(db: any, userId: string
       distributorId: distributor.id,
       firstLevelDistributorId,
       sourceCode: sourceCode || distributor.code,
+      createdAt,
     },
   });
 }
@@ -273,6 +275,7 @@ async function backfillDistributionReferralsForDistributor(db: any, distributor:
       referral.userId,
       distributor,
       referral.sourceCode || distributor.code,
+      referral.createdAt,
     );
     if (result) created += 1;
   }
@@ -303,7 +306,7 @@ export async function bindShareReferral(userId: string, referralCode?: string) {
     let distributionReferral = null;
     const distributor = resolved.distributor;
     if (distributor?.status === 'active' && distributor.userId !== userId) {
-      distributionReferral = await createDistributionReferralFromDistributor(tx, userId, distributor, code);
+      distributionReferral = await createDistributionReferralFromDistributor(tx, userId, distributor, code, shareReferral.createdAt);
     }
 
     return {
@@ -752,7 +755,8 @@ async function settleDistributionCommissionForOrderInTx(tx: any, orderId: string
 
   const setting = await tx.distributionSetting.findUnique({ where: { id: 'default' } });
   if (!setting?.enabled) {
-    if (!referral.firstOrderId && await isFirstPaidOrderForUserAfter(tx, referral.userId, order.id, referral.distributor?.approvedAt)) {
+    const eligibleAfter = maxDate(referral.createdAt, referral.distributor?.approvedAt);
+    if (!referral.firstOrderId && await isFirstPaidOrderForUserAfter(tx, referral.userId, order.id, eligibleAfter)) {
       await tx.distributionReferral.update({
         where: { id: referral.id },
         data: { firstOrderId: order.id, commissionSettledAt: new Date() },
@@ -835,20 +839,22 @@ async function backfillMissingCommissionsForDistributor(distributorId: string) {
       if (!direct || direct.status !== 'active') continue;
 
       if (direct.id === distributor.id) {
+        const directEligibleAfter = maxDate(referral.createdAt, direct.approvedAt);
         const hasDirectCommission = await hasDirectCommissionForReferral(tx, referral.userId, distributor.id);
         if (!hasDirectCommission) {
-          const firstDirectOrder = await findFirstPaidOrderForUserAfter(tx, referral.userId, direct.approvedAt);
+          const firstDirectOrder = await findFirstPaidOrderForUserAfter(tx, referral.userId, directEligibleAfter);
           if (firstDirectOrder) candidateOrderIds.add(firstDirectOrder.id);
         }
       }
 
       if (distributor.level === 1 && direct.level === 2 && referral.firstLevelDistributorId === distributor.id) {
+        const overrideEligibleAfter = maxDate(referral.createdAt, direct.approvedAt, distributor.approvedAt);
         const hasOverrideCommission = await hasCommissionForReferral(tx, referral.userId, distributor.id, 'level1_override');
         if (!hasOverrideCommission) {
           const firstOverrideOrder = await findFirstPaidOrderForUserAfter(
             tx,
             referral.userId,
-            maxDate(direct.approvedAt, distributor.approvedAt),
+            overrideEligibleAfter,
           );
           if (firstOverrideOrder) candidateOrderIds.add(firstOverrideOrder.id);
         }
@@ -927,11 +933,12 @@ async function normalizeDirectCommissionsForDistributor(db: any, distributor: an
 
   let changed = 0;
   for (const referral of referrals) {
+    const directEligibleAfter = maxDate(referral.createdAt, distributor.approvedAt);
     const firstOrder = await db.order.findFirst({
       where: {
         userId: referral.userId,
         status: 'paid',
-        paidAt: distributor.approvedAt ? { gte: distributor.approvedAt } : { not: null },
+        paidAt: directEligibleAfter ? { gte: directEligibleAfter } : { not: null },
       },
       orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
       select: { id: true, amount: true },
@@ -1005,11 +1012,12 @@ async function ensureDistributionReferralForOrder(db: any, order: any) {
   }
 
   const paidAt = order.paidAt ? new Date(order.paidAt) : new Date();
-  if (distributor.approvedAt && paidAt < distributor.approvedAt) {
+  const eligibleAfter = maxDate(shareReferral.createdAt, distributor.approvedAt);
+  if (eligibleAfter && paidAt < eligibleAfter) {
     return null;
   }
 
-  await createDistributionReferralFromDistributor(db, order.userId, distributor, shareReferral.sourceCode);
+  await createDistributionReferralFromDistributor(db, order.userId, distributor, shareReferral.sourceCode, shareReferral.createdAt);
   return db.distributionReferral.findUnique({
     where: { userId: order.userId },
     include: { distributor: { include: { parent: true } } },
@@ -1389,7 +1397,8 @@ async function buildEligibleCommissionRows(db: any, order: any, referral: any, s
   if (!direct || direct.status !== 'active') return rows;
 
   if (direct.level === 1) {
-    const canSettleDirect = await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, direct.approvedAt)
+    const directEligibleAfter = maxDate(referral.createdAt, direct.approvedAt);
+    const canSettleDirect = await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, directEligibleAfter)
       && !await hasDirectCommissionForReferral(db, referral.userId, direct.id);
     if (canSettleDirect) {
       const amount = calculateCommission(order.amount, setting.level1Rate);
@@ -1400,7 +1409,8 @@ async function buildEligibleCommissionRows(db: any, order: any, referral: any, s
     return rows;
   }
 
-  const canSettleLevel2Direct = await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, direct.approvedAt)
+  const directEligibleAfter = maxDate(referral.createdAt, direct.approvedAt);
+  const canSettleLevel2Direct = await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, directEligibleAfter)
     && !await hasDirectCommissionForReferral(db, referral.userId, direct.id);
   if (canSettleLevel2Direct) {
     const level2Amount = calculateCommission(order.amount, setting.level2Rate);
@@ -1411,12 +1421,13 @@ async function buildEligibleCommissionRows(db: any, order: any, referral: any, s
 
   const parent = direct.parent;
   const parentRate = Math.max(0, setting.level1Rate - setting.level2Rate);
+  const parentEligibleAfter = maxDate(referral.createdAt, direct.approvedAt, parent?.approvedAt);
   const canSettleParentOverride = parent?.id
     && parent.id !== SYSTEM_DISTRIBUTOR_ID
     && parent.status === 'active'
     && parentRate > 0
-    && isOrderAfterDate(order, maxDate(direct.approvedAt, parent.approvedAt))
-    && await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, maxDate(direct.approvedAt, parent.approvedAt))
+    && isOrderAfterDate(order, parentEligibleAfter)
+    && await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, parentEligibleAfter)
     && !await hasCommissionForReferral(db, referral.userId, parent.id, 'level1_override');
   if (canSettleParentOverride) {
     const parentAmount = calculateCommission(order.amount, parentRate);
