@@ -94,7 +94,7 @@ function inviterLabel(row: any) {
 async function purgeUser(row: any) {
   try {
     await ElMessageBox.prompt(
-      `这会永久删除用户「${userLabel(row)}」以及点数、订单、咨询、收藏、报告、邀请/分销、佣金等测试数据。请输入“清除”确认。`,
+      `这会永久删除用户「${userLabel(row)}」以及点数、订单、咨询、收藏、报告、邀请、推荐合作、奖励等测试数据。请输入“清除”确认。`,
       '一键清除测试用户',
       {
         confirmButtonText: '确认清除',

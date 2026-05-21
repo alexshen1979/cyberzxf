@@ -41,7 +41,7 @@
       </view>
       <view class="stat-item" v-if="showCommissionStats">
         <text class="stat-value">{{ formatMoney(stats.commissionAmount || 0) }}</text>
-        <text class="stat-label">佣金累计</text>
+        <text class="stat-label">奖励累计</text>
       </view>
     </view>
 
@@ -66,29 +66,29 @@
 
     <view class="info-card" v-if="showDistributionInfo">
       <view class="info-row">
-        <text class="info-label">分销资格</text>
+        <text class="info-label">合作身份</text>
         <text class="info-value">{{ statusText }}</text>
       </view>
       <view class="info-row" v-if="distributor">
-        <text class="info-label">当前层级</text>
+        <text class="info-label">身份类型</text>
         <text class="info-value">{{ levelName(distributor.level) }}</text>
       </view>
       <view class="info-row" v-if="distributor">
-        <text class="info-label">所属一级</text>
+        <text class="info-label">合作伙伴</text>
         <text class="info-value">{{ distributor.level === 1 ? '无' : (distributor.parent?.name || '系统') }}</text>
       </view>
       <view class="info-row" v-if="distributor">
-        <text class="info-label">佣金规则</text>
+        <text class="info-label">奖励规则</text>
         <text class="info-value">{{ rateText }}</text>
       </view>
     </view>
 
     <view class="apply-section" v-if="canApplyDistribution">
       <view class="empty-card">
-        <text class="empty-title">申请成为分销员</text>
-        <text class="empty-desc">邀请码已可正常使用。申请通过后，通过你的邀请码带来的新用户首单才会按后台规则产生分销佣金。</text>
+        <text class="empty-title">申请成为涨识推荐官</text>
+        <text class="empty-desc">邀请码已可正常使用。申请通过后，通过你的邀请码带来的新用户首单才会按后台规则产生推荐奖励。</text>
         <view class="primary-btn" @click="apply" :class="{ disabled: applying }">
-          <text>{{ applying ? '申请中...' : '申请分销资格' }}</text>
+          <text>{{ applying ? '申请中...' : '申请推荐官身份' }}</text>
         </view>
       </view>
     </view>
@@ -96,11 +96,11 @@
     <view v-else>
       <view class="status-card pending" v-if="isPending">
         <text class="empty-title">申请已提交，等待后台审核</text>
-        <text class="empty-desc">邀请码仍可正常追踪和领取每日分享点数；审核通过后，符合规则的首单才会产生分销佣金。</text>
+        <text class="empty-desc">邀请码仍可正常追踪和领取每日分享点数；审核通过后，符合规则的首单才会产生推荐奖励。</text>
       </view>
       <view class="withdraw-card" v-if="isActive">
         <view class="section-head">
-          <text class="section-title">佣金提现</text>
+          <text class="section-title">奖励提现</text>
           <text class="section-action" @click="loadWithdrawals">刷新</text>
         </view>
         <view class="withdraw-grid">
@@ -121,7 +121,7 @@
             <text class="withdraw-label">已提现</text>
           </view>
         </view>
-        <view class="withdraw-tip">最低 {{ formatMoney(stats.minWithdrawalAmount || 1000) }} 可申请；新佣金满 {{ stats.withdrawalFreezeDays ?? 7 }} 天后可提现。</view>
+        <view class="withdraw-tip">最低 {{ formatMoney(stats.minWithdrawalAmount || 1000) }} 可申请；新奖励满 {{ stats.withdrawalFreezeDays ?? 7 }} 天后可提现。</view>
         <view class="withdraw-form">
           <input class="withdraw-input" v-model="withdrawAmountInput" type="digit" placeholder="输入提现金额" />
           <view class="primary-btn withdraw-btn" :class="{ disabled: withdrawing }" @click="applyWithdrawal">
@@ -143,10 +143,10 @@
       </view>
       <view class="commission-card" v-if="isActive">
         <view class="section-head">
-          <text class="section-title">分销佣金</text>
+          <text class="section-title">推荐奖励</text>
           <text class="section-action" @click="loadCommissions">刷新</text>
         </view>
-        <view class="empty-list" v-if="commissions.length === 0">暂无佣金记录</view>
+        <view class="empty-list" v-if="commissions.length === 0">暂无奖励记录</view>
         <view class="commission-item" v-for="item in commissions" :key="item.id">
           <view>
             <text class="commission-title">{{ roleLabel(item.role) }}</text>
@@ -213,20 +213,20 @@ const statusText = computed(() => {
 });
 const pageTitle = computed(() => {
   if (!distributor.value) return '我的邀请码';
-  if (isPending.value) return '邀请码已生成，分销审核中';
+  if (isPending.value) return '邀请码已生成，推荐官审核中';
   if (isRejected.value) return '我的邀请码';
   if (isDisabled.value) return '我的邀请码';
   return `我的邀请码 · ${levelName(distributor.value.level)}`;
 });
 const pageSubtitle = computed(() => {
   if (isBlocked.value || !distributor.value) return `邀请码 ${shareCode.value || '--'}，每天分享可领点数，好友注册后还有奖励。`;
-  if (!isActive.value) return `邀请码 ${shareCode.value || '--'} 可正常邀请注册；分销资格：${statusText.value}`;
-  return `邀请码 ${shareCode.value || '--'}，分销资格已通过`;
+  if (!isActive.value) return `邀请码 ${shareCode.value || '--'} 可正常邀请注册；合作身份：${statusText.value}`;
+  return `邀请码 ${shareCode.value || '--'}，合作身份已通过`;
 });
 const rateText = computed(() => {
   if (!distributor.value) return '-';
-  if (distributor.value.level === 1) return `一级 ${setting.value.level1Percent || 0}%`;
-  return `二级 ${setting.value.level2Percent || 0}%`;
+  if (distributor.value.level === 1) return `特邀合作奖励 ${setting.value.level1Percent || 0}%`;
+  return `推荐奖励 ${setting.value.level2Percent || 0}%`;
 });
 
 async function loadAll() {
@@ -308,7 +308,7 @@ async function loadWithdrawals() {
 function fillAllWithdrawal() {
   const amount = Number(stats.value.availableWithdrawalAmount || 0);
   if (amount <= 0) {
-    uni.showToast({ title: '暂无可提现佣金', icon: 'none' });
+    uni.showToast({ title: '暂无可提现奖励', icon: 'none' });
     return;
   }
   withdrawAmountInput.value = (amount / 100).toFixed(2);
@@ -472,20 +472,20 @@ function writePngDataUrlToTempFile(dataUrl: string, filename: string) {
 }
 
 function levelName(level: number) {
-  return level === 1 ? '一级分销员' : '二级分销员';
+  return level === 1 ? '特邀合作伙伴' : '涨识推荐官';
 }
 
 function roleLabel(role: string) {
-  if (role === 'level1_direct') return '一级直推奖励';
-  if (role === 'level2_direct') return '二级直推奖励';
-  if (role === 'level1_override') return '一级差额奖励';
+  if (role === 'level1_direct') return '直接推荐奖励';
+  if (role === 'level2_direct') return '推荐奖励';
+  if (role === 'level1_override') return '合作伙伴奖励';
   return '分享奖励';
 }
 
 function commissionSourceText(item: any) {
   const userName = item.referralUser?.nickname || item.referralUser?.phone || item.referralUserId || '用户';
   const orderAmount = formatMoney(item.order?.amount || 0);
-  return `${userName} 充值 ${orderAmount}，产生分销佣金`;
+  return `${userName} 充值 ${orderAmount}，产生推荐奖励`;
 }
 
 function withdrawalStatusLabel(status: string) {

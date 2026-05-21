@@ -46,7 +46,7 @@
           <el-menu-item index="/distribution">
             <template #title>
               <el-icon><Share /></el-icon>
-              <span>分销管理</span>
+              <span>推荐合作</span>
             </template>
           </el-menu-item>
 

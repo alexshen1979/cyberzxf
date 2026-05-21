@@ -36,7 +36,7 @@
       <el-table-column label="金额" width="100">
         <template #default="{ row }">¥{{ (row.amount / 100).toFixed(2) }}</template>
       </el-table-column>
-      <el-table-column label="分销佣金" min-width="260">
+      <el-table-column label="推荐奖励" min-width="260">
         <template #default="{ row }">
           <div v-if="row.distributionCommissions?.length" class="commission-cell">
             <div class="commission-summary">
@@ -122,9 +122,9 @@ function statusType(s: string) {
 }
 
 function roleLabel(role: string) {
-  if (role === 'level1_direct') return '一级直推';
-  if (role === 'level2_direct') return '二级直推';
-  if (role === 'level1_override') return '一级差额';
+  if (role === 'level1_direct') return '直接推荐奖励';
+  if (role === 'level2_direct') return '推荐奖励';
+  if (role === 'level1_override') return '合作伙伴奖励';
   return role || '-';
 }
 

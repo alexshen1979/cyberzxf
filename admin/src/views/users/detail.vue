@@ -32,11 +32,11 @@
       <el-table-column prop="user.phone" label="手机号" width="130">
         <template #default="{ row }">{{ row.user?.phone || '--' }}</template>
       </el-table-column>
-      <el-table-column label="分销身份" width="120">
+      <el-table-column label="合作身份" width="150">
         <template #default="{ row }">
           <span v-if="!row.user?.distributorProfile">--</span>
           <el-tag v-else :type="row.user.distributorProfile.level === 1 ? 'success' : 'info'" size="small">
-            {{ row.user.distributorProfile.level === 1 ? '一级' : '二级' }}
+            {{ row.user.distributorProfile.level === 1 ? '特邀合作伙伴' : '涨识推荐官' }}
           </el-tag>
         </template>
       </el-table-column>
