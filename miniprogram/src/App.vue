@@ -33,7 +33,7 @@ function extractReferralFromScene(scene?: string) {
     const [key, value] = pair.split('=');
     if (key === 'd' || key === 'ref') return value || '';
   }
-  return decoded.startsWith('D') ? decoded : '';
+  return /^(D|ZS)/i.test(decoded) ? decoded : '';
 }
 
 function normalizeReferralCode(value: any) {

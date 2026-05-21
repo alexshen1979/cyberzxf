@@ -48,28 +48,69 @@
         <el-select v-model="filters.status" placeholder="状态" clearable style="width: 130px" @change="loadDistributors">
           <el-option label="待审核" value="pending" />
           <el-option label="启用" value="active" />
+          <el-option label="已驳回" value="rejected" />
           <el-option label="禁用" value="disabled" />
         </el-select>
         <el-button @click="loadDistributors">刷新</el-button>
       </div>
 
-      <el-table :data="distributors" v-loading="loadingDistributors" style="width: 100%">
+      <el-table :data="distributors" v-loading="loadingDistributors" row-key="id" style="width: 100%">
+        <el-table-column type="expand" width="48">
+          <template #default="{ row }">
+            <div class="child-table-wrap">
+              <div class="child-title">{{ row.name }} 的二级分销员</div>
+              <el-table :data="row.children || []" size="small" empty-text="暂无二级分销员">
+                <el-table-column label="二级分销员" min-width="180">
+                  <template #default="{ row: child }">
+                    <div class="main-cell">
+                      <strong>{{ child.name }}</strong>
+                      <span>{{ child.user?.nickname || child.user?.phone || child.userId || '-' }}</span>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="code" label="分销码" width="130" />
+                <el-table-column label="直推用户" width="100">
+                  <template #default="{ row: child }">{{ child._count?.referrals || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="佣金单" width="90">
+                  <template #default="{ row: child }">{{ child._count?.commissions || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="状态" width="90">
+                  <template #default="{ row: child }">
+                    <el-tag :type="statusTagType(child.status)" size="small">{{ statusLabel(child.status) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="创建时间" width="170">
+                  <template #default="{ row: child }">{{ formatTime(child.createdAt) }}</template>
+                </el-table-column>
+                <el-table-column label="操作" width="230" fixed="right">
+                  <template #default="{ row: child }">
+                    <el-button v-if="child.status === 'pending'" type="success" link @click="reviewDistributor(child, 'active')">通过</el-button>
+                    <el-button v-if="child.status === 'pending'" type="danger" link @click="reviewDistributor(child, 'rejected')">驳回</el-button>
+                    <el-button type="primary" link @click="openLedgerDialog(child)">流水</el-button>
+                    <el-button type="primary" link @click="openDistributorDialog(child)">编辑</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="分销员" min-width="180">
           <template #default="{ row }">
             <div class="main-cell">
               <strong>{{ row.name }}</strong>
-              <span>{{ row.user?.nickname || row.user?.phone || row.userId || '系统账户' }}</span>
+              <span>{{ row.isGroup ? '系统分组' : (row.user?.nickname || row.user?.phone || row.userId || '-') }}</span>
             </div>
           </template>
         </el-table-column>
         <el-table-column prop="code" label="分销码" width="130" />
         <el-table-column label="层级" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.level === 1 ? 'success' : 'info'" size="small">{{ levelLabel(row.level) }}</el-tag>
+            <el-tag :type="row.isGroup ? 'warning' : 'success'" size="small">{{ row.isGroup ? '分组' : levelLabel(row.level) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="所属一级" min-width="150">
-          <template #default="{ row }">{{ row.level === 1 ? '-' : (row.parent?.name || '系统') }}</template>
+          <template #default>--</template>
         </el-table-column>
         <el-table-column label="直推用户" width="100">
           <template #default="{ row }">{{ row._count?.referrals || 0 }}</template>
@@ -82,17 +123,22 @@
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+            <el-tag v-if="!row.isGroup" :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
+            <span v-else>--</span>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
           <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="190" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="row.status === 'pending'" type="success" link @click="reviewDistributor(row, 'active')">通过</el-button>
-            <el-button v-if="row.status === 'pending'" type="danger" link @click="reviewDistributor(row, 'disabled')">驳回</el-button>
-            <el-button type="primary" link @click="openDistributorDialog(row)">编辑</el-button>
+            <template v-if="!row.isGroup">
+              <el-button v-if="row.status === 'pending'" type="success" link @click="reviewDistributor(row, 'active')">通过</el-button>
+              <el-button v-if="row.status === 'pending'" type="danger" link @click="reviewDistributor(row, 'rejected')">驳回</el-button>
+              <el-button type="primary" link @click="openLedgerDialog(row)">流水</el-button>
+              <el-button type="primary" link @click="openDistributorDialog(row)">编辑</el-button>
+            </template>
+            <span v-else>--</span>
           </template>
         </el-table-column>
       </el-table>
@@ -179,6 +225,7 @@
           <el-select v-model="distributorForm.status" style="width: 100%">
             <el-option label="待审核" value="pending" />
             <el-option label="启用" value="active" />
+            <el-option label="已驳回" value="rejected" />
             <el-option label="禁用" value="disabled" />
           </el-select>
         </el-form-item>
@@ -187,6 +234,78 @@
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="savingDistributor" @click="saveDistributor">保存</el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="ledgerDialogVisible" :title="`${ledgerDistributor?.name || ''} 流水`" width="980px">
+      <div v-if="ledgerDistributor" class="ledger-summary">
+        <div>
+          <span>分销码</span>
+          <strong>{{ ledgerDistributor.code }}</strong>
+        </div>
+        <div>
+          <span>层级</span>
+          <strong>{{ levelLabel(ledgerDistributor.level) }}</strong>
+        </div>
+        <div>
+          <span>用户</span>
+          <strong>{{ ledgerDistributor.user?.nickname || ledgerDistributor.user?.phone || ledgerDistributor.userId || '-' }}</strong>
+        </div>
+      </div>
+
+      <el-tabs v-model="ledgerActiveTab">
+        <el-tab-pane label="分销流水" name="commissions">
+          <el-table :data="ledgerCommissions" v-loading="loadingLedgerCommissions" style="width: 100%" empty-text="暂无分销流水">
+            <el-table-column label="角色" width="120">
+              <template #default="{ row }">{{ roleLabel(row.role) }}</template>
+            </el-table-column>
+            <el-table-column label="被推荐用户" min-width="150">
+              <template #default="{ row }">{{ row.referralUser?.nickname || row.referralUser?.phone || row.referralUserId }}</template>
+            </el-table-column>
+            <el-table-column label="订单" min-width="210">
+              <template #default="{ row }">
+                <div class="main-cell">
+                  <strong>{{ row.order?.productName || '-' }}</strong>
+                  <span>{{ row.order?.orderNo || row.orderId }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="订单金额" width="110">
+              <template #default="{ row }">{{ formatMoney(row.order?.amount || 0) }}</template>
+            </el-table-column>
+            <el-table-column label="比例" width="90">
+              <template #default="{ row }">{{ (row.rateBps / 100).toFixed(2) }}%</template>
+            </el-table-column>
+            <el-table-column label="佣金" width="110">
+              <template #default="{ row }">
+                <strong>{{ formatMoney(row.amount) }}</strong>
+              </template>
+            </el-table-column>
+            <el-table-column label="时间" width="170">
+              <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            v-model:current-page="ledgerCommissionPage"
+            :total="ledgerCommissionTotal"
+            :page-size="ledgerCommissionPageSize"
+            layout="prev, pager, next"
+            @current-change="loadLedgerCommissions"
+            class="pager"
+          />
+        </el-tab-pane>
+        <el-tab-pane label="提现流水" name="withdrawals">
+          <el-table :data="ledgerWithdrawals" style="width: 100%" empty-text="暂无提现流水">
+            <el-table-column prop="amount" label="提现金额" width="120">
+              <template #default="{ row }">{{ formatMoney(row.amount || 0) }}</template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="120" />
+            <el-table-column prop="remark" label="备注" min-width="180" />
+            <el-table-column label="时间" width="170">
+              <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+      </el-tabs>
     </el-dialog>
   </div>
 </template>
@@ -217,6 +336,16 @@ const loadingCommissions = ref(false);
 const commissionPage = ref(1);
 const commissionPageSize = 20;
 const commissionTotal = ref(0);
+
+const ledgerDialogVisible = ref(false);
+const ledgerDistributor = ref<any>(null);
+const ledgerActiveTab = ref('commissions');
+const ledgerCommissions = ref<any[]>([]);
+const loadingLedgerCommissions = ref(false);
+const ledgerCommissionPage = ref(1);
+const ledgerCommissionPageSize = 10;
+const ledgerCommissionTotal = ref(0);
+const ledgerWithdrawals = ref<any[]>([]);
 
 const dialogVisible = ref(false);
 const savingDistributor = ref(false);
@@ -275,7 +404,7 @@ async function loadDashboard() {
 async function loadDistributors() {
   loadingDistributors.value = true;
   try {
-    const res = await api.distribution.distributors({
+    const res = await api.distribution.distributorTree({
       page: page.value,
       pageSize,
       keyword: filters.keyword,
@@ -305,6 +434,33 @@ async function loadCommissions() {
     commissionTotal.value = res.data.total;
   } finally {
     loadingCommissions.value = false;
+  }
+}
+
+async function openLedgerDialog(row: any) {
+  ledgerDistributor.value = row;
+  ledgerActiveTab.value = 'commissions';
+  ledgerCommissionPage.value = 1;
+  ledgerCommissions.value = [];
+  ledgerCommissionTotal.value = 0;
+  ledgerWithdrawals.value = [];
+  ledgerDialogVisible.value = true;
+  await loadLedgerCommissions();
+}
+
+async function loadLedgerCommissions() {
+  if (!ledgerDistributor.value?.id) return;
+  loadingLedgerCommissions.value = true;
+  try {
+    const res = await api.distribution.commissions({
+      page: ledgerCommissionPage.value,
+      pageSize: ledgerCommissionPageSize,
+      distributorId: ledgerDistributor.value.id,
+    }) as any;
+    ledgerCommissions.value = res.data.list;
+    ledgerCommissionTotal.value = res.data.total;
+  } finally {
+    loadingLedgerCommissions.value = false;
   }
 }
 
@@ -356,7 +512,7 @@ async function saveDistributor() {
   }
 }
 
-async function reviewDistributor(row: any, status: 'active' | 'disabled') {
+async function reviewDistributor(row: any, status: 'active' | 'rejected') {
   try {
     await api.distribution.updateDistributor(row.id, {
       name: row.name,
@@ -378,12 +534,14 @@ function levelLabel(level: number) {
 function statusLabel(status: string) {
   if (status === 'active') return '启用';
   if (status === 'pending') return '待审核';
+  if (status === 'rejected') return '已驳回';
   return '禁用';
 }
 
 function statusTagType(status: string) {
   if (status === 'active') return 'success';
   if (status === 'pending') return 'warning';
+  if (status === 'rejected') return 'danger';
   return 'info';
 }
 
@@ -455,6 +613,17 @@ h2 {
 
 .settings-form {
   align-items: center;
+}
+
+.child-table-wrap {
+  padding: 12px 18px 16px 54px;
+  background: #f8fafc;
+}
+
+.child-title {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  margin-bottom: 10px;
 }
 
 .formula,

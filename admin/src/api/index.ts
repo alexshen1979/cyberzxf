@@ -36,6 +36,7 @@ export const api = {
     list: (params?: any) => http.get('/admin/users', { params }),
     detail: (id: string) => http.get(`/admin/users/${id}`),
     update: (id: string, data: any) => http.put(`/admin/users/${id}`, data),
+    purge: (id: string) => http.delete(`/admin/users/${id}/purge`),
   },
   points: {
     getUser: (userId: string) => http.get(`/admin/points/${userId}`),
@@ -59,6 +60,7 @@ export const api = {
     updateSettings: (data: any) => http.put('/admin/distribution/settings', data),
     dashboard: () => http.get('/admin/distribution/dashboard'),
     distributors: (params?: any) => http.get('/admin/distribution/distributors', { params }),
+    distributorTree: (params?: any) => http.get('/admin/distribution/distributor-tree', { params }),
     levelOne: () => http.get('/admin/distribution/level-one'),
     createDistributor: (data: any) => http.post('/admin/distribution/distributors', data),
     updateDistributor: (id: string, data: any) => http.put(`/admin/distribution/distributors/${id}`, data),
@@ -140,6 +142,20 @@ export const api = {
     autoFillStatus: () => http.get('/admin/admission-scores/auto-fill/status'),
     startAutoFill: (data?: any) => http.post('/admin/admission-scores/auto-fill/start', data || {}),
     stopAutoFill: () => http.post('/admin/admission-scores/auto-fill/stop'),
+  },
+  artAdmissionRules: {
+    list: (params?: any) => http.get('/admin/art-admission-rules', { params }),
+    create: (data: any) => http.post('/admin/art-admission-rules', data),
+    update: (id: string, data: any) => http.put(`/admin/art-admission-rules/${id}`, data),
+    delete: (id: string) => http.delete(`/admin/art-admission-rules/${id}`),
+    import: (items: any[]) => http.post('/admin/art-admission-rules/import', { items }),
+  },
+  artAdmissionScores: {
+    list: (params?: any) => http.get('/admin/art-admission-scores', { params }),
+    create: (data: any) => http.post('/admin/art-admission-scores', data),
+    update: (id: string, data: any) => http.put(`/admin/art-admission-scores/${id}`, data),
+    delete: (id: string) => http.delete(`/admin/art-admission-scores/${id}`),
+    import: (items: any[]) => http.post('/admin/art-admission-scores/import', { items }),
   },
   scoreRanks: {
     list: (params?: any) => http.get('/admin/score-ranks', { params }),

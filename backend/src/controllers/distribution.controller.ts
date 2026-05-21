@@ -1,6 +1,7 @@
 import { Context } from 'koa';
 import {
   applyDistributor,
+  bindShareReferral,
   createDistributorForAdmin,
   getDistributionDashboardForAdmin,
   getDistributionSettingsForAdmin,
@@ -9,7 +10,9 @@ import {
   getMyDistributionQrCode,
   listCommissionsForAdmin,
   listDistributorsForAdmin,
+  listDistributorTreeForAdmin,
   listLevelOneDistributorsForAdmin,
+  recordUserShare,
   updateDistributionSettingsForAdmin,
   updateDistributorForAdmin,
 } from '../services/distribution.service';
@@ -27,6 +30,17 @@ export async function apply(ctx: Context) {
 export async function qrcode(ctx: Context) {
   const userId = ctx.state.user.userId;
   ctx.body = { success: true, data: await getMyDistributionQrCode(userId) };
+}
+
+export async function recordShare(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  ctx.body = { success: true, data: await recordUserShare(userId, ctx.request.body as Record<string, any>) };
+}
+
+export async function bindReferral(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  const { referralCode } = ctx.request.body as any;
+  ctx.body = { success: true, data: await bindShareReferral(userId, referralCode) };
 }
 
 export async function commissions(ctx: Context) {
@@ -50,6 +64,10 @@ export async function adminDashboard(ctx: Context) {
 
 export async function adminDistributors(ctx: Context) {
   ctx.body = { success: true, data: await listDistributorsForAdmin(ctx.query as Record<string, any>) };
+}
+
+export async function adminDistributorTree(ctx: Context) {
+  ctx.body = { success: true, data: await listDistributorTreeForAdmin(ctx.query as Record<string, any>) };
 }
 
 export async function adminLevelOneDistributors(ctx: Context) {

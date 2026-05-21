@@ -52,9 +52,12 @@ function goDetail(item: any) {
   if (item.targetType === 'article') {
     uni.navigateTo({ url: `/pages/articles/detail?id=${item.targetId}` });
   } else if (item.targetType === 'knowledge') {
-    uni.setStorageSync('open_knowledge_id', item.targetId);
-    uni.switchTab({ url: '/pages/knowledge/index' });
-  } else {
+    uni.navigateTo({ url: `/pages/knowledge/detail?id=${item.targetId}` });
+  } else if (item.targetType === 'university') {
+    uni.navigateTo({ url: `/pages/universities/detail?id=${item.targetId}` });
+  } else if (item.targetType === 'major') {
+    uni.navigateTo({ url: `/pages/majors/detail?id=${item.targetId}` });
+  } else if (item.targetType === 'consultation') {
     userStore.loadSessionId = item.targetId;
     uni.switchTab({ url: '/pages/consult/index' });
   }
@@ -62,7 +65,9 @@ function goDetail(item: any) {
 
 function typeLabel(type: string) {
   if (type === 'article') return '文章';
-  if (type === 'knowledge') return '资料';
+  if (type === 'knowledge') return '知识';
+  if (type === 'university') return '院校';
+  if (type === 'major') return '专业';
   return '咨询';
 }
 
@@ -81,6 +86,8 @@ onMounted(load);
 .fav-type.article { background: rgba(0,245,255,0.1); color: $primary; }
 .fav-type.consultation { background: rgba(124,58,237,0.1); color: $secondary; }
 .fav-type.knowledge { background: rgba(15,118,110,0.10); color: #0f766e; }
+.fav-type.university { background: rgba(37,99,235,0.10); color: #2563eb; }
+.fav-type.major { background: rgba(217,119,6,0.12); color: #b45309; }
 .fav-date { font-size: $font-xs; color: $text-dim; }
 .fav-title { font-size: $font-md; font-weight: 600; display: block; margin-bottom: 4rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fav-summary { font-size: $font-xs; color: $text-secondary; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

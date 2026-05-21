@@ -33,8 +33,8 @@
       </view>
       <view class="share-copy">
         <text class="share-kicker">邀请入口</text>
-        <text class="share-title">我的分享码</text>
-        <text class="share-desc">生成专属小程序码，方便分享志愿分析工具。</text>
+        <text class="share-title">我的邀请码</text>
+        <text class="share-desc">登录即有专属邀请码，每天分享可领点数。</text>
       </view>
       <text class="menu-arrow">›</text>
     </view>
@@ -138,7 +138,7 @@ const menuList = [
   { key: 'consult-records', icon: 'Clock', color: '#7c3aed', bg: '#f5f3ff', title: '咨询记录', desc: '查看 AI 追问历史', action: () => goConsultHistory() },
   { key: 'orders', icon: 'Notebook', color: '#2563eb', bg: '#eff6ff', title: '订单管理', desc: '充值订单和支付状态', action: () => uni.navigateTo({ url: '/pages/orders/index' }) },
   { key: 'points', icon: 'DataLine', color: '#059669', bg: '#ecfdf5', title: '点数明细', desc: '余额变化与消费记录', action: () => uni.navigateTo({ url: '/pages/points/index' }) },
-  { key: 'favorites', icon: 'Star', color: '#d97706', bg: '#fff7ed', title: '我的收藏', desc: '保存的文章和资料', action: () => uni.navigateTo({ url: '/pages/favorites/index' }) },
+  { key: 'favorites', icon: 'Star', color: '#d97706', bg: '#fff7ed', title: '我的收藏', desc: '保存院校、专业和资料', action: () => uni.navigateTo({ url: '/pages/favorites/index' }) },
   { key: 'customer-service', icon: 'Briefcase', color: '#475569', bg: '#f1f5f9', title: '联系客服', desc: '订单、账号和使用问题', action: () => {} },
 ];
 

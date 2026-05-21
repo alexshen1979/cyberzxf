@@ -30,11 +30,8 @@
         <view class="meta-pill" @click="provincePanelOpen = !provincePanelOpen">
           <text>{{ form.province || '选择省份' }}</text>
         </view>
-        <view class="meta-pill ghost" @click="yearPanelOpen = !yearPanelOpen">
-          <text>{{ form.year }}年</text>
-        </view>
-        <view class="meta-pill ghost" :class="{ locating }" @click="detectProvince(true)">
-          <text>{{ locating ? '定位中' : '定位' }}</text>
+        <view class="meta-pill ghost" @click="openProvincePanel">
+          <text>手动选择</text>
         </view>
       </view>
       <text
@@ -42,16 +39,6 @@
         class="location-status"
         :class="locationStatusTone"
       >{{ locationStatus }}</text>
-
-      <view class="year-tags" v-if="yearPanelOpen">
-        <text
-          v-for="item in yearOptions"
-          :key="item"
-          class="year-tag"
-          :class="{ active: form.year === item }"
-          @click="selectYear(item)"
-        >{{ item }}年</text>
-      </view>
 
       <view class="province-tags" v-if="provincePanelOpen">
         <text
@@ -153,7 +140,7 @@
         <view class="input-grid">
           <view class="score-input">
             <text class="input-mark">分</text>
-            <input v-model.number="form.score" type="number" placeholder="500" @input="handleScoreInput" />
+            <input v-model.number="form.score" type="number" :placeholder="cultureScorePlaceholder" @input="handleScoreInput" />
           </view>
           <view class="score-input">
             <text class="input-mark">位</text>
@@ -164,19 +151,25 @@
       </view>
 
       <view v-else class="art-area">
-        <view class="field-label-row">
+        <view class="field-label-row art-category-head">
           <text class="field-label">专业类别</text>
-        </view>
-        <picker :range="artMajorOptions" :value="artMajorIndex" @change="selectArtMajor">
-          <view class="select-field">
-            <text>{{ artMajorOptions[artMajorIndex] }}</text>
-            <text class="select-arrow">⌄</text>
+          <view class="meta-pill art-category-pill" @click="artMajorPanelOpen = !artMajorPanelOpen">
+            <text>{{ currentArtCategory }}</text>
           </view>
-        </picker>
+        </view>
+        <view class="province-tags art-category-tags" v-if="artMajorPanelOpen">
+          <text
+            v-for="(item, index) in artMajorOptions"
+            :key="item"
+            class="province-tag art-category-tag"
+            :class="{ active: artMajorIndex === index }"
+            @click="selectArtMajorByIndex(index)"
+          >{{ item }}</text>
+        </view>
 
         <view class="score-input full">
           <text class="input-mark">分</text>
-          <input v-model.number="artScore" type="number" placeholder="请输入统考分/预估分" />
+          <input v-model.number="artScore" type="number" :placeholder="artScorePlaceholder" @input="handleArtScoreInput" />
         </view>
 
         <view class="art-line">
@@ -193,16 +186,80 @@
           </view>
         </view>
 
-        <picker :range="subjectComboOptions" :value="subjectComboIndex" @change="selectSubjectCombo">
-          <view class="select-field">
-            <text>{{ currentSubjectComboLabel }}</text>
-            <text class="select-arrow">⌄</text>
+        <view v-if="selectionMode === 'six-three'" class="subject-block">
+          <view class="field-label-row">
+            <text class="field-hint">6选3</text>
           </view>
-        </picker>
+          <view class="choice-grid three">
+            <view
+              v-for="item in subjectPool"
+              :key="item"
+              class="choice-chip"
+              :class="{ active: comprehensiveSubjects.includes(item), disabled: !comprehensiveSubjects.includes(item) && comprehensiveSubjects.length >= 3 }"
+              @click="toggleComprehensiveSubject(item)"
+            >
+              <text>{{ item }}</text>
+            </view>
+          </view>
+        </view>
+
+        <view v-else-if="selectionMode === 'two-one-four-two'" class="subject-block split">
+          <view class="subject-line">
+            <view class="field-label-row compact">
+              <text class="field-label">首选</text>
+              <text class="field-hint">2选1</text>
+            </view>
+            <view class="choice-row">
+              <view
+                v-for="item in firstChoiceOptions"
+                :key="item"
+                class="choice-chip small"
+                :class="{ active: firstSubject === item }"
+                @click="selectFirstSubject(item)"
+              >
+                <text>{{ item }}</text>
+              </view>
+            </view>
+          </view>
+          <view class="subject-line">
+            <view class="field-label-row compact">
+              <text class="field-label">次选</text>
+              <text class="field-hint">4选2</text>
+            </view>
+            <view class="choice-row wrap">
+              <view
+                v-for="item in secondChoiceOptions"
+                :key="item"
+                class="choice-chip small"
+                :class="{ active: secondarySubjects.includes(item), disabled: !secondarySubjects.includes(item) && secondarySubjects.length >= 2 }"
+                @click="toggleSecondarySubject(item)"
+              >
+                <text>{{ item }}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view v-else class="subject-block">
+          <view class="field-label-row">
+            <text class="field-hint">按省份规则</text>
+          </view>
+          <view class="choice-row wrap">
+            <view
+              v-for="item in subjectOptions"
+              :key="item"
+              class="choice-chip"
+              :class="{ active: form.subjectType === item }"
+              @click="form.subjectType = item"
+            >
+              <text>{{ item }}</text>
+            </view>
+          </view>
+        </view>
 
         <view class="score-input full">
           <text class="input-mark">分</text>
-          <input v-model.number="form.score" type="number" placeholder="500" @input="handleScoreInput" />
+          <input v-model.number="form.score" type="number" :placeholder="cultureScorePlaceholder" @input="handleScoreInput" />
         </view>
         <text class="rank-lookup-tip" :class="rankLookupState">{{ rankLookupMessage }}</text>
       </view>
@@ -220,7 +277,7 @@
           </view>
           <view class="chart-marker" :style="{ left: chartMarkerLeft }"></view>
           <text class="axis-left">{{ minScoreLabel }}</text>
-          <text class="axis-right">750分</text>
+          <text class="axis-right">{{ cultureScoreMax }}分</text>
         </view>
         <view class="school-counts">
           <text class="count-label">候选池</text>
@@ -373,7 +430,7 @@
           <view class="orbit-ring ring-one"></view>
           <view class="orbit-ring ring-two"></view>
           <view class="orbit-core">
-            <text>AI</text>
+            <image class="orbit-logo" src="/static/images/brand-logo.png" mode="aspectFit" />
           </view>
           <view class="orbit-dot dot-one"></view>
           <view class="orbit-dot dot-two"></view>
@@ -392,10 +449,11 @@
 </template>
 
 <script setup lang="ts">
-import { onShow, onPullDownRefresh } from '@dcloudio/uni-app';
+import { onShow, onPullDownRefresh, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app';
 import { computed, reactive, ref, watch } from 'vue';
 import { api } from '@/api';
 import { useUserStore } from '@/store/user';
+import { recordShare, withShareRef } from '@/utils/share';
 
 const userStore = useUserStore();
 
@@ -410,6 +468,14 @@ const subjectPool = ['物理', '化学', '生物', '政治', '历史', '地理']
 const firstChoiceOptions = ['物理', '历史'] as const;
 const secondChoiceOptions = ['化学', '生物', '政治', '地理'];
 const artMajorOptions = ['美术与设计类', '音乐类', '舞蹈类', '播音与主持类', '表（导）演类', '书法类'];
+const artMajorBackendMap: Record<string, string> = {
+  '美术与设计类': '美术与设计类',
+  '音乐类': '音乐类',
+  '舞蹈类': '舞蹈类',
+  '播音与主持类': '播音与主持类',
+  '表（导）演类': '表（导）演类',
+  '书法类': '书法类',
+};
 const riskOptions = [
   { label: '稳中带冲', value: 'balanced' },
   { label: '稳妥优先', value: 'conservative' },
@@ -469,10 +535,8 @@ const reportsLoaded = ref(false);
 const advancedOpen = ref(false);
 const provinceTouched = ref(false);
 const provincePanelOpen = ref(false);
-const yearPanelOpen = ref(false);
-const yearOptions = ref([2026, 2025]);
+const artMajorPanelOpen = ref(false);
 const regionTree = ref<any[]>([]);
-const locating = ref(false);
 const locationStatus = ref('');
 const locationStatusTone = ref<'muted' | 'success' | 'warning'>('muted');
 const rankLookupLoading = ref(false);
@@ -482,6 +546,15 @@ const rankManuallyEdited = ref(false);
 const rankLookupMessage = ref('填写分数后自动匹配一分一段位次');
 const recommendationPreview = ref<any>(null);
 const recommendationPreviewLoading = ref(false);
+const artSupport = ref<Array<{
+  province: string;
+  year: number;
+  artCategory: string;
+  batch: string;
+  subjectType: string;
+  cultureFullScore?: number;
+  professionalFullScore?: number;
+}>>([]);
 const reportCost = ref(38);
 const publicFreeGift = ref(100);
 let rankLookupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -581,6 +654,8 @@ const subjectSelectionValid = computed(() => {
   return Boolean(form.subjectType);
 });
 
+const currentArtCategory = computed(() => artMajorBackendMap[artMajorOptions[artMajorIndex.value]] || artMajorOptions[artMajorIndex.value]);
+
 const displayScore = computed(() => Number(form.score) || 0);
 
 const displayRank = computed(() => {
@@ -602,17 +677,21 @@ const rankRangeLabel = computed(() => {
 const exceedPercent = computed(() => {
   const score = Number(form.score) || 0;
   if (!score) return 0;
-  const raw = Math.round(((score - 100) / 650) * 100);
+  const raw = Math.round(((score - scoreFloor.value) / Math.max(1, cultureScoreMax.value - scoreFloor.value)) * 100);
   return Math.min(96, Math.max(1, raw));
 });
 
 const exceedText = computed(() => displayScore.value ? `超过本省${exceedPercent.value}%考生` : '填写分数后自动估算');
 
-const minScoreLabel = computed(() => (selectionMode.value === 'six-three' ? '100分' : '220分'));
+const scoreFloor = computed(() => (selectionMode.value === 'six-three' ? 100 : 220));
+
+const minScoreLabel = computed(() => `${scoreFloor.value}分`);
 
 const chartMarkerLeft = computed(() => {
-  const score = Math.min(750, Math.max(100, Number(form.score) || 100));
-  const pct = ((score - 100) / 650) * 100;
+  const floor = scoreFloor.value;
+  const max = cultureScoreMax.value;
+  const score = Math.min(max, Math.max(floor, Number(form.score) || floor));
+  const pct = ((score - floor) / Math.max(1, max - floor)) * 100;
   return `${Math.min(86, Math.max(8, pct))}%`;
 });
 
@@ -694,39 +773,39 @@ const rankPlaceholder = computed(() => {
   return '自动查';
 });
 
-const PROVINCE_CENTERS = [
-  { province: '北京', lat: 39.9042, lng: 116.4074 },
-  { province: '天津', lat: 39.3434, lng: 117.3616 },
-  { province: '河北', lat: 38.0428, lng: 114.5149 },
-  { province: '山西', lat: 37.8706, lng: 112.5489 },
-  { province: '内蒙古', lat: 40.8426, lng: 111.7492 },
-  { province: '辽宁', lat: 41.8057, lng: 123.4315 },
-  { province: '吉林', lat: 43.8171, lng: 125.3235 },
-  { province: '黑龙江', lat: 45.8038, lng: 126.5349 },
-  { province: '上海', lat: 31.2304, lng: 121.4737 },
-  { province: '江苏', lat: 32.0603, lng: 118.7969 },
-  { province: '浙江', lat: 30.2741, lng: 120.1551 },
-  { province: '安徽', lat: 31.8206, lng: 117.2272 },
-  { province: '福建', lat: 26.0745, lng: 119.2965 },
-  { province: '江西', lat: 28.6820, lng: 115.8582 },
-  { province: '山东', lat: 36.6512, lng: 117.1201 },
-  { province: '河南', lat: 34.7466, lng: 113.6254 },
-  { province: '湖北', lat: 30.5928, lng: 114.3055 },
-  { province: '湖南', lat: 28.2282, lng: 112.9388 },
-  { province: '广东', lat: 23.1291, lng: 113.2644 },
-  { province: '广西', lat: 22.8170, lng: 108.3669 },
-  { province: '海南', lat: 20.0440, lng: 110.1999 },
-  { province: '重庆', lat: 29.5630, lng: 106.5516 },
-  { province: '四川', lat: 30.5728, lng: 104.0668 },
-  { province: '贵州', lat: 26.6470, lng: 106.6302 },
-  { province: '云南', lat: 25.0389, lng: 102.7183 },
-  { province: '西藏', lat: 29.6520, lng: 91.1721 },
-  { province: '陕西', lat: 34.3416, lng: 108.9398 },
-  { province: '甘肃', lat: 36.0611, lng: 103.8343 },
-  { province: '青海', lat: 36.6171, lng: 101.7782 },
-  { province: '宁夏', lat: 38.4872, lng: 106.2309 },
-  { province: '新疆', lat: 43.8256, lng: 87.6168 },
-];
+const cultureScoreMax = computed(() => {
+  const ruleMax = currentArtRule.value?.cultureFullScore;
+  if (examCategory.value === 'art' && Number.isFinite(Number(ruleMax))) return Number(ruleMax);
+  if (form.province === '上海') return 660;
+  if (form.province === '海南') return 900;
+  return 750;
+});
+
+const artProfessionalScoreMax = computed(() => {
+  const ruleMax = currentArtRule.value?.professionalFullScore;
+  return Number.isFinite(Number(ruleMax)) ? Number(ruleMax) : 300;
+});
+
+const cultureScorePlaceholder = computed(() => `0-${cultureScoreMax.value}`);
+const artScorePlaceholder = computed(() => `请输入统考分/预估分，0-${artProfessionalScoreMax.value}`);
+
+const currentArtRule = computed(() => {
+  if (examCategory.value !== 'art') return null;
+  const province = form.province.trim();
+  const category = currentArtCategory.value;
+  const batch = artLevel.value;
+  if (!province || !category) return null;
+  return artSupport.value.find(item =>
+    item.province === province &&
+    item.artCategory === category &&
+    item.batch === batch &&
+    (item.subjectType === form.subjectType || item.subjectType === '不限')
+  ) || artSupport.value.find(item =>
+    item.province === province &&
+    item.artCategory === category &&
+    item.batch === batch
+  ) || null;
+});
 
 function splitList(text: string) {
   return text.split(/[,，、\s]+/).map(item => item.trim()).filter(Boolean);
@@ -821,185 +900,20 @@ function mergeMajorSuggestions(keyword: string, remoteItems: Array<{ id: string;
   return result.slice(0, 18);
 }
 
-function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const rad = Math.PI / 180;
-  const dLat = (lat2 - lat1) * rad;
-  const dLng = (lng2 - lng1) * rad;
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function nearestProvince(latitude: number, longitude: number) {
-  return PROVINCE_CENTERS
-    .map(item => Object.assign({}, item, {
-      distance: distanceKm(latitude, longitude, item.lat, item.lng),
-    }))
-    .sort((a, b) => a.distance - b.distance)[0]?.province || '';
-}
-
-function createLocationTimeoutError() {
-  return Object.assign(new Error('location timeout'), { errMsg: 'location:timeout' });
-}
-
-function isLocationTimeout(err: any) {
-  const message = String(err?.errMsg || err?.message || '');
-  return /timeout|time out|超时/i.test(message);
-}
-
-function isLocationDenied(err: any) {
-  const message = String(err?.errMsg || err?.message || '');
-  return /auth deny|authorize|denied|deny|cancel|拒绝|取消|privacy/i.test(message);
-}
-
-function isNetworkLocationUnavailable(err: any) {
-  const message = String(err?.errMsg || err?.message || '');
-  return /NOCELL|WIFI_LOCATION|LOCATIONSWITCHOFF/i.test(message);
-}
-
-function formatLocationError(err: any) {
-  if (isNetworkLocationUnavailable(err)) return '系统网络定位不可用，请打开手机定位、Wi-Fi或移动网络后重试，也可以手动选择省份';
-  if (isLocationTimeout(err)) return '定位超时，请手动选择省份';
-  if (isLocationDenied(err)) return '定位未开启，请手动选择省份';
-  return '定位暂不可用，请手动选择省份';
-}
-
-function locationDebugText(err: any) {
-  return String(err?.errMsg || err?.message || '').replace(/\s+/g, ' ').slice(0, 42);
-}
-
-function isDevtoolsRuntime() {
-  try {
-    const wxApi = (globalThis as any).wx;
-    const info = typeof wxApi?.getDeviceInfo === 'function'
-      ? wxApi.getDeviceInfo()
-      : (uni as any).getSystemInfoSync?.();
-    const platform = String(info?.platform || '').toLowerCase();
-    const system = String(info?.system || '').toLowerCase();
-    return platform === 'devtools' || /devtools|mac|windows/.test(`${platform} ${system}`);
-  } catch {
-    return false;
-  }
-}
-
-function delay(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function authorizeLocation() {
-  const wxApi = (globalThis as any).wx;
-  const authorize = (uni as any).authorize || wxApi?.authorize;
-  if (typeof authorize !== 'function') return Promise.resolve();
-
-  return new Promise<void>((resolve, reject) => {
-    authorize({
-      scope: 'scope.userLocation',
-      success: () => resolve(),
-      fail: (err: any) => reject(err),
-    });
-  });
-}
-
-function requestLocationByApi(
-  apiFn: Function,
-  options: { type: 'gcj02' | 'wgs84'; highAccuracy: boolean; timeoutMs: number },
-) {
-  return new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(createLocationTimeoutError());
-    }, timeoutMs);
-
-    const done = (err?: any, value?: any) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (err) {
-        reject(err);
-        return;
-      }
-      const latitude = Number(value?.latitude);
-      const longitude = Number(value?.longitude);
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-        reject(new Error('location invalid'));
-        return;
-      }
-      resolve({ latitude, longitude });
-    };
-
-    const params: Record<string, any> = {
-      type: options.type,
-      isHighAccuracy: options.highAccuracy,
-      success: (res: any) => done(undefined, res),
-      fail: (err: any) => done(err),
-    };
-    if (options.highAccuracy) {
-      params.highAccuracyExpireTime = Math.max(3000, Math.min(options.timeoutMs - 1000, 10000));
-    }
-    apiFn(params);
-  });
-}
-
-async function getProvinceLocation() {
-  await authorizeLocation().catch((err) => {
-    if (isLocationDenied(err)) throw err;
-  });
-  await delay(250);
-
-  const candidates = [
-    (uni as any).getLocation,
-    (globalThis as any).wx?.getLocation,
-  ].filter((item, index, list) => typeof item === 'function' && list.indexOf(item) === index);
-
-  if (!candidates.length) {
-    throw new Error('location api not available');
-  }
-
-  let lastError: any;
-  const attempts = [
-    { type: 'gcj02' as const, highAccuracy: true, timeoutMs: 15000 },
-    { type: 'wgs84' as const, highAccuracy: true, timeoutMs: 15000 },
-    { type: 'gcj02' as const, highAccuracy: false, timeoutMs: 9000 },
-    { type: 'wgs84' as const, highAccuracy: false, timeoutMs: 9000 },
-  ];
-  for (const apiFn of candidates) {
-    for (const options of attempts) {
-      try {
-        return await requestLocationByApi(apiFn, options);
-      } catch (err: any) {
-        lastError = err;
-        if (isLocationDenied(err)) break;
-      }
-    }
-    if (isLocationDenied(lastError)) break;
-  }
-  throw lastError || new Error('location unavailable');
-}
-
 function selectProvince(province: string) {
   form.province = province;
   ensureSubjectOption();
+  validateScores({ toast: false, clamp: true });
   provinceTouched.value = true;
   provincePanelOpen.value = false;
-  locationStatus.value = `已选择 ${province}，可重新定位`;
+  locationStatus.value = `已选择 ${province}`;
   locationStatusTone.value = 'success';
 }
 
-function selectYear(year: number) {
-  if (year === 2026) {
-    uni.showToast({ title: '不是不报日子未到 哈哈', icon: 'none' });
-    form.year = fallbackDataYear;
-    yearPanelOpen.value = false;
-    return;
-  }
-  form.year = year;
-  yearPanelOpen.value = false;
-  rankAutoFilled.value = false;
-  rankLookupTried.value = false;
-  if (!rankManuallyEdited.value) form.rank = undefined;
-  scheduleRankLookup();
+function openProvincePanel() {
+  provincePanelOpen.value = true;
+  locationStatus.value = '请选择考生参加高考的省份';
+  locationStatusTone.value = 'muted';
 }
 
 function defaultBatchForLevel(level: '本科' | '专科') {
@@ -1048,6 +962,12 @@ function selectArtMajor(event: any) {
   artMajorIndex.value = Number(event?.detail?.value || 0);
 }
 
+function selectArtMajorByIndex(index: number) {
+  artMajorIndex.value = index;
+  artMajorPanelOpen.value = false;
+  scheduleRecommendationPreview();
+}
+
 function selectSubjectCombo(event: any) {
   subjectComboIndex.value = Number(event?.detail?.value || 0);
   if (selectionMode.value === 'legacy') {
@@ -1063,6 +983,7 @@ function selectBatch(event: any) {
 }
 
 function handleScoreInput() {
+  if (!validateCultureScore()) return;
   if (!subjectSelectionValid.value) {
     showSubjectRequiredToast();
     rankLookupLoading.value = false;
@@ -1073,6 +994,43 @@ function handleScoreInput() {
   }
   rankManuallyEdited.value = false;
   scheduleRankLookup();
+}
+
+function handleArtScoreInput() {
+  validateArtScore();
+  scheduleRecommendationPreview();
+}
+
+function validateCultureScore(options: { toast?: boolean; clamp?: boolean } = {}) {
+  const toast = options.toast !== false;
+  const score = Number(form.score);
+  if (!form.score && form.score !== 0) return true;
+  if (!Number.isFinite(score)) return true;
+  const max = cultureScoreMax.value;
+  if (score < 0 || score > max) {
+    if (options.clamp) form.score = Math.min(max, Math.max(0, score));
+    if (toast) uni.showToast({ title: `文化分不能超过${max}分`, icon: 'none' });
+    return false;
+  }
+  return true;
+}
+
+function validateArtScore(options: { toast?: boolean; clamp?: boolean } = {}) {
+  const toast = options.toast !== false;
+  const score = Number(artScore.value);
+  if (!artScore.value && artScore.value !== 0) return true;
+  if (!Number.isFinite(score)) return true;
+  const max = artProfessionalScoreMax.value;
+  if (score < 0 || score > max) {
+    if (options.clamp) artScore.value = Math.min(max, Math.max(0, score));
+    if (toast) uni.showToast({ title: `统考/专业分不能超过${max}分`, icon: 'none' });
+    return false;
+  }
+  return true;
+}
+
+function validateScores(options: { toast?: boolean; clamp?: boolean } = {}) {
+  return validateCultureScore(options) && (examCategory.value !== 'art' || validateArtScore(options));
 }
 
 function showSubjectRequiredToast() {
@@ -1118,20 +1076,6 @@ async function loadRegions() {
   }
 }
 
-async function loadVolunteerDataYears() {
-  try {
-    const res = await api.volunteer.dataYears();
-    const years = res.data?.years || [];
-    yearOptions.value = [...new Set([...years, 2026, 2025])]
-      .filter(year => year === 2026 || year === 2025)
-      .sort((a, b) => b - a);
-    form.year = fallbackDataYear;
-  } catch {
-    yearOptions.value = [2026, 2025];
-    form.year = fallbackDataYear;
-  }
-}
-
 async function loadPublicConfig() {
   try {
     const res = await api.config.getPublic();
@@ -1148,6 +1092,15 @@ async function loadPublicConfig() {
   }
 }
 
+async function loadArtSupport() {
+  try {
+    const res = await api.volunteer.artSupport();
+    artSupport.value = res.data || [];
+  } catch {
+    artSupport.value = [];
+  }
+}
+
 function scheduleRankLookup() {
   if (rankLookupTimer) clearTimeout(rankLookupTimer);
   rankLookupTimer = setTimeout(() => {
@@ -1161,11 +1114,18 @@ async function lookupScoreRank() {
   const province = form.province.trim();
   const subjectType = form.subjectType;
 
-  if (!province || !subjectType || !Number.isInteger(year) || !Number.isInteger(score) || score <= 0 || score > 750) {
+  if (!province || !subjectType || !Number.isInteger(year) || !Number.isInteger(score) || score <= 0) {
     rankLookupLoading.value = false;
     rankLookupTried.value = false;
     rankAutoFilled.value = false;
     if (!rankManuallyEdited.value) rankLookupMessage.value = '填写分数后自动匹配一分一段位次';
+    return;
+  }
+  if (!validateCultureScore({ toast: false })) {
+    rankLookupLoading.value = false;
+    rankLookupTried.value = true;
+    rankAutoFilled.value = false;
+    rankLookupMessage.value = `分数需在0-${cultureScoreMax.value}之间`;
     return;
   }
 
@@ -1186,7 +1146,7 @@ async function lookupScoreRank() {
       const exactText = res.data.exact === false && res.data.score
         ? `（按${res.data.score}分及以上段估算）`
         : '';
-      rankLookupMessage.value = `${year}${province}${res.data.subjectType}：约第 ${res.data.rank} 名${exactText}`;
+      rankLookupMessage.value = `${province}${res.data.subjectType}：约第 ${res.data.rank} 名${exactText}`;
       scheduleRecommendationPreview();
     } else {
       if (rankAutoFilled.value && !rankManuallyEdited.value) form.rank = undefined;
@@ -1218,7 +1178,12 @@ async function loadRecommendationPreview() {
   const province = form.province.trim();
   const subjectType = form.subjectType;
 
-  if (!province || !subjectType || !Number.isInteger(year) || !Number.isFinite(score) || score <= 0 || score > 750) {
+  if (!province || !subjectType || !Number.isInteger(year) || !Number.isFinite(score) || score <= 0 || !validateCultureScore({ toast: false })) {
+    recommendationPreview.value = null;
+    recommendationPreviewLoading.value = false;
+    return;
+  }
+  if (examCategory.value === 'art' && (!artScore.value || Number(artScore.value) <= 0 || !validateArtScore({ toast: false }))) {
     recommendationPreview.value = null;
     recommendationPreviewLoading.value = false;
     return;
@@ -1229,12 +1194,16 @@ async function loadRecommendationPreview() {
 
   try {
     const res = await api.volunteer.preview({
+      examCategory: examCategory.value,
       province,
       year,
       subjectType,
       score,
       rank: form.rank ? Number(form.rank) : undefined,
       targetBatch: form.targetBatch,
+      artCategory: examCategory.value === 'art' ? currentArtCategory.value : undefined,
+      artProfessionalScore: examCategory.value === 'art' ? Number(artScore.value) : undefined,
+      artLevel: examCategory.value === 'art' ? artLevel.value : undefined,
       preferredCities: splitList(preferredCitiesText.value),
       preferredMajors: splitList(preferredMajorsText.value),
       avoidMajors: splitList(avoidMajorsText.value),
@@ -1271,52 +1240,6 @@ function goRecharge() {
   uni.navigateTo({ url: '/pages/recharge/index' });
 }
 
-async function detectProvince(force = false) {
-  if (locating.value) return;
-  if (!force && (form.province || provinceTouched.value)) return;
-  if (isDevtoolsRuntime()) {
-    locationStatus.value = force ? '开发者工具定位不稳定，请真机预览或手动选择省份' : '';
-    locationStatusTone.value = 'warning';
-    if (force) uni.showToast({ title: locationStatus.value, icon: 'none' });
-    return;
-  }
-
-  locating.value = true;
-  locationStatus.value = '正在根据位置默认省份...';
-  locationStatusTone.value = 'muted';
-  try {
-    const location = await getProvinceLocation();
-    const province = nearestProvince(Number(location.latitude), Number(location.longitude));
-    if (!province) {
-      locationStatus.value = '定位结果不稳定，请手动选择省份';
-      locationStatusTone.value = 'warning';
-      return;
-    }
-    if (!provinceTouched.value || force) {
-      form.province = province;
-      ensureSubjectOption();
-      locationStatus.value = `已根据定位默认：${province}，可手动修改`;
-      locationStatusTone.value = 'success';
-    } else {
-      locationStatus.value = '已获取定位，省份仍可手动填写';
-      locationStatusTone.value = 'success';
-    }
-  } catch (err: any) {
-    const debug = locationDebugText(err);
-    locationStatus.value = `${formatLocationError(err)}${debug && force ? `（${debug}）` : ''}`;
-    locationStatusTone.value = 'warning';
-    provincePanelOpen.value = true;
-    if (force) {
-      uni.showToast({
-        title: isNetworkLocationUnavailable(err) ? '请打开定位和网络后重试' : formatLocationError(err),
-        icon: 'none',
-      });
-    }
-  } finally {
-    locating.value = false;
-  }
-}
-
 async function submit() {
   if (loading.value) return;
   if (!userStore.isLogin) {
@@ -1325,6 +1248,11 @@ async function submit() {
   }
   if (!form.province.trim() || !form.score) {
     uni.showToast({ title: '请填写省份和分数', icon: 'none' });
+    return;
+  }
+  if (!validateScores()) return;
+  if (examCategory.value === 'art' && (!artScore.value || Number(artScore.value) <= 0)) {
+    uni.showToast({ title: '请填写统考/专业分', icon: 'none' });
     return;
   }
   if (!subjectSelectionValid.value) {
@@ -1363,9 +1291,13 @@ async function submit() {
       riskNotes.value.trim() ? `体检/单科限制：${riskNotes.value.trim()}` : '',
     ].filter(Boolean).join('\n');
     const analysisInput = Object.assign({}, form, {
+      examCategory: examCategory.value,
       province: form.province.trim(),
       score: Number(form.score),
       rank: form.rank ? Number(form.rank) : undefined,
+      artCategory: examCategory.value === 'art' ? currentArtCategory.value : undefined,
+      artProfessionalScore: examCategory.value === 'art' ? Number(artScore.value) : undefined,
+      artLevel: examCategory.value === 'art' ? artLevel.value : undefined,
       preferredCities: splitList(preferredCitiesText.value),
       preferredMajors: splitList(preferredMajorsText.value),
       avoidMajors: splitList(avoidMajorsText.value),
@@ -1416,22 +1348,42 @@ function formatDate(value: string) {
 
 onShow(() => {
   loadPublicConfig();
-  loadVolunteerDataYears();
+  loadArtSupport();
   loadRegions();
   loadReports();
-  detectProvince(false);
 });
 
 onPullDownRefresh(async () => {
   try {
-    await Promise.all([loadPublicConfig(), loadVolunteerDataYears(), loadRegions(), loadReports(), userStore.fetchBalance()]);
+    await Promise.all([loadPublicConfig(), loadArtSupport(), loadRegions(), loadReports(), userStore.fetchBalance()]);
     await lookupScoreRank();
   } finally {
     uni.stopPullDownRefresh();
   }
 });
 
+onShareAppMessage(() => {
+  const path = withShareRef('/pages/volunteer/index');
+  recordShare('friend', path);
+  return {
+    title: '涨识 AI 高考志愿分析',
+    path,
+  };
+});
+
+onShareTimeline(() => {
+  const path = withShareRef('/pages/volunteer/index');
+  recordShare('timeline', path);
+  return {
+    title: '涨识 AI 高考志愿分析',
+    query: path.split('?')[1] || '',
+  };
+});
+
 watch(() => form.province, ensureSubjectOption);
+watch([() => form.province, examCategory, artLevel, artMajorIndex], () => {
+  validateScores({ toast: false, clamp: true });
+});
 watch(
   () => userStore.isLogin,
   (isLogin) => {
@@ -1448,8 +1400,9 @@ watch(
 watch(preferredCitiesText, scheduleRecommendationPreview);
 watch(preferredMajorsText, () => handleMajorInput('preferred'));
 watch(avoidMajorsText, () => handleMajorInput('avoid'));
+watch([examCategory, artLevel, artMajorIndex], scheduleRecommendationPreview);
 watch(
-  () => [form.province, form.year, form.subjectType, form.score],
+  () => [form.province, form.subjectType, form.score],
   () => {
     rankManuallyEdited.value = false;
     scheduleRankLookup();
@@ -1628,10 +1581,6 @@ watch(
   color: #475569;
 }
 
-.meta-pill.locating {
-  opacity: 0.72;
-}
-
 .location-status {
   display: block;
   margin: -8rpx 0 18rpx;
@@ -1648,8 +1597,7 @@ watch(
   color: #b45309;
 }
 
-.province-tags,
-.year-tags {
+.province-tags {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 10rpx;
@@ -1660,12 +1608,7 @@ watch(
   border: 1rpx solid rgba(148, 163, 184, 0.14);
 }
 
-.year-tags {
-  grid-template-columns: repeat(2, 1fr);
-}
-
-.province-tag,
-.year-tag {
+.province-tag {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1679,11 +1622,38 @@ watch(
   font-weight: 700;
 }
 
-.province-tag.active,
-.year-tag.active {
+.province-tag.active {
   background: #ecfeff;
   border-color: #67e8f9;
   color: #0891b2;
+}
+
+.art-category-head {
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.art-category-pill {
+  max-width: 360rpx;
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #7c3aed;
+}
+
+.art-category-tags {
+  grid-template-columns: repeat(2, 1fr);
+  margin-top: -4rpx;
+  margin-bottom: 20rpx;
+}
+
+.art-category-tag {
+  height: 64rpx;
+  padding: 0 12rpx;
+  box-sizing: border-box;
+  font-size: 25rpx;
+  line-height: 1.18;
+  text-align: center;
+  white-space: normal;
 }
 
 .subject-area,
@@ -2473,12 +2443,17 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #0f766e 0%, #7c3aed 100%);
-  color: #fff;
-  font-size: 28rpx;
-  font-weight: 900;
+  overflow: hidden;
+  background: #101010;
+  border: 4rpx solid rgba(255, 255, 255, 0.9);
   box-shadow: 0 16rpx 34rpx rgba(124, 58, 237, 0.28);
   animation: corePulse 1.2s ease-in-out infinite;
+}
+
+.orbit-logo {
+  width: 78rpx;
+  height: 78rpx;
+  display: block;
 }
 
 .orbit-dot {

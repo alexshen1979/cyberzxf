@@ -51,7 +51,7 @@ export async function streamConsult(ctx: Context) {
 
   // 设置 SSE 响应头
   ctx.set({
-    'Content-Type': 'text/event-stream',
+    'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
@@ -80,17 +80,16 @@ export async function streamConsult(ctx: Context) {
     const reader = result.stream.getReader();
     const decoder = new TextDecoder();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    let streamBuffer = '';
+    const consumeUpstreamChunk = (chunk: string, flush = false) => {
+      streamBuffer += chunk;
+      const lines = streamBuffer.split('\n');
+      streamBuffer = flush ? '' : (lines.pop() || '');
 
-      const chunk = decoder.decode(value, { stream: true });
-
-      // DeepSeek 返回的是 SSE 格式 "data: {...}\n\n"
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6).trim();
+      for (const rawLine of lines) {
+        const line = rawLine.replace(/\r$/, '');
+        if (line.startsWith('data:')) {
+          const jsonStr = line.slice(5).trim();
           if (jsonStr === '[DONE]') continue;
 
           try {
@@ -104,7 +103,16 @@ export async function streamConsult(ctx: Context) {
           }
         }
       }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      consumeUpstreamChunk(chunk);
     }
+    consumeUpstreamChunk(decoder.decode(), true);
 
     actualModel = result.model;
     actualCost = result.pointsCost;
@@ -173,9 +181,9 @@ export async function streamConsult(ctx: Context) {
 
 function chunkText(text: string) {
   const chunks: string[] = [];
-  const content = text || '';
-  for (let i = 0; i < content.length; i += 24) {
-    chunks.push(content.slice(i, i + 24));
+  const chars = Array.from(text || '');
+  for (let i = 0; i < chars.length; i += 24) {
+    chunks.push(chars.slice(i, i + 24).join(''));
   }
   return chunks.length ? chunks : [''];
 }

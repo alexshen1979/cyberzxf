@@ -9,7 +9,7 @@
     <view class="decision-card">
       <view class="decision-item">
         <text class="decision-label">定位原则</text>
-        <text class="decision-value">位次优先</text>
+        <text class="decision-value">{{ isArtReport ? '综合分优先' : '位次优先' }}</text>
       </view>
       <view class="decision-item">
         <text class="decision-label">推荐依据</text>
@@ -243,9 +243,10 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { onLoad } from '@dcloudio/uni-app';
+import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app';
 import { api } from '@/api';
 import { useUserStore } from '@/store/user';
+import { recordShare, withShareRef } from '@/utils/share';
 
 const userStore = useUserStore();
 const activeTab = ref<'cards' | 'report'>('cards');
@@ -316,7 +317,15 @@ function sanitizeReport(content = '') {
 const reportTitle = computed(() => {
   const source = data.value?.input || data.value;
   if (!source?.province) return '志愿分析报告';
+  if (source.examCategory === 'art') {
+    return `${source.province} ${source.artCategory || '艺术类'} ${source.score || ''}分`;
+  }
   return `${source.province} ${source.subjectType || ''} ${source.score || ''}分`;
+});
+
+const isArtReport = computed(() => {
+  const source = data.value?.input || data.value;
+  return source?.examCategory === 'art';
 });
 
 const groups = computed(() => {
@@ -352,9 +361,11 @@ const reportMetrics = computed(() => {
   const source = reportInput.value || data.value || {};
   return [
     { label: '考生省份', value: source.province || '未填写' },
-    { label: '科类/选科', value: source.subjectType || '未填写' },
+    { label: isArtReport.value ? '艺术类别' : '科类/选科', value: isArtReport.value ? (source.artCategory || '未填写') : (source.subjectType || '未填写') },
     { label: '高考分数', value: source.score ? `${source.score} 分` : '未填写' },
-    { label: '参考位次', value: source.rank ? `${source.rank}` : '未填写' },
+    isArtReport.value
+      ? { label: '统考/专业分', value: source.artProfessionalScore ? `${source.artProfessionalScore} 分` : '未填写' }
+      : { label: '参考位次', value: source.rank ? `${source.rank}` : '未填写' },
     { label: '分析年份', value: source.year ? `${source.year} 年` : '默认年份' },
     { label: '风险偏好', value: riskPreferenceLabel(source.riskPreference) },
   ];
@@ -439,13 +450,14 @@ async function downloadReport(type: 'pdf' | 'image') {
     if (!downloadRes.tempFilePath) {
       throw new Error('报告下载失败');
     }
+    const namedFilePath = await persistExportFile(downloadRes.tempFilePath, type);
 
     if (type === 'pdf') {
-      await uni.openDocument({ filePath: downloadRes.tempFilePath, fileType: 'pdf', showMenu: true });
+      await uni.openDocument({ filePath: namedFilePath, fileType: 'pdf', showMenu: true });
       return;
     }
 
-    await uni.saveImageToPhotosAlbum({ filePath: downloadRes.tempFilePath });
+    await uni.saveImageToPhotosAlbum({ filePath: namedFilePath });
     uni.showToast({ title: '长图已保存', icon: 'success' });
   } catch (err: any) {
     const message = String(err?.errMsg || err?.message || '');
@@ -467,6 +479,50 @@ function toggleGroup(key: string) {
 
 function isGroupCollapsed(key: string) {
   return Boolean(collapsedGroups.value[key]);
+}
+
+async function persistExportFile(tempFilePath: string, type: 'pdf' | 'image') {
+  const fs = (uni as any).getFileSystemManager?.();
+  const root = (globalThis as any)?.wx?.env?.USER_DATA_PATH || (globalThis as any)?.uni?.env?.USER_DATA_PATH || '';
+  if (!fs || !root) return tempFilePath;
+
+  const filePath = `${root}/${buildExportFilename(type)}`;
+  const copied = await new Promise<boolean>((resolve) => {
+    fs.unlink({
+      filePath,
+      complete: () => {
+        fs.copyFile({
+          srcPath: tempFilePath,
+          destPath: filePath,
+          success: () => resolve(true),
+          fail: () => resolve(false),
+        });
+      },
+    });
+  });
+  return copied ? filePath : tempFilePath;
+}
+
+function buildExportFilename(type: 'pdf' | 'image') {
+  const ext = type === 'pdf' ? 'pdf' : 'png';
+  const userName = userStore.userInfo?.nickname || userStore.userInfo?.phone || '用户';
+  const reportId = currentReportId();
+  const parts = [
+    '涨识',
+    '志愿分析报告',
+    userName,
+    reportTitle.value,
+    formattedReportDate.value.replace(/\./g, ''),
+    reportId ? reportId.slice(0, 8) : '',
+  ].filter(Boolean);
+  return `${safeDownloadFilename(parts.join('_'))}.${ext}`;
+}
+
+function safeDownloadFilename(value: string) {
+  return String(value || '涨识_志愿分析报告')
+    .replace(/[\\/:*?"<>|\s]+/g, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 120);
 }
 
 function currentGroupLimit(key: string) {
@@ -817,6 +873,26 @@ function displayReason(item: any) {
 onLoad((query: any) => {
   loadReport(query?.id);
   loadExportCosts();
+});
+
+onShareAppMessage(() => {
+  const id = currentReportId();
+  const path = withShareRef(id ? `/pages/volunteer/report?id=${id}` : '/pages/volunteer/index');
+  recordShare('friend', path);
+  return {
+    title: reportTitle.value || '涨识 志愿分析报告',
+    path,
+  };
+});
+
+onShareTimeline(() => {
+  const id = currentReportId();
+  const path = withShareRef(id ? `/pages/volunteer/report?id=${id}` : '/pages/volunteer/index');
+  recordShare('timeline', path);
+  return {
+    title: reportTitle.value || '涨识 志愿分析报告',
+    query: path.split('?')[1] || '',
+  };
 });
 </script>
 

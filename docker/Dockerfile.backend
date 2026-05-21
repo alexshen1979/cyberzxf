@@ -11,6 +11,7 @@ RUN npm ci
 COPY tsconfig.json ./
 COPY prisma ./prisma
 COPY src ./src
+COPY src/assets ./dist/assets
 COPY scripts ./scripts
 COPY start.sh ./
 

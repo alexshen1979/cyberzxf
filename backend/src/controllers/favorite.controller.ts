@@ -1,6 +1,54 @@
 import { Context } from 'koa';
 import { prisma } from '../utils/prisma';
 
+const FAVORITE_TARGET_TYPES = ['article', 'consultation', 'knowledge', 'university', 'major'];
+
+async function assertFavoriteTargetExists(targetType: string, targetId: string) {
+  if (targetType === 'article') {
+    return prisma.article.findUnique({ where: { id: targetId }, select: { id: true } });
+  }
+  if (targetType === 'consultation') {
+    return prisma.consultationRecord.findUnique({ where: { id: targetId }, select: { id: true } });
+  }
+  if (targetType === 'knowledge') {
+    return prisma.knowledgeEntry.findUnique({ where: { id: targetId }, select: { id: true } });
+  }
+  if (targetType === 'university') {
+    return prisma.university.findUnique({ where: { id: targetId }, select: { id: true } });
+  }
+  if (targetType === 'major') {
+    return prisma.major.findUnique({ where: { id: targetId }, select: { id: true } });
+  }
+  return null;
+}
+
+async function buildFavoriteDisplay(fav: { targetType: string; targetId: string }) {
+  let title = '';
+  let summary = '';
+  if (fav.targetType === 'article') {
+    const article = await prisma.article.findUnique({ where: { id: fav.targetId } });
+    title = article?.title || '已删除';
+    summary = article?.content?.replace(/<[^>]+>/g, '').slice(0, 100) || '';
+  } else if (fav.targetType === 'consultation') {
+    const record = await prisma.consultationRecord.findUnique({ where: { id: fav.targetId } });
+    title = record?.question?.slice(0, 50) || '已删除';
+    summary = record?.answer?.slice(0, 100) || '';
+  } else if (fav.targetType === 'knowledge') {
+    const entry = await prisma.knowledgeEntry.findUnique({ where: { id: fav.targetId } });
+    title = entry?.title || '已删除';
+    summary = entry?.content?.replace(/<[^>]+>/g, '').slice(0, 100) || '';
+  } else if (fav.targetType === 'university') {
+    const university = await prisma.university.findUnique({ where: { id: fav.targetId } });
+    title = university?.name || '已删除';
+    summary = [university?.province, university?.city, university?.level, university?.type].filter(Boolean).join(' · ');
+  } else if (fav.targetType === 'major') {
+    const major = await prisma.major.findUnique({ where: { id: fav.targetId } });
+    title = major?.name || '已删除';
+    summary = major?.employment || major?.description || [major?.category, major?.degreeType, major?.riskLevel].filter(Boolean).join(' · ');
+  }
+  return { title, summary };
+}
+
 // 添加收藏（已收藏则取消，实现 toggle）
 export async function toggle(ctx: Context) {
   const userId = ctx.state.user.userId;
@@ -12,9 +60,9 @@ export async function toggle(ctx: Context) {
     return;
   }
 
-  if (!['article', 'consultation', 'knowledge'].includes(targetType)) {
+  if (!FAVORITE_TARGET_TYPES.includes(targetType)) {
     ctx.status = 422;
-    ctx.body = { success: false, message: 'targetType 只能为 article、consultation 或 knowledge' };
+    ctx.body = { success: false, message: 'targetType 只能为 article、consultation、knowledge、university 或 major' };
     return;
   }
 
@@ -27,6 +75,13 @@ export async function toggle(ctx: Context) {
   if (existing) {
     await prisma.favorite.delete({ where: { id: existing.id } });
     ctx.body = { success: true, data: { favorited: false }, message: '已取消收藏' };
+    return;
+  }
+
+  const target = await assertFavoriteTargetExists(targetType, targetId);
+  if (!target) {
+    ctx.status = 404;
+    ctx.body = { success: false, message: '收藏目标不存在' };
     return;
   }
 
@@ -45,6 +100,12 @@ export async function check(ctx: Context) {
   if (!targetType || !targetId) {
     ctx.status = 422;
     ctx.body = { success: false, message: 'targetType 和 targetId 为必填项' };
+    return;
+  }
+
+  if (!FAVORITE_TARGET_TYPES.includes(targetType)) {
+    ctx.status = 422;
+    ctx.body = { success: false, message: 'targetType 不支持' };
     return;
   }
 
@@ -75,21 +136,7 @@ export async function list(ctx: Context) {
 
   // 加载关联内容
   const enriched = await Promise.all(items.map(async (fav) => {
-    let title = '';
-    let summary = '';
-    if (fav.targetType === 'article') {
-      const article = await prisma.article.findUnique({ where: { id: fav.targetId } });
-      title = article?.title || '已删除';
-      summary = article?.content?.slice(0, 100) || '';
-    } else if (fav.targetType === 'consultation') {
-      const record = await prisma.consultationRecord.findUnique({ where: { id: fav.targetId } });
-      title = record?.question?.slice(0, 50) || '已删除';
-      summary = record?.answer?.slice(0, 100) || '';
-    } else if (fav.targetType === 'knowledge') {
-      const entry = await prisma.knowledgeEntry.findUnique({ where: { id: fav.targetId } });
-      title = entry?.title || '已删除';
-      summary = entry?.content?.replace(/<[^>]+>/g, '').slice(0, 100) || '';
-    }
+    const { title, summary } = await buildFavoriteDisplay(fav);
     return { ...fav, title, summary };
   }));
 

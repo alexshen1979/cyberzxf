@@ -65,7 +65,7 @@
     {
       "path": "pages/distribution/index",
       "style": {
-        "navigationBarTitleText": "我的分享码",
+        "navigationBarTitleText": "我的邀请码",
         "navigationBarBackgroundColor": "#ffffff",
         "navigationBarTextStyle": "black",
         "enablePullDownRefresh": true
@@ -112,6 +112,14 @@
       }
     },
     {
+      "path": "pages/knowledge/detail",
+      "style": {
+        "navigationBarTitleText": "知识详情",
+        "navigationBarBackgroundColor": "#ffffff",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
       "path": "pages/consult/index",
       "style": {
         "navigationBarTitleText": "AI 追问",
@@ -131,6 +139,14 @@
       "path": "pages/universities/detail",
       "style": {
         "navigationBarTitleText": "院校详情",
+        "navigationBarBackgroundColor": "#ffffff",
+        "navigationBarTextStyle": "black"
+      }
+    },
+    {
+      "path": "pages/majors/detail",
+      "style": {
+        "navigationBarTitleText": "专业详情",
         "navigationBarBackgroundColor": "#ffffff",
         "navigationBarTextStyle": "black"
       }

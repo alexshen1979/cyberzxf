@@ -11,9 +11,8 @@ export function categoryIcon(iconName: string): string {
   return ICON_EMOJI_MAP[iconName] || iconName || '📌';
 }
 
-// 开发环境使用本地后端，生产环境使用正式域名
-// 可通过 .env 文件中的 VITE_API_BASE_URL 覆盖
-export const BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:3000/api/v1';
+// 小程序真机和体验版不能请求 localhost；缺省也走正式 API，避免环境变量丢失时断网。
+export const BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'https://zhangshi-api.digitsecho.com/api/v1';
 
 interface RequestOptions {
   url: string;
@@ -27,6 +26,7 @@ interface RequestOptions {
 
 export async function request<T = any>(options: RequestOptions): Promise<{ success: boolean; data: T; message?: string }> {
   const { url, method = 'GET', data, header = {}, showLoading = false, timeout = 15000 } = options;
+  const requestUrl = `${BASE_URL}${url}`;
 
   if (showLoading) {
     uni.showLoading({ title: options.loadingTitle || '加载中...', mask: true });
@@ -36,7 +36,7 @@ export async function request<T = any>(options: RequestOptions): Promise<{ succe
     const token = uni.getStorageSync('token');
 
     const res = await uni.request({
-      url: `${BASE_URL}${url}`,
+      url: requestUrl,
       method,
       data,
       timeout,
@@ -49,14 +49,26 @@ export async function request<T = any>(options: RequestOptions): Promise<{ succe
 
     if (res.statusCode === 401) {
       uni.removeStorageSync('token');
+      console.warn('[api] 未登录或登录过期', { method, url: requestUrl, statusCode: res.statusCode, data: res.data });
       throw new Error('登录已过期，请重新登录');
     }
 
     if (res.statusCode >= 400) {
+      console.error('[api] 请求返回错误', { method, url: requestUrl, statusCode: res.statusCode, data: res.data });
       throw new Error((res.data as any)?.message || '请求失败');
     }
 
     return res.data as any;
+  } catch (err: any) {
+    const errMsg = String(err?.errMsg || err?.message || err || '');
+    console.error('[api] 请求失败', { method, url: requestUrl, err });
+    if (errMsg.includes('url not in domain list')) {
+      throw new Error('接口域名未加入微信小程序合法域名');
+    }
+    if (errMsg.includes('timeout')) {
+      throw new Error('接口请求超时，请稍后重试');
+    }
+    throw err;
   } finally {
     if (showLoading) {
       uni.hideLoading();
@@ -181,6 +193,20 @@ export const api = {
       request<string[]>({ url: '/knowledge-categories' }),
   },
 
+  // 专业库
+  majors: {
+    list: (page = 1, pageSize = 20, category?: string, keyword?: string) => {
+      let url = `/majors?page=${page}&pageSize=${pageSize}`;
+      if (category) url += `&category=${encodeURIComponent(category)}`;
+      if (keyword) url += `&keyword=${encodeURIComponent(keyword)}`;
+      return request({ url });
+    },
+    detail: (id: string) =>
+      request({ url: `/majors/${id}` }),
+    categories: () =>
+      request<string[]>({ url: '/major-categories' }),
+  },
+
   // 分类
   categories: {
     list: () =>
@@ -198,7 +224,7 @@ export const api = {
     toggle: (targetType: string, targetId: string) =>
       request({ url: '/favorites/toggle', method: 'POST', data: { targetType, targetId } }),
     check: (targetType: string, targetId: string) =>
-      request({ url: `/favorites/check?targetType=${targetType}&targetId=${targetId}` }),
+      request({ url: `/favorites/check?targetType=${encodeURIComponent(targetType)}&targetId=${encodeURIComponent(targetId)}` }),
     list: (page = 1, pageSize = 20) =>
       request({ url: `/favorites?page=${page}&pageSize=${pageSize}` }),
     remove: (id: string) =>
@@ -213,6 +239,10 @@ export const api = {
       request({ url: '/distribution/apply', method: 'POST' }),
     qrcode: () =>
       request({ url: '/distribution/qrcode' }),
+    recordShare: (data: { channel: 'friend' | 'timeline' | 'copy' | 'qrcode'; path?: string }) =>
+      request({ url: '/distribution/share', method: 'POST', data }),
+    bindReferral: (referralCode: string) =>
+      request({ url: '/distribution/bind-referral', method: 'POST', data: { referralCode } }),
     commissions: (page = 1, pageSize = 20) =>
       request({ url: `/distribution/commissions?page=${page}&pageSize=${pageSize}` }),
   },
@@ -228,6 +258,18 @@ export const api = {
       }>({ url: '/volunteer/data-years' }),
     majorSuggestions: (keyword: string) =>
       request<Array<{ id: string; name: string; category?: string | null }>>({ url: `/volunteer/major-suggestions?keyword=${encodeURIComponent(keyword)}` }),
+    artSupport: () =>
+      request<Array<{
+        province: string;
+        year: number;
+        artCategory: string;
+        batch: string;
+        subjectType: string;
+        cultureFullScore?: number;
+        professionalFullScore?: number;
+        sourceName?: string | null;
+        sourceUrl?: string | null;
+      }>>({ url: '/volunteer/art-support' }),
     scoreRank: (data: { province: string; year: number; subjectType: string; score: number }) =>
       request<{
         available: boolean;
@@ -246,12 +288,16 @@ export const api = {
         url: `/volunteer/score-rank?province=${encodeURIComponent(data.province)}&year=${data.year}&subjectType=${encodeURIComponent(data.subjectType)}&score=${data.score}`,
       }),
     analyze: (data: {
+      examCategory?: 'normal' | 'art';
       province: string;
       year?: number;
       subjectType: string;
       score: number;
       rank?: number;
       targetBatch?: string;
+      artCategory?: string;
+      artProfessionalScore?: number;
+      artLevel?: '本科' | '专科';
       preferredCities?: string[];
       preferredMajors?: string[];
       avoidMajors?: string[];
@@ -261,12 +307,16 @@ export const api = {
     }) =>
       request({ url: '/volunteer/analyze', method: 'POST', data, timeout: 90000 }),
     preview: (data: {
+      examCategory?: 'normal' | 'art';
       province: string;
       year?: number;
       subjectType: string;
       score: number;
       rank?: number;
       targetBatch?: string;
+      artCategory?: string;
+      artProfessionalScore?: number;
+      artLevel?: '本科' | '专科';
       preferredCities?: string[];
       preferredMajors?: string[];
       avoidMajors?: string[];
@@ -287,6 +337,20 @@ export const api = {
 
   // 院校库
   universities: {
+    list: (page = 1, pageSize = 20, params: Record<string, any> = {}) => {
+      const query = [`page=${page}`, `pageSize=${pageSize}`];
+      Object.keys(params).forEach((key) => {
+        const value = params[key];
+        if (value !== undefined && value !== null && value !== '') {
+          query.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+        }
+      });
+      return request({ url: `/universities?${query.join('&')}` });
+    },
+    filters: (province?: string) =>
+      request({
+        url: province ? `/university-filters?province=${encodeURIComponent(province)}` : '/university-filters',
+      }),
     detail: (id: string) =>
       request({ url: `/universities/${id}` }),
   },

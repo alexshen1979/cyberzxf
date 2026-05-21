@@ -81,11 +81,17 @@ router.get('/universities', uniCtrl.list);
 router.get('/university-filters', uniCtrl.filters);
 router.get('/universities/:id', uniCtrl.detail);
 
+// ─── 专业库（公开） ────────────────────────────────
+router.get('/majors', optionalAuth, volunteerCtrl.publicMajors);
+router.get('/major-categories', optionalAuth, volunteerCtrl.publicMajorCategories);
+router.get('/majors/:id', optionalAuth, volunteerCtrl.publicMajorDetail);
+
 // ─── AI 高考志愿分析 ───────────────────────────────
 router.post('/volunteer/analyze', auth, volunteerCtrl.analyze);
 router.post('/volunteer/preview', optionalAuth, volunteerCtrl.preview);
 router.get('/volunteer/score-rank', optionalAuth, volunteerCtrl.scoreRankLookup);
 router.get('/volunteer/data-years', optionalAuth, volunteerCtrl.volunteerDataYears);
+router.get('/volunteer/art-support', optionalAuth, volunteerCtrl.artAdmissionSupport);
 router.get('/volunteer/major-suggestions', optionalAuth, volunteerCtrl.majorSuggestions);
 router.get('/volunteer/report-export-costs', optionalAuth, volunteerCtrl.reportExportCosts);
 router.get('/volunteer/reports', auth, volunteerCtrl.reports);
@@ -96,6 +102,8 @@ router.get('/volunteer/reports/:id/export', auth, volunteerCtrl.exportReport);
 router.get('/distribution/me', auth, distributionCtrl.me);
 router.post('/distribution/apply', auth, distributionCtrl.apply);
 router.get('/distribution/qrcode', auth, distributionCtrl.qrcode);
+router.post('/distribution/share', auth, distributionCtrl.recordShare);
+router.post('/distribution/bind-referral', auth, distributionCtrl.bindReferral);
 router.get('/distribution/commissions', auth, distributionCtrl.commissions);
 
 // ─── 管理后台接口（需要 admin 权限） ─────────────────
@@ -105,6 +113,7 @@ const admin = new Router({ prefix: '/admin' });
 admin.get('/users', adminAuth, adminCtrl.getUsers);
 admin.get('/users/:id', adminAuth, adminCtrl.getUserDetail);
 admin.put('/users/:id', adminAuth, adminCtrl.updateUser);
+admin.delete('/users/:id/purge', adminAuth, adminCtrl.purgeUserForAdmin);
 
 // 点数管理
 admin.get('/points/:userId', adminAuth, adminCtrl.getUserPoints);
@@ -128,6 +137,7 @@ admin.get('/distribution/settings', adminAuth, distributionCtrl.adminSettings);
 admin.put('/distribution/settings', adminAuth, distributionCtrl.adminUpdateSettings);
 admin.get('/distribution/dashboard', adminAuth, distributionCtrl.adminDashboard);
 admin.get('/distribution/distributors', adminAuth, distributionCtrl.adminDistributors);
+admin.get('/distribution/distributor-tree', adminAuth, distributionCtrl.adminDistributorTree);
 admin.get('/distribution/level-one', adminAuth, distributionCtrl.adminLevelOneDistributors);
 admin.post('/distribution/distributors', adminAuth, distributionCtrl.adminCreateDistributor);
 admin.put('/distribution/distributors/:id', adminAuth, distributionCtrl.adminUpdateDistributor);
@@ -220,6 +230,16 @@ admin.post('/admission-scores', adminAuth, volunteerCtrl.createAdmissionScore);
 admin.post('/admission-scores/import', adminAuth, volunteerCtrl.importAdmissionScores);
 admin.put('/admission-scores/:id', adminAuth, volunteerCtrl.updateAdmissionScore);
 admin.delete('/admission-scores/:id', adminAuth, volunteerCtrl.deleteAdmissionScore);
+admin.get('/art-admission-rules', adminAuth, volunteerCtrl.adminArtAdmissionRules);
+admin.post('/art-admission-rules', adminAuth, volunteerCtrl.createArtAdmissionRule);
+admin.post('/art-admission-rules/import', adminAuth, volunteerCtrl.importArtAdmissionRules);
+admin.put('/art-admission-rules/:id', adminAuth, volunteerCtrl.updateArtAdmissionRule);
+admin.delete('/art-admission-rules/:id', adminAuth, volunteerCtrl.deleteArtAdmissionRule);
+admin.get('/art-admission-scores', adminAuth, volunteerCtrl.adminArtAdmissionScores);
+admin.post('/art-admission-scores', adminAuth, volunteerCtrl.createArtAdmissionScore);
+admin.post('/art-admission-scores/import', adminAuth, volunteerCtrl.importArtAdmissionScores);
+admin.put('/art-admission-scores/:id', adminAuth, volunteerCtrl.updateArtAdmissionScore);
+admin.delete('/art-admission-scores/:id', adminAuth, volunteerCtrl.deleteArtAdmissionScore);
 admin.get('/majors', adminAuth, volunteerCtrl.adminMajors);
 admin.post('/majors', adminAuth, volunteerCtrl.createMajor);
 admin.post('/majors/import', adminAuth, volunteerCtrl.importMajors);

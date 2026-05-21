@@ -36,6 +36,21 @@
       <el-table-column label="金额" width="100">
         <template #default="{ row }">¥{{ (row.amount / 100).toFixed(2) }}</template>
       </el-table-column>
+      <el-table-column label="分销佣金" min-width="260">
+        <template #default="{ row }">
+          <div v-if="row.distributionCommissions?.length" class="commission-cell">
+            <div class="commission-summary">
+              <strong>{{ formatMoney(commissionTotal(row)) }}</strong>
+              <span>{{ row.distributionCommissions.length }} 笔</span>
+            </div>
+            <div class="commission-line" v-for="item in row.distributionCommissions" :key="item.id">
+              <span>{{ item.distributor?.name || item.distributor?.code || item.distributorId }}</span>
+              <em>{{ roleLabel(item.role) }} · {{ formatMoney(item.amount) }}</em>
+            </div>
+          </div>
+          <span v-else class="muted">无</span>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }"><el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag></template>
       </el-table-column>
@@ -106,6 +121,21 @@ function statusType(s: string) {
   return map[s] || 'info';
 }
 
+function roleLabel(role: string) {
+  if (role === 'level1_direct') return '一级直推';
+  if (role === 'level2_direct') return '二级直推';
+  if (role === 'level1_override') return '一级差额';
+  return role || '-';
+}
+
+function commissionTotal(row: any) {
+  return (row.distributionCommissions || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
+}
+
+function formatMoney(value: number) {
+  return `¥${(Number(value || 0) / 100).toFixed(2)}`;
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -165,4 +195,38 @@ h2 { margin-bottom: 20px; }
 }
 .payment-config-title { font-weight: 600; color: #1f2937; }
 .payment-config-subtitle { margin-top: 4px; font-size: 13px; color: #6b7280; }
+.commission-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.commission-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  strong {
+    color: #0f766e;
+  }
+
+  span {
+    color: #6b7280;
+    font-size: 12px;
+  }
+}
+.commission-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #374151;
+  font-size: 12px;
+
+  em {
+    color: #6b7280;
+    font-style: normal;
+  }
+}
+.muted {
+  color: #9ca3af;
+}
 </style>

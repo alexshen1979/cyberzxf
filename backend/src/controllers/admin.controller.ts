@@ -1,5 +1,7 @@
 import { Context } from 'koa';
 import bcrypt from 'bcryptjs';
+import fs from 'fs';
+import path from 'path';
 import { prisma } from '../utils/prisma';
 import { signToken } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
@@ -7,6 +9,7 @@ import { syncMenu as syncWechatMenuService } from '../services/wechat.service';
 import { getBalance } from '../services/points.service';
 import { getRevenueStats } from '../services/payment.service';
 import { createLogger } from '../utils/logger';
+import { ensureDistributionDefaults } from '../services/distribution.service';
 import {
   createRechargeProduct,
   deleteRechargeProduct,
@@ -17,6 +20,29 @@ import {
 } from '../services/point-config.service';
 
 const logger = createLogger('admin-ctrl');
+const REPORT_OUTPUT_DIR = path.resolve(process.cwd(), 'uploads', 'reports');
+
+type AdminInvitationNode = {
+  id: string;
+  nickname: string | null;
+  phone: string | null;
+  miniOpenId: string | null;
+  mpOpenId: string | null;
+  shareCode: string | null;
+  status: number;
+  createdAt: Date;
+  pointsAccount: any;
+  distributorProfile: any;
+  invitation: any;
+  depth: number;
+  roleLabel: string;
+  children: AdminInvitationNode[];
+  directInviteCount: number;
+};
+
+function safePathSegment(value: string) {
+  return String(value || '').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 120) || 'unknown';
+}
 
 // ─── 管理员登录 ─────────────────────────────────────
 
@@ -61,14 +87,24 @@ export async function getUsers(ctx: Context) {
   const page = parseInt((ctx.query.page as string) || '1', 10);
   const pageSize = parseInt((ctx.query.pageSize as string) || '20', 10);
   const keyword = ctx.query.keyword as string;
+  const tree = String(ctx.query.tree || '') === '1';
 
   const where: any = {};
   if (keyword) {
     where.OR = [
+      { id: { contains: keyword } },
       { nickname: { contains: keyword } },
+      { phone: { contains: keyword } },
+      { shareCode: { contains: keyword } },
       { mpOpenId: { contains: keyword } },
       { miniOpenId: { contains: keyword } },
     ];
+  }
+
+  if (tree) {
+    const data = await getUserInvitationTree({ page, pageSize, keyword });
+    ctx.body = { success: true, data };
+    return;
   }
 
   const [list, total] = await Promise.all([
@@ -77,12 +113,150 @@ export async function getUsers(ctx: Context) {
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
-      include: { pointsAccount: { select: { balance: true, frozen: true, expiredAt: true } } },
+      include: {
+        pointsAccount: { select: { balance: true, frozen: true, expiredAt: true } },
+        shareReferralRecord: {
+          select: {
+            referrerUserId: true,
+            sourceCode: true,
+            createdAt: true,
+            referrer: {
+              select: {
+                id: true,
+                nickname: true,
+                phone: true,
+                shareCode: true,
+              },
+            },
+          },
+        },
+      },
     }),
     prisma.user.count({ where }),
   ]);
 
   ctx.body = { success: true, data: { list, total, page, pageSize } };
+}
+
+async function getUserInvitationTree(params: { page: number; pageSize: number; keyword?: string }) {
+  const keyword = String(params.keyword || '').trim();
+  const [users, shareReferrals] = await Promise.all([
+    prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        pointsAccount: { select: { balance: true, frozen: true, expiredAt: true } },
+        distributorProfile: { select: { id: true, code: true, level: true, status: true, parentId: true } },
+        shareReferralRecord: { select: { referrerUserId: true, sourceCode: true, createdAt: true } },
+      },
+    }),
+    prisma.shareReferral.findMany({
+      select: { userId: true, referrerUserId: true, sourceCode: true, createdAt: true },
+    }),
+  ]);
+
+  const userMap = new Map(users.map(user => [user.id, user]));
+  const referralsByReferrer = new Map<string, any[]>();
+  const referredUserIds = new Set<string>();
+  for (const referral of shareReferrals) {
+    const list = referralsByReferrer.get(referral.referrerUserId) || [];
+    list.push(referral);
+    referralsByReferrer.set(referral.referrerUserId, list);
+    referredUserIds.add(referral.userId);
+  }
+
+  for (const list of referralsByReferrer.values()) {
+    list.sort((a, b) => Number(new Date(b.createdAt)) - Number(new Date(a.createdAt)));
+  }
+
+  const roots = users
+    .filter(user => user.distributorProfile?.level === 1 || (!referredUserIds.has(user.id) && (referralsByReferrer.get(user.id)?.length || 0) > 0))
+    .map((user) => {
+      const directReferrals = referralsByReferrer.get(user.id) || [];
+      const children = directReferrals
+        .map(referral => buildInvitationNode(userMap.get(referral.userId), referral, referralsByReferrer, userMap, 1))
+        .filter((item): item is AdminInvitationNode => Boolean(item));
+      return buildInvitationNode(user, null, referralsByReferrer, userMap, 0, children);
+    })
+    .filter(Boolean) as any[];
+
+  const filtered = keyword
+    ? roots
+      .map(root => filterInvitationNode(root, keyword))
+      .filter(Boolean) as any[]
+    : roots;
+
+  const total = filtered.length;
+  const list = filtered.slice((params.page - 1) * params.pageSize, params.page * params.pageSize);
+  return { list, total, page: params.page, pageSize: params.pageSize };
+}
+
+function buildInvitationNode(
+  user: any,
+  referral: any,
+  referralsByReferrer: Map<string, any[]>,
+  userMap: Map<string, any>,
+  depth: number,
+  childrenOverride?: AdminInvitationNode[],
+): AdminInvitationNode | null {
+  if (!user) return null;
+  const directSecondLevel = user.distributorProfile?.level === 2;
+  const children: AdminInvitationNode[] = childrenOverride ?? (directSecondLevel
+    ? (referralsByReferrer.get(user.id) || [])
+      .map(childReferral => buildInvitationNode(userMap.get(childReferral.userId), childReferral, referralsByReferrer, userMap, depth + 1))
+      .filter((item): item is AdminInvitationNode => Boolean(item))
+    : []);
+  return {
+    id: user.id,
+    nickname: user.nickname,
+    phone: user.phone,
+    miniOpenId: user.miniOpenId,
+    mpOpenId: user.mpOpenId,
+    shareCode: user.shareCode,
+    status: user.status,
+    createdAt: user.createdAt,
+    pointsAccount: user.pointsAccount,
+    distributorProfile: user.distributorProfile,
+    invitation: referral ? {
+      sourceCode: referral.sourceCode,
+      createdAt: referral.createdAt,
+      referrerUserId: referral.referrerUserId,
+    } : null,
+    depth,
+    roleLabel: userInvitationRoleLabel(user, depth),
+    children,
+    directInviteCount: referralsByReferrer.get(user.id)?.length || 0,
+  };
+}
+
+function filterInvitationNode(node: any, keyword: string): any | null {
+  const children = (node.children || []).map((child: any) => filterInvitationNode(child, keyword)).filter(Boolean);
+  if (invitationNodeMatches(node, keyword) || children.length) {
+    return { ...node, children };
+  }
+  return null;
+}
+
+function invitationNodeMatches(node: any, keyword: string) {
+  const text = [
+    node.id,
+    node.nickname,
+    node.phone,
+    node.shareCode,
+    node.miniOpenId,
+    node.mpOpenId,
+    node.distributorProfile?.code,
+    node.roleLabel,
+    node.invitation?.sourceCode,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return text.includes(keyword.toLowerCase());
+}
+
+function userInvitationRoleLabel(user: any, depth: number) {
+  if (user.distributorProfile?.level === 1) return '一级分销';
+  if (user.distributorProfile?.level === 2) return '二级分销';
+  if (depth >= 2) return '二级邀请普通用户';
+  if (depth === 1) return '一级邀请普通用户';
+  return '普通用户';
 }
 
 export async function getUserDetail(ctx: Context) {
@@ -92,6 +266,34 @@ export async function getUserDetail(ctx: Context) {
       pointsAccount: true,
       orders: { orderBy: { createdAt: 'desc' }, take: 10 },
       consultationRecords: { orderBy: { createdAt: 'desc' }, take: 10 },
+      shareReferralRecord: {
+        select: {
+          sourceCode: true,
+          createdAt: true,
+          referrer: {
+            select: { id: true, nickname: true, phone: true, shareCode: true },
+          },
+        },
+      },
+      shareReferrals: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nickname: true,
+              phone: true,
+              miniOpenId: true,
+              mpOpenId: true,
+              shareCode: true,
+              status: true,
+              createdAt: true,
+              pointsAccount: { select: { balance: true, frozen: true, expiredAt: true } },
+              distributorProfile: { select: { code: true, level: true, status: true } },
+            },
+          },
+        },
+      },
     },
   });
 
@@ -120,6 +322,206 @@ export async function updateUser(ctx: Context) {
     }
     throw err;
   }
+}
+
+export async function purgeUserForAdmin(ctx: Context) {
+  const userId = ctx.params.id;
+  const result = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        nickname: true,
+        phone: true,
+        miniOpenId: true,
+        mpOpenId: true,
+        shareCode: true,
+      },
+    });
+    if (!user) {
+      throw new AppError(404, '用户不存在或已被清除', 'USER_NOT_FOUND');
+    }
+
+    const { system } = await ensureDistributionDefaults(tx);
+    const summary: Record<string, number> = {};
+    const addCount = (key: string, value?: number) => {
+      summary[key] = (summary[key] || 0) + (value || 0);
+    };
+
+    const ownShareReferral = await tx.shareReferral.findUnique({ where: { userId } });
+    if (ownShareReferral) {
+      const rewardTransactions = await tx.pointsTransaction.findMany({
+        where: {
+          source: 'share_referral_reward',
+          sourceId: ownShareReferral.id,
+          amount: { gt: 0 },
+        },
+        select: { id: true, userId: true, amount: true },
+      });
+      const rewardsByUser = new Map<string, number>();
+      for (const item of rewardTransactions) {
+        rewardsByUser.set(item.userId, (rewardsByUser.get(item.userId) || 0) + item.amount);
+      }
+      for (const [rewardUserId, amount] of rewardsByUser.entries()) {
+        const account = await tx.pointsAccount.findUnique({ where: { userId: rewardUserId } });
+        if (account) {
+          await tx.pointsAccount.update({
+            where: { userId: rewardUserId },
+            data: { balance: Math.max(0, account.balance - amount) },
+          });
+        }
+      }
+      const rewardDeleted = await tx.pointsTransaction.deleteMany({
+        where: { id: { in: rewardTransactions.map(item => item.id) } },
+      });
+      addCount('referrerRewardTransactions', rewardDeleted.count);
+    }
+
+    const distributor = await tx.distributor.findUnique({
+      where: { userId },
+      select: { id: true, level: true },
+    });
+    if (distributor) {
+      const directReferrals = await tx.distributionReferral.findMany({
+        where: { distributorId: distributor.id },
+        select: { userId: true },
+      });
+      const directReferralUserIds = directReferrals.map(item => item.userId);
+      if (directReferralUserIds.length) {
+        const directCommissionDeleted = await tx.distributionCommission.deleteMany({
+          where: { referralUserId: { in: directReferralUserIds } },
+        });
+        addCount('distributionCommissions', directCommissionDeleted.count);
+        const directReferralDeleted = await tx.distributionReferral.deleteMany({
+          where: { userId: { in: directReferralUserIds } },
+        });
+        addCount('distributionReferrals', directReferralDeleted.count);
+        const referredUserCleared = await tx.user.updateMany({
+          where: { id: { in: directReferralUserIds }, referredByDistributorId: distributor.id },
+          data: { referredByDistributorId: null, referredAt: null },
+        });
+        addCount('referredUsersCleared', referredUserCleared.count);
+      }
+
+      const overrideCommissionDeleted = await tx.distributionCommission.deleteMany({
+        where: { distributorId: distributor.id },
+      });
+      addCount('distributionCommissions', overrideCommissionDeleted.count);
+      const firstLevelCleared = await tx.distributionReferral.updateMany({
+        where: { firstLevelDistributorId: distributor.id },
+        data: { firstLevelDistributorId: system.id },
+      });
+      addCount('firstLevelReferralsCleared', firstLevelCleared.count);
+      const childDistributorsMoved = await tx.distributor.updateMany({
+        where: { parentId: distributor.id },
+        data: { parentId: system.id },
+      });
+      addCount('childDistributorsMoved', childDistributorsMoved.count);
+      const referredByCleared = await tx.user.updateMany({
+        where: { referredByDistributorId: distributor.id },
+        data: { referredByDistributorId: null, referredAt: null },
+      });
+      addCount('referredUsersCleared', referredByCleared.count);
+    }
+
+    const targetCommissionDeleted = await tx.distributionCommission.deleteMany({
+      where: { referralUserId: userId },
+    });
+    addCount('distributionCommissions', targetCommissionDeleted.count);
+
+    const ownDistributionReferralDeleted = await tx.distributionReferral.deleteMany({
+      where: { userId },
+    });
+    addCount('distributionReferrals', ownDistributionReferralDeleted.count);
+
+    const invitedUsers = await tx.shareReferral.findMany({
+      where: { referrerUserId: userId },
+      select: { userId: true },
+    });
+    const invitedUserIds = invitedUsers.map(item => item.userId);
+    const shareReferralDeleted = await tx.shareReferral.deleteMany({
+      where: { OR: [{ userId }, { referrerUserId: userId }] },
+    });
+    addCount('shareReferrals', shareReferralDeleted.count);
+    if (invitedUserIds.length) {
+      const invitedDistributionReferralDeleted = await tx.distributionReferral.deleteMany({
+        where: { userId: { in: invitedUserIds } },
+      });
+      addCount('distributionReferrals', invitedDistributionReferralDeleted.count);
+      const invitedUserCleared = await tx.user.updateMany({
+        where: { id: { in: invitedUserIds } },
+        data: { referredByDistributorId: null, referredAt: null },
+      });
+      addCount('referredUsersCleared', invitedUserCleared.count);
+    }
+
+    const orders = await tx.order.findMany({ where: { userId }, select: { id: true } });
+    const orderIds = orders.map(item => item.id);
+    if (orderIds.length) {
+      const orderCommissionDeleted = await tx.distributionCommission.deleteMany({
+        where: { orderId: { in: orderIds } },
+      });
+      addCount('distributionCommissions', orderCommissionDeleted.count);
+    }
+
+    const deletions = await Promise.all([
+      tx.favorite.deleteMany({ where: { userId } }),
+      tx.consultationRecord.deleteMany({ where: { userId } }),
+      tx.volunteerReport.deleteMany({ where: { userId } }),
+      tx.dailyShareReward.deleteMany({ where: { userId } }),
+      tx.shareEvent.deleteMany({ where: { OR: [{ userId }, ...(user.shareCode ? [{ shareCode: user.shareCode }] : [])] } }),
+      tx.pointsTransaction.deleteMany({ where: { userId } }),
+      tx.pointsAccount.deleteMany({ where: { userId } }),
+      tx.order.deleteMany({ where: { userId } }),
+    ]);
+    [
+      'favorites',
+      'consultationRecords',
+      'volunteerReports',
+      'dailyShareRewards',
+      'shareEvents',
+      'pointsTransactions',
+      'pointsAccounts',
+      'orders',
+    ].forEach((key, index) => addCount(key, deletions[index].count));
+
+    if (distributor) {
+      const distributorDeleted = await tx.distributor.deleteMany({ where: { id: distributor.id } });
+      addCount('distributors', distributorDeleted.count);
+    }
+
+    const userDeleted = await tx.user.delete({ where: { id: userId } });
+    addCount('users', 1);
+
+    return {
+      user: {
+        id: userDeleted.id,
+        nickname: userDeleted.nickname,
+        phone: userDeleted.phone,
+        miniOpenId: user.miniOpenId,
+        mpOpenId: user.mpOpenId,
+      },
+      summary,
+    };
+  });
+
+  const reportDir = path.join(REPORT_OUTPUT_DIR, safePathSegment(userId));
+  let reportFilesRemoved = false;
+  try {
+    await fs.promises.rm(reportDir, { recursive: true, force: true });
+    reportFilesRemoved = true;
+  } catch (err) {
+    logger.warn({ err, userId, reportDir }, '清除用户报告缓存失败');
+  }
+
+  logger.warn({ adminId: ctx.state.user?.userId, userId, summary: result.summary }, '管理员清除测试用户');
+  ctx.body = {
+    success: true,
+    data: {
+      ...result,
+      reportFilesRemoved,
+    },
+  };
 }
 
 // ─── 点数管理 ───────────────────────────────────────
@@ -184,6 +586,15 @@ export async function getAllOrders(ctx: Context) {
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
+      include: {
+        user: { select: { id: true, nickname: true, phone: true, shareCode: true } },
+        distributionCommissions: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            distributor: { select: { id: true, name: true, code: true, level: true } },
+          },
+        },
+      },
     }),
     prisma.order.count({ where }),
   ]);
@@ -192,7 +603,18 @@ export async function getAllOrders(ctx: Context) {
 }
 
 export async function getOrderDetail(ctx: Context) {
-  const order = await prisma.order.findUnique({ where: { id: ctx.params.id } });
+  const order = await prisma.order.findUnique({
+    where: { id: ctx.params.id },
+    include: {
+      user: { select: { id: true, nickname: true, phone: true, shareCode: true } },
+      distributionCommissions: {
+        orderBy: { createdAt: 'desc' },
+        include: {
+          distributor: { select: { id: true, name: true, code: true, level: true } },
+        },
+      },
+    },
+  });
   ctx.body = { success: true, data: order };
 }
 

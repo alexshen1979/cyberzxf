@@ -5,7 +5,7 @@ import { config } from '../config';
 import axios from 'axios';
 import { getWechatMiniProgramCredentials } from './payment.service';
 import { getPointSettings } from './point-config.service';
-import { createReferralForNewUser } from './distribution.service';
+import { createReferralForNewUser, ensureUserShareCode } from './distribution.service';
 
 let accessTokenCache: { token: string; expiresAt: number } | null = null;
 
@@ -69,6 +69,7 @@ export async function loginByMiniProgram(code: string, profile?: { nickName?: st
         ...(phone ? { phone } : {}),
       },
     });
+    user = await ensureUserShareCode(user.id);
   } else {
     // 新用户注册 + 赠送点数（事务保证原子性）
     user = await prisma.$transaction(async (tx) => {
@@ -83,10 +84,11 @@ export async function loginByMiniProgram(code: string, profile?: { nickName?: st
       });
       await giftNewUserPoints(newUser.id, tx);
       await createReferralForNewUser(tx, newUser.id, referralCode);
-      return newUser;
+      return ensureUserShareCode(newUser.id, tx);
     });
   }
 
+  if (!user) throw new AppError(404, '用户不存在', 'USER_NOT_FOUND');
   const token = signToken({ userId: user.id });
   return { token, user: sanitizeUser(user) };
 }
@@ -117,6 +119,7 @@ export async function findOrCreateByMpOpenId(mpOpenId: string, unionId?: string)
       where: { id: user.id },
       data: { mpOpenId, ...(unionId ? { unionId } : {}) },
     });
+    user = await ensureUserShareCode(user.id);
   } else {
     // 新用户：公众号关注即注册 + 赠送点数（事务保证原子性）
     user = await prisma.$transaction(async (tx) => {
@@ -128,7 +131,7 @@ export async function findOrCreateByMpOpenId(mpOpenId: string, unionId?: string)
         },
       });
       await giftNewUserPoints(newUser.id, tx);
-      return newUser;
+      return ensureUserShareCode(newUser.id, tx);
     });
   }
 
@@ -160,8 +163,8 @@ async function giftNewUserPoints(userId: string, tx?: any) {
 
 // 脱敏用户信息
 function sanitizeUser(user: any) {
-  const { id, nickname, avatar, phone, status, createdAt } = user;
-  return { id, nickname, avatar, phone, status, createdAt };
+  const { id, nickname, avatar, phone, status, createdAt, shareCode } = user;
+  return { id, nickname, avatar, phone, status, createdAt, shareCode };
 }
 
 async function getPhoneNumberByCode(phoneCode: string) {

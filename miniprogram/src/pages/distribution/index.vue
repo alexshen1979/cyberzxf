@@ -1,17 +1,94 @@
 <template>
   <view class="distribution-page">
     <view class="summary-band">
-      <text class="eyebrow">我的分享码</text>
+      <text class="eyebrow">我的邀请码</text>
       <text class="title">{{ pageTitle }}</text>
       <text class="subtitle">{{ pageSubtitle }}</text>
     </view>
 
-    <view class="apply-section" v-if="!distributor">
+    <view class="qr-card">
+      <view class="section-head">
+        <text class="section-title">我的邀请码</text>
+        <text class="section-action" @click="loadQrcode(true)">刷新</text>
+      </view>
+      <view class="qr-box">
+        <image v-if="qrcodeUrl" class="qr-img" :src="qrcodeUrl" mode="aspectFit" />
+        <canvas v-else-if="canvasQrVisible" canvas-id="inviteQrCanvas" class="qr-canvas" />
+        <view v-else class="qr-placeholder" @click="loadQrcode(true)">
+          <text>{{ qrcodeLoading ? '生成中...' : '点击生成分享二维码' }}</text>
+        </view>
+      </view>
+      <view class="invite-code-box" @click="copyShareCode">
+        <text class="invite-code-label">邀请码</text>
+        <text class="invite-code-value">{{ shareCode || '正在生成...' }}</text>
+        <text class="copy-code" @click.stop="copyShareCode">复制</text>
+      </view>
+      <view class="reward-tip">每天分享可领 {{ dailyShareRewardPoints }} 点；好友通过你的码注册，再赠送 {{ referralRewardPoints }} 点。</view>
+      <view class="action-row">
+        <view class="secondary-btn" @click="copyShareCode">复制邀请码</view>
+        <button class="primary-btn button-reset" open-type="share">分享给朋友</button>
+      </view>
+    </view>
+
+    <view class="stats-grid" :class="{ compact: !showCommissionStats }">
+      <view class="stat-item">
+        <text class="stat-value">{{ stats.shareReferralCount || 0 }}</text>
+        <text class="stat-label">邀请注册</text>
+      </view>
+      <view class="stat-item">
+        <text class="stat-value">{{ stats.shareRewardCount || 0 }}</text>
+        <text class="stat-label">注册奖励</text>
+      </view>
+      <view class="stat-item" v-if="showCommissionStats">
+        <text class="stat-value">{{ formatMoney(stats.commissionAmount || 0) }}</text>
+        <text class="stat-label">佣金累计</text>
+      </view>
+    </view>
+
+    <view class="bind-card">
+      <view class="section-head">
+        <text class="section-title">邀请我的人</text>
+      </view>
+      <view class="bound-row" v-if="shareReferral">
+        <view class="bound-copy">
+          <text class="bound-label">已绑定</text>
+          <text class="bound-value">{{ inviterText }}</text>
+        </view>
+        <text class="copy-code" @click="copyBoundReferralCode">复制</text>
+      </view>
+      <view class="invite-input-row" v-else>
+        <input class="invite-input" v-model="referralCodeInput" placeholder="输入对方邀请码" maxlength="32" />
+        <view class="secondary-btn bind-btn" :class="{ disabled: bindingReferral }" @click="bindReferralCode">
+          <text>{{ bindingReferral ? '绑定中' : '确认' }}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="info-card" v-if="showDistributionInfo">
+      <view class="info-row">
+        <text class="info-label">分销资格</text>
+        <text class="info-value">{{ statusText }}</text>
+      </view>
+      <view class="info-row" v-if="distributor">
+        <text class="info-label">当前层级</text>
+        <text class="info-value">{{ levelName(distributor.level) }}</text>
+      </view>
+      <view class="info-row" v-if="distributor">
+        <text class="info-label">所属一级</text>
+        <text class="info-value">{{ distributor.level === 1 ? '无' : (distributor.parent?.name || '系统') }}</text>
+      </view>
+      <view class="info-row" v-if="distributor">
+        <text class="info-label">佣金规则</text>
+        <text class="info-value">{{ rateText }}</text>
+      </view>
+    </view>
+
+    <view class="apply-section" v-if="canApplyDistribution">
       <view class="empty-card">
-        <text class="empty-title">还没有分享码</text>
-        <text class="empty-desc">申请通过后即可生成专属小程序码。朋友通过你的码进入并完成首单后，可按后台规则产生分享奖励。</text>
+        <text class="empty-title">申请成为分销员</text>
+        <text class="empty-desc">邀请码已可正常使用。申请通过后，通过你的邀请码带来的新用户首单才会按后台规则产生分销佣金。</text>
         <view class="primary-btn" @click="apply" :class="{ disabled: applying }">
-          <text>{{ applying ? '申请中...' : '立即申请' }}</text>
+          <text>{{ applying ? '申请中...' : '申请分销资格' }}</text>
         </view>
       </view>
     </view>
@@ -19,76 +96,18 @@
     <view v-else>
       <view class="status-card pending" v-if="isPending">
         <text class="empty-title">申请已提交，等待后台审核</text>
-        <text class="empty-desc">审核通过后会开放专属小程序码和分享功能。当前还不会产生分享归因和奖励。</text>
+        <text class="empty-desc">邀请码仍可正常追踪和领取每日分享点数；审核通过后，符合规则的首单才会产生分销佣金。</text>
       </view>
-      <view class="status-card disabled" v-else-if="isDisabled">
-        <text class="empty-title">分享码未启用</text>
-        <text class="empty-desc">你的分享码当前不可用，如需恢复请联系平台管理员。</text>
-      </view>
-
-      <view class="stats-grid" v-if="isActive">
-        <view class="stat-item">
-          <text class="stat-value">{{ stats.directReferralCount || 0 }}</text>
-          <text class="stat-label">直推用户</text>
-        </view>
-        <view class="stat-item">
-          <text class="stat-value">{{ stats.paidReferralCount || 0 }}</text>
-          <text class="stat-label">首单用户</text>
-        </view>
-        <view class="stat-item">
-          <text class="stat-value">{{ formatMoney(stats.commissionAmount || 0) }}</text>
-          <text class="stat-label">奖励累计</text>
-        </view>
-      </view>
-
-      <view class="info-card">
-        <view class="info-row">
-          <text class="info-label">当前层级</text>
-          <text class="info-value">{{ levelName(distributor.level) }}</text>
-        </view>
-        <view class="info-row">
-          <text class="info-label">审核状态</text>
-          <text class="info-value">{{ statusText }}</text>
-        </view>
-        <view class="info-row">
-          <text class="info-label">所属一级</text>
-          <text class="info-value">{{ distributor.level === 1 ? '无' : (distributor.parent?.name || '系统') }}</text>
-        </view>
-        <view class="info-row">
-          <text class="info-label">分享奖励</text>
-          <text class="info-value">{{ rateText }}</text>
-        </view>
-      </view>
-
-      <view class="qr-card" v-if="isActive">
-        <view class="section-head">
-          <text class="section-title">我的分享码</text>
-          <text class="section-action" @click="loadQrcode(true)">刷新</text>
-        </view>
-        <view class="qr-box">
-          <image v-if="qrcodeUrl" class="qr-img" :src="qrcodeUrl" mode="aspectFit" />
-          <view v-else class="qr-placeholder" @click="loadQrcode(true)">
-            <text>{{ qrcodeLoading ? '生成中...' : '点击生成小程序码' }}</text>
-          </view>
-        </view>
-        <view class="share-path">
-          <text>{{ sharePath }}</text>
-        </view>
-        <view class="action-row">
-          <view class="secondary-btn" @click="copySharePath">复制路径</view>
-          <button class="primary-btn button-reset" open-type="share">分享给朋友</button>
-        </view>
-      </view>
-
       <view class="commission-card" v-if="isActive">
         <view class="section-head">
-          <text class="section-title">分享奖励</text>
+          <text class="section-title">分销佣金</text>
           <text class="section-action" @click="loadCommissions">刷新</text>
         </view>
-        <view class="empty-list" v-if="commissions.length === 0">暂无奖励记录</view>
+        <view class="empty-list" v-if="commissions.length === 0">暂无佣金记录</view>
         <view class="commission-item" v-for="item in commissions" :key="item.id">
           <view>
             <text class="commission-title">{{ roleLabel(item.role) }}</text>
+            <text class="commission-sub">{{ commissionSourceText(item) }}</text>
             <text class="commission-sub">{{ item.order?.productName || '充值订单' }} · {{ formatDate(item.createdAt) }}</text>
           </view>
           <text class="commission-amount">{{ formatMoney(item.amount) }}</text>
@@ -100,9 +119,11 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { onLoad, onPullDownRefresh, onShareAppMessage } from '@dcloudio/uni-app';
+import { onLoad, onPullDownRefresh, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app';
+import QRCode from 'qrcode';
 import { api } from '@/api';
 import { useUserStore } from '@/store/user';
+import { recordShare, withShareRef } from '@/utils/share';
 
 const userStore = useUserStore();
 const data = ref<any>(null);
@@ -110,6 +131,9 @@ const commissions = ref<any[]>([]);
 const applying = ref(false);
 const qrcodeLoading = ref(false);
 const qrcodeUrl = ref('');
+const canvasQrVisible = ref(false);
+const referralCodeInput = ref('');
+const bindingReferral = ref(false);
 
 const distributor = computed(() => data.value?.distributor || null);
 const stats = computed(() => data.value?.stats || {});
@@ -117,23 +141,41 @@ const setting = computed(() => data.value?.setting || {});
 const isActive = computed(() => distributor.value?.status === 'active');
 const isPending = computed(() => distributor.value?.status === 'pending');
 const isDisabled = computed(() => distributor.value?.status === 'disabled');
-const sharePath = computed(() => data.value?.sharePath || (distributor.value ? `pages/volunteer/index?ref=${distributor.value.code}` : ''));
+const isRejected = computed(() => distributor.value?.status === 'rejected');
+const isBlocked = computed(() => isDisabled.value || isRejected.value);
+const showDistributionInfo = computed(() => Boolean(distributor.value) && !isBlocked.value);
+const showCommissionStats = computed(() => isActive.value);
+const shareReferral = computed(() => data.value?.shareReferral || null);
+const canApplyDistribution = computed(() => data.value?.canApply === true);
+const shareCode = computed(() => data.value?.shareCode || userStore.userInfo?.shareCode || '');
+const sharePath = computed(() => data.value?.sharePath || withShareRef('pages/volunteer/index'));
+const dailyShareRewardPoints = computed(() => data.value?.dailyShareRewardPoints || 10);
+const referralRewardPoints = computed(() => data.value?.referralRewardPoints || 20);
+const inviterText = computed(() => {
+  const referral = shareReferral.value;
+  if (!referral) return '';
+  const referrer = referral.referrer || {};
+  return referrer.nickname || referrer.phone || referral.sourceCode || '已绑定邀请人';
+});
 const statusText = computed(() => {
+  if (!distributor.value) return '未申请';
   if (isActive.value) return '审核通过';
   if (isPending.value) return '待后台审核';
-  if (isDisabled.value) return '未启用';
+  if (isRejected.value) return '已驳回';
+  if (isDisabled.value) return '已禁用';
   return '-';
 });
 const pageTitle = computed(() => {
-  if (!distributor.value) return '申请我的分享码';
-  if (isPending.value) return '分享码申请审核中';
-  if (isDisabled.value) return '分享码未启用';
-  return levelName(distributor.value.level);
+  if (!distributor.value) return '我的邀请码';
+  if (isPending.value) return '邀请码已生成，分销审核中';
+  if (isRejected.value) return '我的邀请码';
+  if (isDisabled.value) return '我的邀请码';
+  return `我的邀请码 · ${levelName(distributor.value.level)}`;
 });
 const pageSubtitle = computed(() => {
-  if (!distributor.value) return '申请后进入后台审核，审核通过后即可生成专属分享码。';
-  if (!isActive.value) return `分享码 ${distributor.value.code}，当前状态：${statusText.value}`;
-  return `分享码 ${distributor.value.code}`;
+  if (isBlocked.value || !distributor.value) return `邀请码 ${shareCode.value || '--'}，每天分享可领点数，好友注册后还有奖励。`;
+  if (!isActive.value) return `邀请码 ${shareCode.value || '--'} 可正常邀请注册；分销资格：${statusText.value}`;
+  return `邀请码 ${shareCode.value || '--'}，分销资格已通过`;
 });
 const rateText = computed(() => {
   if (!distributor.value) return '-';
@@ -148,8 +190,12 @@ async function loadAll() {
   }
   const res = await api.distribution.me();
   data.value = res.data;
+  if (data.value?.shareCode) {
+    userStore.userInfo = Object.assign({}, userStore.userInfo || {}, { shareCode: data.value.shareCode });
+  }
+  await loadQrcode(false);
   if (isActive.value) {
-    await Promise.all([loadQrcode(false), loadCommissions()]);
+    await loadCommissions();
   }
 }
 
@@ -168,13 +214,34 @@ async function apply() {
 }
 
 async function loadQrcode(showToast = false) {
-  if (!distributor.value || !isActive.value || qrcodeLoading.value) return;
+  if (qrcodeLoading.value) return;
+  if (!userStore.isLogin) {
+    userStore.loginWithWechatProfile();
+    return;
+  }
   qrcodeLoading.value = true;
   try {
-    const res = await api.distribution.qrcode();
-    qrcodeUrl.value = (res.data as any).dataUrl;
+    await ensureShareCode();
+    try {
+      const res = await api.distribution.qrcode();
+      const payload = res.data as any;
+      data.value = Object.assign({}, data.value || {}, {
+        shareCode: payload.shareCode || data.value?.shareCode,
+        sharePath: payload.sharePath || data.value?.sharePath,
+      });
+      syncUserShareCode(data.value?.shareCode);
+      qrcodeUrl.value = await materializeImageDataUrl(payload.dataUrl);
+      canvasQrVisible.value = false;
+    } catch (error) {
+      const localQrUrl = await generateLocalInviteQr();
+      if (localQrUrl) {
+        qrcodeUrl.value = localQrUrl;
+        canvasQrVisible.value = false;
+      }
+    }
+    recordShare('qrcode', sharePath.value);
   } catch (e: any) {
-    if (showToast) uni.showToast({ title: e.message || '小程序码生成失败', icon: 'none' });
+    if (showToast) uni.showToast({ title: e.message || '邀请码图片生成失败', icon: 'none' });
   } finally {
     qrcodeLoading.value = false;
   }
@@ -186,13 +253,141 @@ async function loadCommissions() {
   commissions.value = (res.data as any).list || [];
 }
 
-function copySharePath() {
-  if (!sharePath.value) return;
-  uni.setClipboardData({ data: sharePath.value });
+async function copyShareCode() {
+  try {
+    await ensureShareCode();
+    if (!shareCode.value) {
+      uni.showToast({ title: '邀请码生成失败，请稍后重试', icon: 'none' });
+      return;
+    }
+    uni.setClipboardData({ data: shareCode.value });
+    recordShare('copy', sharePath.value);
+  } catch (e: any) {
+    uni.showToast({ title: e.message || '邀请码生成失败', icon: 'none' });
+  }
+}
+
+function copyBoundReferralCode() {
+  const code = shareReferral.value?.sourceCode;
+  if (!code) return;
+  uni.setClipboardData({ data: code });
+}
+
+async function bindReferralCode() {
+  const code = referralCodeInput.value.trim().toUpperCase();
+  if (!code) {
+    uni.showToast({ title: '请输入邀请码', icon: 'none' });
+    return;
+  }
+  if (code === String(shareCode.value || '').toUpperCase()) {
+    uni.showToast({ title: '不能填写自己的邀请码', icon: 'none' });
+    return;
+  }
+  if (bindingReferral.value) return;
+  bindingReferral.value = true;
+  try {
+    await api.distribution.bindReferral(code);
+    referralCodeInput.value = '';
+    uni.showToast({ title: '已绑定邀请人', icon: 'success' });
+    await loadAll();
+  } catch (e: any) {
+    uni.showToast({ title: e.message || '绑定失败', icon: 'none' });
+  } finally {
+    bindingReferral.value = false;
+  }
+}
+
+async function ensureShareCode() {
+  if (shareCode.value) return shareCode.value;
+  const res = await api.distribution.me();
+  data.value = res.data;
+  syncUserShareCode(data.value?.shareCode);
+  return shareCode.value;
+}
+
+function syncUserShareCode(code?: string) {
+  if (!code) return;
+  userStore.userInfo = Object.assign({}, userStore.userInfo || {}, { shareCode: code });
+}
+
+async function materializeImageDataUrl(dataUrl: string) {
+  const raw = String(dataUrl || '');
+  const match = raw.match(/^data:image\/png;base64,(.+)$/);
+  if (!match) return raw;
+
+  return writePngDataUrlToTempFile(raw, `zhangshi-share-code-${shareCode.value || 'me'}.png`);
+}
+
+async function generateLocalInviteQr() {
+  const code = await ensureShareCode();
+  if (!code) throw new Error('邀请码生成失败，请稍后重试');
+  const content = `zhangshi://invite?code=${encodeURIComponent(code)}&path=${encodeURIComponent(sharePath.value)}`;
+  return drawInviteQrToTempFile(content, code);
+}
+
+function drawInviteQrToTempFile(content: string, code: string) {
+  const qr = QRCode.create(content, {
+    errorCorrectionLevel: 'M',
+  });
+  qrcodeUrl.value = '';
+  canvasQrVisible.value = true;
+  const modules = qr.modules;
+  const matrixSize = modules.size;
+  const canvasSize = 320;
+  const margin = 18;
+  const cellSize = Math.floor((canvasSize - margin * 2) / matrixSize);
+  const qrSize = cellSize * matrixSize;
+  const offset = Math.floor((canvasSize - qrSize) / 2);
+  const ctx = uni.createCanvasContext('inviteQrCanvas');
+
+  ctx.setFillStyle('#ffffff');
+  ctx.fillRect(0, 0, canvasSize, canvasSize);
+  ctx.setFillStyle('#0f766e');
+  for (let row = 0; row < matrixSize; row += 1) {
+    for (let col = 0; col < matrixSize; col += 1) {
+      if (modules.get(row, col)) {
+        ctx.fillRect(offset + col * cellSize, offset + row * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+
+  return new Promise<string>((resolve) => {
+    ctx.draw(false, () => {
+      uni.canvasToTempFilePath({
+        canvasId: 'inviteQrCanvas',
+        width: canvasSize,
+        height: canvasSize,
+        destWidth: canvasSize,
+        destHeight: canvasSize,
+        fileType: 'png',
+        success: (res) => resolve(res.tempFilePath),
+        fail: () => resolve(''),
+      });
+    });
+  });
+}
+
+function writePngDataUrlToTempFile(dataUrl: string, filename: string) {
+  const match = String(dataUrl || '').match(/^data:image\/png;base64,(.+)$/);
+  if (!match) return Promise.resolve(dataUrl);
+  const fs = (uni as any).getFileSystemManager?.();
+  const root = (globalThis as any)?.wx?.env?.USER_DATA_PATH || (globalThis as any)?.uni?.env?.USER_DATA_PATH || '';
+  if (!fs || !root) return Promise.resolve(dataUrl);
+
+  return new Promise<string>((resolve) => {
+    const filePath = `${root}/${filename}`;
+    fs.writeFile({
+      filePath,
+      data: match[1],
+      encoding: 'base64',
+      success: () => resolve(filePath),
+      fail: () => resolve(dataUrl),
+    });
+  });
 }
 
 function levelName(level: number) {
-  return level === 1 ? '一级分享码' : '二级分享码';
+  return level === 1 ? '一级分销员' : '二级分销员';
 }
 
 function roleLabel(role: string) {
@@ -200,6 +395,12 @@ function roleLabel(role: string) {
   if (role === 'level2_direct') return '二级直推奖励';
   if (role === 'level1_override') return '一级差额奖励';
   return '分享奖励';
+}
+
+function commissionSourceText(item: any) {
+  const userName = item.referralUser?.nickname || item.referralUser?.phone || item.referralUserId || '用户';
+  const orderAmount = formatMoney(item.order?.amount || 0);
+  return `${userName} 充值 ${orderAmount}，产生分销佣金`;
 }
 
 function formatMoney(value: number) {
@@ -220,10 +421,23 @@ onPullDownRefresh(async () => {
   }
 });
 
-onShareAppMessage(() => ({
-  title: '涨识 志愿分析',
-  path: sharePath.value || 'pages/volunteer/index',
-}));
+onShareAppMessage(() => {
+  const path = sharePath.value || withShareRef('pages/volunteer/index');
+  recordShare('friend', path);
+  return {
+    title: '涨识 志愿分析',
+    path,
+  };
+});
+
+onShareTimeline(() => {
+  const path = sharePath.value || withShareRef('pages/volunteer/index');
+  recordShare('timeline', path);
+  return {
+    title: '涨识 志愿分析',
+    query: path.split('?')[1] || '',
+  };
+});
 </script>
 
 <style lang="scss" scoped>
@@ -272,6 +486,8 @@ onShareAppMessage(() => ({
 
 .empty-card,
 .status-card,
+.blocked-card,
+.bind-card,
 .info-card,
 .qr-card,
 .commission-card {
@@ -280,6 +496,11 @@ onShareAppMessage(() => ({
   border-radius: 18rpx;
   border: 1rpx solid rgba(15, 23, 42, 0.06);
   background: #fff;
+}
+
+.blocked-card {
+  border-color: rgba(220, 38, 38, 0.14);
+  background: #fff7f7;
 }
 
 .status-card.pending {
@@ -312,6 +533,10 @@ onShareAppMessage(() => ({
   grid-template-columns: repeat(3, 1fr);
   gap: 12rpx;
   margin-top: $spacing-md;
+
+  &.compact {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .stat-item {
@@ -387,6 +612,11 @@ onShareAppMessage(() => ({
   height: 100%;
 }
 
+.qr-canvas {
+  width: 320px;
+  height: 320px;
+}
+
 .qr-placeholder {
   width: 100%;
   height: 100%;
@@ -397,14 +627,47 @@ onShareAppMessage(() => ({
   font-size: $font-sm;
 }
 
-.share-path {
+.invite-code-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
   margin-top: 18rpx;
-  padding: 14rpx;
-  border-radius: 14rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 16rpx;
   background: #f8fafc;
-  color: $text-secondary;
+}
+
+.invite-code-label {
+  color: $text-tertiary;
   font-size: $font-xs;
-  word-break: break-all;
+}
+
+.invite-code-value {
+  flex: 1;
+  text-align: center;
+  color: #0f766e;
+  font-size: 28rpx;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-code {
+  padding: 6rpx 12rpx;
+  border-radius: $radius-full;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
+.reward-tip {
+  margin-top: 14rpx;
+  color: #b45309;
+  font-size: $font-xs;
+  line-height: 1.5;
 }
 
 .action-row {
@@ -412,6 +675,59 @@ onShareAppMessage(() => ({
   grid-template-columns: 1fr 1fr;
   gap: 12rpx;
   margin-top: 18rpx;
+}
+
+.invite-input-row {
+  display: grid;
+  grid-template-columns: 1fr 150rpx;
+  gap: 12rpx;
+  align-items: center;
+}
+
+.invite-input {
+  height: 76rpx;
+  padding: 0 20rpx;
+  border-radius: 16rpx;
+  background: #f8fafc;
+  color: $text-primary;
+  font-size: $font-sm;
+  box-sizing: border-box;
+}
+
+.bind-btn {
+  height: 76rpx;
+  line-height: 76rpx;
+}
+
+.bound-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 16rpx;
+  background: #f8fafc;
+}
+
+.bound-copy {
+  min-width: 0;
+}
+
+.bound-label {
+  display: block;
+  color: $text-tertiary;
+  font-size: $font-xs;
+}
+
+.bound-value {
+  display: block;
+  margin-top: 4rpx;
+  color: $text-primary;
+  font-size: $font-sm;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .primary-btn,

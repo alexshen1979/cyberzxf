@@ -66,6 +66,9 @@
           </view>
           <view class="msg-bubble" :class="msg.role === 'user' ? 'bubble-user' : 'bubble-ai'">
             <view class="msg-top-actions" v-if="msg.role === 'ai' && msg.content">
+              <view class="listen-icon-btn" @click.stop="copyMessage(msg)">
+                <image class="listen-icon" :src="getIconSrc('Copy')" mode="aspectFit" />
+              </view>
               <view class="listen-icon-btn" :class="{ active: readingMessageId === msg.id }" @click.stop="toggleReadMessage(msg)">
                 <image class="listen-icon" :src="getIconSrc(readingMessageId === msg.id ? 'PauseCircle' : 'Speaker')" mode="aspectFit" />
               </view>
@@ -85,6 +88,9 @@
               </view>
             </view>
             <view class="msg-footer" v-if="msg.role === 'ai' && msg.content">
+              <view class="listen-icon-btn bottom" @click.stop="copyMessage(msg)">
+                <image class="listen-icon" :src="getIconSrc('Copy')" mode="aspectFit" />
+              </view>
               <view class="listen-icon-btn bottom" :class="{ active: readingMessageId === msg.id }" @click.stop="toggleReadMessage(msg)">
                 <image class="listen-icon" :src="getIconSrc(readingMessageId === msg.id ? 'PauseCircle' : 'Speaker')" mode="aspectFit" />
               </view>
@@ -264,7 +270,18 @@ declare const requirePlugin: undefined | ((name: string) => any);
 let speechAudio: any = null;
 let WechatSIPlugin: any = null;
 let speechRequestSeq = 0;
-let speechQueue: { seq: number; chunks: string[]; index: number; messageId: string } | null = null;
+type SpeechQueue = { seq: number; chunks: string[]; index: number; messageId: string };
+type SpeechPlaybackState = {
+  seq: number;
+  queue: SpeechQueue;
+  content: string;
+  attempt: number;
+  started: boolean;
+  playTimer?: ReturnType<typeof setTimeout>;
+  fallbackTimer?: ReturnType<typeof setTimeout>;
+};
+let speechQueue: SpeechQueue | null = null;
+let speechPlayback: SpeechPlaybackState | null = null;
 const SPEECH_PLAYBACK_RATE = 1.16;
 const SPEECH_CHUNK_MAX_BYTES = 190;
 const SPEECH_MAX_CHUNKS = 32;
@@ -273,6 +290,130 @@ const FIXED_NOTICE_TITLE = ['免', '责', '声', '明'].join('');
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function toUint8Array(data: any): Uint8Array {
+  if (!data) return new Uint8Array(0);
+  if (data instanceof Uint8Array) return data;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+  if (Array.isArray(data)) return new Uint8Array(data);
+  return new Uint8Array(0);
+}
+
+function appendCodePoint(output: string, codePoint: number) {
+  if (codePoint <= 0xffff) return output + String.fromCharCode(codePoint);
+  const offset = codePoint - 0x10000;
+  return output + String.fromCharCode(0xd800 + (offset >> 10), 0xdc00 + (offset & 0x3ff));
+}
+
+function createManualUtf8Decoder() {
+  let pending: number[] = [];
+
+  const decodeBytes = (bytes: Uint8Array, final = false) => {
+    let data = bytes;
+    if (pending.length) {
+      data = new Uint8Array(pending.length + bytes.length);
+      data.set(pending, 0);
+      data.set(bytes, pending.length);
+      pending = [];
+    }
+
+    let output = '';
+    for (let i = 0; i < data.length;) {
+      const first = data[i];
+      let needed = 0;
+      let codePoint = 0;
+
+      if (first < 0x80) {
+        output += String.fromCharCode(first);
+        i += 1;
+        continue;
+      } else if (first >= 0xc2 && first <= 0xdf) {
+        needed = 2;
+        codePoint = first & 0x1f;
+      } else if (first >= 0xe0 && first <= 0xef) {
+        needed = 3;
+        codePoint = first & 0x0f;
+      } else if (first >= 0xf0 && first <= 0xf4) {
+        needed = 4;
+        codePoint = first & 0x07;
+      } else {
+        output += '\ufffd';
+        i += 1;
+        continue;
+      }
+
+      if (i + needed > data.length) {
+        if (!final) {
+          pending = Array.from(data.slice(i));
+          break;
+        }
+        output += '\ufffd';
+        i += 1;
+        continue;
+      }
+
+      let valid = true;
+      for (let j = 1; j < needed; j += 1) {
+        const next = data[i + j];
+        if ((next & 0xc0) !== 0x80) {
+          valid = false;
+          break;
+        }
+        codePoint = (codePoint << 6) | (next & 0x3f);
+      }
+
+      if (!valid) {
+        output += '\ufffd';
+        i += 1;
+        continue;
+      }
+
+      output = appendCodePoint(output, codePoint);
+      i += needed;
+    }
+
+    return output;
+  };
+
+  return {
+    decode(data: any) {
+      if (typeof data === 'string') return (pending.length ? decodeBytes(new Uint8Array(0), true) : '') + data;
+      return decodeBytes(toUint8Array(data));
+    },
+    flush() {
+      return decodeBytes(new Uint8Array(0), true);
+    },
+  };
+}
+
+function createUtf8StreamDecoder() {
+  if (typeof TextDecoder !== 'undefined') {
+    try {
+      const probeDecoder = new TextDecoder('utf-8');
+      const probe = probeDecoder.decode(new Uint8Array([0xe4, 0xb8]), { stream: true })
+        + probeDecoder.decode(new Uint8Array([0xad]), { stream: true })
+        + probeDecoder.decode();
+      if (probe.length === 1 && probe.charCodeAt(0) === 0x4e2d) {
+        const decoder = new TextDecoder('utf-8');
+        return {
+          decode(data: any) {
+            if (typeof data === 'string') return data;
+            return decoder.decode(toUint8Array(data), { stream: true });
+          },
+          flush() {
+            return decoder.decode();
+          },
+        };
+      }
+    } catch {
+      // Some real-device runtimes expose TextDecoder incompletely.
+    }
+  }
+  return createManualUtf8Decoder();
 }
 
 // 分类（从后端加载）
@@ -496,7 +637,7 @@ function newConsultation() {
 
 function enterHistory(item: any) {
   showHistoryDrawer.value = false;
-  enterHistorySession(item);
+  enterHistorySession(item, item.id);
 }
 
 function genId() {
@@ -507,6 +648,25 @@ function scrollToBottom() {
   scrollToId.value = '';
   nextTick(() => {
     scrollToId.value = 'msg-bottom';
+  });
+}
+
+function scrollToMessage(id: string) {
+  if (!id) return;
+  scrollToId.value = '';
+  nextTick(() => {
+    setTimeout(() => {
+      scrollToId.value = `msg-${id}`;
+    }, 80);
+  });
+}
+
+function copyMessage(msg: Message) {
+  const content = sanitizeAnswerPart(msg.content || '');
+  if (!content) return;
+  uni.setClipboardData({
+    data: content,
+    success: () => uni.showToast({ title: '已复制回答', icon: 'none' }),
   });
 }
 
@@ -611,26 +771,112 @@ function splitSpeechText(content = '') {
   return chunks;
 }
 
+function configureInnerAudioPlayback() {
+  const wxApi = (globalThis as any).wx || (uni as any);
+  const setOption = (wxApi as any)?.setInnerAudioOption || (uni as any).setInnerAudioOption;
+  if (typeof setOption !== 'function') return;
+  try {
+    setOption.call(wxApi, {
+      obeyMuteSwitch: false,
+      mixWithOther: true,
+      fail: (err: any) => console.warn('[consult] setInnerAudioOption 失败', err),
+    });
+  } catch (err) {
+    console.warn('[consult] setInnerAudioOption 异常', err);
+  }
+}
+
+function clearSpeechPlaybackTimers(state?: SpeechPlaybackState | null) {
+  if (!state) return;
+  if (state.playTimer) clearTimeout(state.playTimer);
+  if (state.fallbackTimer) clearTimeout(state.fallbackTimer);
+  state.playTimer = undefined;
+  state.fallbackTimer = undefined;
+}
+
+function normalizeSpeechAudioSrc(filePath: string) {
+  if (/^https?:\/\//i.test(filePath)) {
+    try {
+      return encodeURI(filePath);
+    } catch {
+      return filePath;
+    }
+  }
+  return filePath;
+}
+
+function attemptPlaySpeechAudio(state: SpeechPlaybackState) {
+  if (speechPlayback !== state || state.seq !== speechRequestSeq) return;
+  if (state.started) return;
+  const audio = getSpeechAudio();
+  if (!audio) {
+    speechPlayback = null;
+    handleSpeechChunkError(state.queue, state.content, state.attempt, { msg: 'audio context unavailable' });
+    return;
+  }
+  try {
+    configureInnerAudioPlayback();
+    try {
+      audio.playbackRate = SPEECH_PLAYBACK_RATE;
+    } catch { /* ignore */ }
+    state.started = true;
+    uni.hideLoading();
+    audio.play();
+  } catch (err) {
+    clearSpeechPlaybackTimers(state);
+    speechPlayback = null;
+    handleSpeechChunkError(state.queue, state.content, state.attempt, err || { msg: 'audio play failed' });
+  }
+}
+
+function scheduleSpeechPlay(state: SpeechPlaybackState, delay = 80) {
+  clearSpeechPlaybackTimers(state);
+  state.playTimer = setTimeout(() => attemptPlaySpeechAudio(state), delay);
+  state.fallbackTimer = setTimeout(() => attemptPlaySpeechAudio(state), 900);
+}
+
 function getSpeechAudio() {
   if (speechAudio) return speechAudio;
+  configureInnerAudioPlayback();
   const wxApi = (globalThis as any).wx || (uni as any);
   const factory = (wxApi as any)?.createInnerAudioContext || (uni as any).createInnerAudioContext;
   if (typeof factory !== 'function') return null;
   speechAudio = factory.call(wxApi);
   speechAudio.obeyMuteSwitch = false;
+  speechAudio.autoplay = false;
   try {
     speechAudio.playbackRate = SPEECH_PLAYBACK_RATE;
   } catch { /* ignore */ }
+  speechAudio.onCanplay?.(() => {
+    const state = speechPlayback;
+    if (!state || state.seq !== speechRequestSeq || state.started) return;
+    scheduleSpeechPlay(state, 60);
+  });
+  speechAudio.onPlay?.(() => {
+    const state = speechPlayback;
+    if (!state || state.seq !== speechRequestSeq) return;
+    state.started = true;
+    uni.hideLoading();
+    clearSpeechPlaybackTimers(state);
+  });
   speechAudio.onEnded?.(() => {
+    const state = speechPlayback;
+    if (state) clearSpeechPlaybackTimers(state);
+    speechPlayback = null;
     playNextSpeechChunk();
   });
   speechAudio.onStop?.(() => {
     if (!speechQueue) readingMessageId.value = '';
   });
-  speechAudio.onError?.(() => {
-    speechQueue = null;
-    readingMessageId.value = '';
-    uni.showToast({ title: '朗读失败，请稍后再试', icon: 'none' });
+  speechAudio.onError?.((err: any) => {
+    const state = speechPlayback;
+    if (state && state.seq === speechRequestSeq) {
+      clearSpeechPlaybackTimers(state);
+      speechPlayback = null;
+      handleSpeechChunkError(state.queue, state.content, state.attempt, err || { msg: 'audio playback error' });
+      return;
+    }
+    if (!speechQueue) readingMessageId.value = '';
   });
   return speechAudio;
 }
@@ -665,6 +911,8 @@ function getWechatSIPlugin() {
 function stopReading() {
   speechRequestSeq++;
   speechQueue = null;
+  clearSpeechPlaybackTimers(speechPlayback);
+  speechPlayback = null;
   uni.hideLoading();
   if (speechAudio) {
     try {
@@ -740,7 +988,7 @@ function playNextSpeechChunk() {
 }
 
 function requestSpeechChunk(
-  queue: { seq: number; chunks: string[]; index: number; messageId: string },
+  queue: SpeechQueue,
   content: string,
   attempt: number,
 ) {
@@ -767,13 +1015,13 @@ function requestSpeechChunk(
       }
       try {
         audio.stop?.();
-        audio.src = filePath;
-        try {
-          audio.playbackRate = SPEECH_PLAYBACK_RATE;
-        } catch { /* ignore */ }
-        audio.play();
-      } catch {
-        handleSpeechChunkError(queue, content, attempt, { msg: 'audio play failed' });
+        const state: SpeechPlaybackState = { seq: queue.seq, queue, content, attempt, started: false };
+        speechPlayback = state;
+        audio.src = normalizeSpeechAudioSrc(filePath);
+        scheduleSpeechPlay(state, 220);
+      } catch (err) {
+        speechPlayback = null;
+        handleSpeechChunkError(queue, content, attempt, err || { msg: 'audio setup failed' });
       }
     },
     fail: (err: any) => {
@@ -785,12 +1033,14 @@ function requestSpeechChunk(
 }
 
 function handleSpeechChunkError(
-  queue: { seq: number; chunks: string[]; index: number; messageId: string },
+  queue: SpeechQueue,
   content: string,
   attempt: number,
   err: any,
 ) {
   if (queue.seq !== speechRequestSeq) return;
+  clearSpeechPlaybackTimers(speechPlayback);
+  speechPlayback = null;
   console.warn('[consult] WechatSI textToSpeech 单段失败', {
     err,
     attempt,
@@ -1035,6 +1285,33 @@ async function sendMessage() {
   let streamStarted = false;
   let fallbackTriggered = false;
   let fallbackPromise: Promise<void> | null = null;
+  const streamDecoder = createUtf8StreamDecoder();
+
+  const processStreamText = (text = '', flush = false) => {
+    chunkBuffer += text;
+    const lines = chunkBuffer.split('\n');
+    chunkBuffer = flush ? '' : (lines.pop() || '');
+
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\r$/, '');
+      if (!line.startsWith('data:')) continue;
+      const jsonStr = line.slice(5).trim();
+      if (!jsonStr || jsonStr === '[DONE]') continue;
+
+      try {
+        const parsed = JSON.parse(jsonStr);
+        if (parsed.done) {
+          sessionId.value = parsed.sessionId;
+          finishMessageReveal(aiMsgId, parsed.pointsCost);
+          userStore.fetchBalance();
+        } else if (parsed.error) {
+          appendMessageText(aiMsgId, parsed.error);
+        } else if (parsed.content) {
+          appendMessageText(aiMsgId, parsed.content);
+        }
+      } catch { /* skip malformed JSON */ }
+    }
+  };
 
   const runFallback = () => {
     if (!fallbackTriggered) {
@@ -1059,13 +1336,14 @@ async function sendMessage() {
       context: userContext.value || undefined,
     },
     enableChunked: true,
-    responseType: 'text',
+    responseType: 'arraybuffer',
     timeout: consultType.value === 'deep' ? 90000 : 60000,
     success() {},
     fail() {
       runFallback();
     },
     complete() {
+      processStreamText(streamDecoder.flush(), true);
       if (!streamStarted) runFallback();
       const finish = () => {
         loading.value = false;
@@ -1080,37 +1358,10 @@ async function sendMessage() {
   if (typeof (task as any).onChunkReceived === 'function') {
     (task as any).onChunkReceived((res: any) => {
       streamStarted = true;
-      let chunk = '';
       try {
-        chunk = typeof res.data === 'string' ? res.data :
-          (typeof TextDecoder !== 'undefined'
-            ? new TextDecoder('utf-8').decode(res.data)
-            : String.fromCharCode.apply(null, Array.from(new Uint8Array(res.data))));
+        processStreamText(streamDecoder.decode(res.data));
       } catch {
-        chunk = '';
-      }
-      chunkBuffer += chunk;
-
-      const lines = chunkBuffer.split('\n');
-      chunkBuffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const jsonStr = line.slice(6).trim();
-        if (!jsonStr || jsonStr === '[DONE]') continue;
-
-        try {
-          const parsed = JSON.parse(jsonStr);
-          if (parsed.done) {
-            sessionId.value = parsed.sessionId;
-            finishMessageReveal(aiMsgId, parsed.pointsCost);
-            userStore.fetchBalance();
-          } else if (parsed.error) {
-            appendMessageText(aiMsgId, parsed.error);
-          } else if (parsed.content) {
-            appendMessageText(aiMsgId, parsed.content);
-          }
-        } catch { /* skip malformed JSON */ }
+        // Ignore a broken chunk and let the non-stream fallback handle request failures.
       }
       scrollToBottom();
     });
@@ -1152,7 +1403,7 @@ function loadMoreHistory() {
   loadHistory();
 }
 
-async function enterHistorySession(item: any) {
+async function enterHistorySession(item: any, targetRecordId?: string) {
   const sid = item?.sessionId || item?.id;
   if (!sid) {
     uni.showToast({ title: '会话ID缺失', icon: 'error' });
@@ -1167,8 +1418,8 @@ async function enterHistorySession(item: any) {
     }
     const msgs: Message[] = [];
     for (const h of history) {
-      msgs.push({ id: genId(), role: 'user', content: h.question });
-      msgs.push({ id: genId(), role: 'ai', content: h.answer || '（AI 未返回内容）' });
+      msgs.push({ id: `history-${h.id}-q`, role: 'user', content: h.question });
+      msgs.push({ id: `history-${h.id}-a`, role: 'ai', content: h.answer || '（AI 未返回内容）', pointsCost: h.pointsCost });
     }
     messages.value = msgs;
     collapsedMessages.value = msgs.reduce((acc: Record<string, boolean>, msg) => {
@@ -1176,7 +1427,8 @@ async function enterHistorySession(item: any) {
       return acc;
     }, {});
     sessionId.value = sid;
-    scrollToBottom();
+    if (targetRecordId) scrollToMessage(`history-${targetRecordId}-q`);
+    else scrollToBottom();
   } catch (e: any) {
     console.error('加载会话失败:', e?.message || e);
     uni.showToast({ title: '加载会话失败，请重试', icon: 'error' });

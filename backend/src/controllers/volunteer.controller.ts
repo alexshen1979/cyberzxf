@@ -4,6 +4,7 @@ import {
   getVolunteerReport,
   listVolunteerReports,
   previewVolunteer,
+  getArtAdmissionSupport,
   VolunteerAnalyzeInput,
 } from '../services/volunteer-analysis.service';
 import {
@@ -65,6 +66,10 @@ export async function reportExportCosts(ctx: Context) {
   ctx.body = { success: true, data: costs };
 }
 
+export async function artAdmissionSupport(ctx: Context) {
+  ctx.body = { success: true, data: await getArtAdmissionSupport() };
+}
+
 function normalizeExportType(value: string): VolunteerReportExportType {
   if (value === 'image' || value === 'png') return 'image';
   return 'pdf';
@@ -89,8 +94,9 @@ export async function scoreRankLookup(ctx: Context) {
   if (!Number.isInteger(year) || year < 2000 || year > 2100) {
     throw new AppError(422, '请输入有效年份', 'SCORE_RANK_YEAR_INVALID');
   }
-  if (!Number.isInteger(score) || score < 0 || score > 750) {
-    throw new AppError(422, '请输入有效高考分数', 'SCORE_RANK_SCORE_INVALID');
+  const scoreMax = scoreRankMaxScore(province);
+  if (!Number.isInteger(score) || score < 0 || score > scoreMax) {
+    throw new AppError(422, `请输入0-${scoreMax}之间的高考分数`, 'SCORE_RANK_SCORE_INVALID');
   }
 
   const item = await prisma.scoreRank.findFirst({
@@ -196,6 +202,90 @@ export async function majorSuggestions(ctx: Context) {
   });
 
   ctx.body = { success: true, data: mergeMajorSuggestionFallbacks(keyword, majors) };
+}
+
+export async function publicMajors(ctx: Context) {
+  const { keyword, category, page: p, pageSize: ps } = ctx.query as Record<string, string>;
+  const page = Math.max(1, parseInt(p || '1', 10));
+  const pageSize = Math.min(100, Math.max(1, parseInt(ps || '20', 10)));
+
+  const where: any = {};
+  if (category) where.category = category;
+  if (keyword) {
+    where.OR = [
+      { name: { contains: keyword } },
+      { category: { contains: keyword } },
+      { description: { contains: keyword } },
+      { employment: { contains: keyword } },
+      { tags: { contains: keyword } },
+    ];
+  }
+
+  const [list, total] = await Promise.all([
+    prisma.major.findMany({
+      where,
+      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.major.count({ where }),
+  ]);
+
+  ctx.body = { success: true, data: { list: list.map(transformMajor), total, page, pageSize } };
+}
+
+export async function publicMajorCategories(ctx: Context) {
+  const categories = await prisma.major.findMany({
+    where: { category: { not: null } },
+    select: { category: true },
+    distinct: ['category'],
+    orderBy: { category: 'asc' },
+  });
+  ctx.body = { success: true, data: categories.map(item => item.category).filter((item): item is string => Boolean(item)) };
+}
+
+export async function publicMajorDetail(ctx: Context) {
+  const major = await prisma.major.findUnique({
+    where: { id: ctx.params.id },
+    include: {
+      universityMajors: {
+        where: { status: 'enabled' },
+        include: {
+          university: {
+            select: {
+              id: true,
+              name: true,
+              province: true,
+              city: true,
+              type: true,
+              level: true,
+              is985: true,
+              is211: true,
+              isDoubleFirst: true,
+            },
+          },
+        },
+        orderBy: [{ strengthLevel: 'desc' }, { updatedAt: 'desc' }],
+        take: 20,
+      },
+    },
+  });
+
+  if (!major) {
+    ctx.status = 404;
+    ctx.body = { success: false, message: '专业不存在' };
+    return;
+  }
+
+  const { universityMajors, ...majorData } = major;
+
+  ctx.body = {
+    success: true,
+    data: {
+      ...transformMajor(majorData),
+      universityMajors: universityMajors.map(transformUniversityMajor),
+    },
+  };
 }
 
 const COMMON_MAJOR_SUGGESTIONS = [
@@ -424,6 +514,161 @@ export async function importAdmissionScores(ctx: Context) {
   ctx.body = { success: true, data: { count: result.count } };
 }
 
+export async function adminArtAdmissionRules(ctx: Context) {
+  const {
+    province, year, artCategory, batch, subjectType, formulaType,
+    page: p, pageSize: ps,
+  } = ctx.query as Record<string, string>;
+  const page = Math.max(1, parseInt(p || '1', 10));
+  const pageSize = Math.min(500, Math.max(1, parseInt(ps || '20', 10)));
+
+  const where: any = {};
+  if (province) where.province = province;
+  if (year) where.year = Number(year);
+  if (artCategory) where.artCategory = artCategory;
+  if (batch) where.batch = batch;
+  if (subjectType) where.subjectType = subjectType;
+  if (formulaType) where.formulaType = formulaType;
+
+  const [list, total] = await Promise.all([
+    prisma.artAdmissionRule.findMany({
+      where,
+      orderBy: [{ year: 'desc' }, { province: 'asc' }, { artCategory: 'asc' }, { batch: 'asc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.artAdmissionRule.count({ where }),
+  ]);
+
+  ctx.body = { success: true, data: { list, total, page, pageSize } };
+}
+
+export async function createArtAdmissionRule(ctx: Context) {
+  const data = normalizeArtAdmissionRule(ctx.request.body as any);
+  const item = await prisma.artAdmissionRule.upsert({
+    where: {
+      province_year_artCategory_batch_subjectType: {
+        province: data.province,
+        year: data.year,
+        artCategory: data.artCategory,
+        batch: data.batch,
+        subjectType: data.subjectType,
+      },
+    },
+    update: data,
+    create: data,
+  });
+  ctx.body = { success: true, data: item };
+}
+
+export async function updateArtAdmissionRule(ctx: Context) {
+  const data = normalizeArtAdmissionRule(ctx.request.body as any, true);
+  const item = await prisma.artAdmissionRule.update({ where: { id: ctx.params.id }, data });
+  ctx.body = { success: true, data: item };
+}
+
+export async function deleteArtAdmissionRule(ctx: Context) {
+  await prisma.artAdmissionRule.delete({ where: { id: ctx.params.id } });
+  ctx.body = { success: true, message: '删除成功' };
+}
+
+export async function importArtAdmissionRules(ctx: Context) {
+  const { items } = ctx.request.body as any;
+  if (!Array.isArray(items) || items.length === 0) {
+    ctx.status = 422;
+    ctx.body = { success: false, message: 'items 必须是非空数组' };
+    return;
+  }
+
+  let count = 0;
+  for (const item of items.slice(0, 1000)) {
+    const data = normalizeArtAdmissionRule(item);
+    await prisma.artAdmissionRule.upsert({
+      where: {
+        province_year_artCategory_batch_subjectType: {
+          province: data.province,
+          year: data.year,
+          artCategory: data.artCategory,
+          batch: data.batch,
+          subjectType: data.subjectType,
+        },
+      },
+      update: data,
+      create: data,
+    });
+    count++;
+  }
+
+  ctx.body = { success: true, data: { count } };
+}
+
+export async function adminArtAdmissionScores(ctx: Context) {
+  const {
+    province, year, artCategory, batch, subjectType, universityName, majorName,
+    sourceType, dataQuality,
+    page: p, pageSize: ps,
+  } = ctx.query as Record<string, string>;
+  const page = Math.max(1, parseInt(p || '1', 10));
+  const pageSize = Math.min(500, Math.max(1, parseInt(ps || '20', 10)));
+
+  const where: any = {};
+  if (province) where.province = province;
+  if (year) where.year = Number(year);
+  if (artCategory) where.artCategory = artCategory;
+  if (batch) where.batch = batch;
+  if (subjectType) where.subjectType = subjectType;
+  if (universityName) where.universityName = { contains: universityName };
+  if (majorName) where.majorName = { contains: majorName };
+  if (sourceType) where.sourceType = sourceType;
+  if (dataQuality) where.dataQuality = dataQuality;
+
+  const [list, total] = await Promise.all([
+    prisma.artAdmissionScore.findMany({
+      where,
+      include: { university: { select: { name: true, province: true, city: true, is985: true, is211: true, isDoubleFirst: true } } },
+      orderBy: [{ year: 'desc' }, { minRank: 'asc' }, { minCompositeScore: 'desc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.artAdmissionScore.count({ where }),
+  ]);
+
+  ctx.body = { success: true, data: { list, total, page, pageSize } };
+}
+
+export async function createArtAdmissionScore(ctx: Context) {
+  const data = await normalizeArtAdmissionScore(ctx.request.body as any);
+  const item = await prisma.artAdmissionScore.create({ data });
+  ctx.body = { success: true, data: item };
+}
+
+export async function updateArtAdmissionScore(ctx: Context) {
+  const data = await normalizeArtAdmissionScore(ctx.request.body as any, true);
+  const item = await prisma.artAdmissionScore.update({ where: { id: ctx.params.id }, data });
+  ctx.body = { success: true, data: item };
+}
+
+export async function deleteArtAdmissionScore(ctx: Context) {
+  await prisma.artAdmissionScore.delete({ where: { id: ctx.params.id } });
+  ctx.body = { success: true, message: '删除成功' };
+}
+
+export async function importArtAdmissionScores(ctx: Context) {
+  const { items } = ctx.request.body as any;
+  if (!Array.isArray(items) || items.length === 0) {
+    ctx.status = 422;
+    ctx.body = { success: false, message: 'items 必须是非空数组' };
+    return;
+  }
+
+  const data = [];
+  for (const item of items.slice(0, 10000)) {
+    data.push(await normalizeArtAdmissionScore(item));
+  }
+  const result = await prisma.artAdmissionScore.createMany({ data });
+  ctx.body = { success: true, data: { count: result.count } };
+}
+
 export async function admissionAutoFillStatus(ctx: Context) {
   ctx.body = { success: true, data: await getAdmissionAutoFillStatus() };
 }
@@ -646,6 +891,89 @@ async function normalizeAdmissionScore(body: any, partial = false) {
   return data;
 }
 
+function normalizeArtAdmissionRule(body: any, partial = false) {
+  const required = ['province', 'year', 'artCategory', 'batch', 'cultureWeight', 'professionalWeight'];
+  if (!partial) {
+    for (const key of required) {
+      if (body[key] === undefined || body[key] === '') {
+        throw new Error(`缺少字段 ${key}`);
+      }
+    }
+  }
+
+  const data: any = {};
+  if (body.province !== undefined) data.province = String(body.province).trim();
+  if (body.year !== undefined) data.year = Number(body.year);
+  if (body.artCategory !== undefined) data.artCategory = String(body.artCategory).trim();
+  if (body.batch !== undefined) data.batch = String(body.batch || '本科').trim();
+  if (body.subjectType !== undefined) data.subjectType = String(body.subjectType || '不限').trim();
+  if (body.subjectType === undefined && !partial) data.subjectType = '不限';
+  if (body.formulaType !== undefined) data.formulaType = String(body.formulaType || 'weighted').trim();
+  if (body.formulaType === undefined && !partial) data.formulaType = 'weighted';
+  if (body.cultureFullScore !== undefined) data.cultureFullScore = numberWithDefault(body.cultureFullScore, 750);
+  if (body.cultureFullScore === undefined && !partial) data.cultureFullScore = 750;
+  if (body.professionalFullScore !== undefined) data.professionalFullScore = numberWithDefault(body.professionalFullScore, 300);
+  if (body.professionalFullScore === undefined && !partial) data.professionalFullScore = 300;
+  if (body.cultureWeight !== undefined) data.cultureWeight = Number(body.cultureWeight);
+  if (body.professionalWeight !== undefined) data.professionalWeight = Number(body.professionalWeight);
+  if (body.scaleTo !== undefined) data.scaleTo = numberWithDefault(body.scaleTo, 750);
+  if (body.scaleTo === undefined && !partial) data.scaleTo = 750;
+  if (body.minCultureScore !== undefined) data.minCultureScore = nullableNumber(body.minCultureScore);
+  if (body.minProfessionalScore !== undefined) data.minProfessionalScore = nullableNumber(body.minProfessionalScore);
+  if (body.sourceName !== undefined) data.sourceName = body.sourceName || null;
+  if (body.sourceUrl !== undefined) data.sourceUrl = body.sourceUrl || null;
+  if (body.sourceType !== undefined) data.sourceType = body.sourceType || null;
+  if (body.notes !== undefined) data.notes = body.notes || null;
+
+  if (data.year !== undefined && (!Number.isInteger(data.year) || data.year < 2000 || data.year > 2100)) throw new Error('年份无效');
+  if (data.cultureWeight !== undefined && !Number.isFinite(data.cultureWeight)) throw new Error('文化权重无效');
+  if (data.professionalWeight !== undefined && !Number.isFinite(data.professionalWeight)) throw new Error('专业权重无效');
+  return data;
+}
+
+async function normalizeArtAdmissionScore(body: any, partial = false) {
+  const required = ['universityName', 'province', 'year', 'artCategory', 'batch'];
+  if (!partial) {
+    for (const key of required) {
+      if (body[key] === undefined || body[key] === '') {
+        throw new Error(`缺少字段 ${key}`);
+      }
+    }
+  }
+
+  const data: any = {};
+  if (body.universityId !== undefined) data.universityId = body.universityId || null;
+  if (body.universityName !== undefined) data.universityName = String(body.universityName).trim();
+  if (body.province !== undefined) data.province = String(body.province).trim();
+  if (body.year !== undefined) data.year = Number(body.year);
+  if (body.batch !== undefined) data.batch = String(body.batch || '本科').trim();
+  if (body.artCategory !== undefined) data.artCategory = String(body.artCategory).trim();
+  if (body.subjectType !== undefined) data.subjectType = String(body.subjectType || '不限').trim();
+  if (body.subjectType === undefined && !partial) data.subjectType = '不限';
+  if (body.majorName !== undefined) data.majorName = body.majorName || null;
+  if (body.groupCode !== undefined) data.groupCode = body.groupCode || null;
+  if (body.groupName !== undefined) data.groupName = body.groupName || null;
+  if (body.minCompositeScore !== undefined) data.minCompositeScore = nullableNumber(body.minCompositeScore);
+  if (body.minCultureScore !== undefined) data.minCultureScore = nullableNumber(body.minCultureScore);
+  if (body.minProfessionalScore !== undefined) data.minProfessionalScore = nullableNumber(body.minProfessionalScore);
+  if (body.minRank !== undefined) data.minRank = nullableInteger(body.minRank);
+  if (body.planCount !== undefined) data.planCount = nullableInteger(body.planCount);
+  if (body.admissionMethod !== undefined) data.admissionMethod = body.admissionMethod || null;
+  if (body.sourceName !== undefined) data.sourceName = body.sourceName || null;
+  if (body.sourceUrl !== undefined) data.sourceUrl = body.sourceUrl || null;
+  if (body.sourceType !== undefined) data.sourceType = body.sourceType || null;
+  if (body.dataQuality !== undefined) data.dataQuality = body.dataQuality || 'unknown';
+  if (body.dataQuality === undefined && !partial) data.dataQuality = 'unknown';
+  if (body.rawData !== undefined) data.rawData = typeof body.rawData === 'string' ? body.rawData : JSON.stringify(body.rawData);
+
+  if (!data.universityId && data.universityName) {
+    const uni = await prisma.university.findFirst({ where: { name: data.universityName }, select: { id: true } });
+    if (uni) data.universityId = uni.id;
+  }
+  if (data.year !== undefined && (!Number.isInteger(data.year) || data.year < 2000 || data.year > 2100)) throw new Error('年份无效');
+  return data;
+}
+
 async function normalizeUniversityMajor(body: any, partial = false) {
   if (!partial && !body.universityId && !body.universityName) throw new Error('院校 ID 或院校名称必填');
   if (!partial && !body.majorName && !body.majorId) throw new Error('专业名称或专业 ID 必填');
@@ -773,4 +1101,20 @@ function nullableNumber(value: any) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function scoreRankMaxScore(province: string) {
+  if (province === '上海') return 660;
+  if (province === '海南') return 900;
+  return 750;
+}
+
+function nullableInteger(value: any) {
+  const n = nullableNumber(value);
+  return n === null ? null : Math.round(n);
+}
+
+function numberWithDefault(value: any, fallback: number) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }

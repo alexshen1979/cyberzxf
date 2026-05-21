@@ -1,6 +1,7 @@
 import { Context } from 'koa';
 import * as authService from '../services/auth.service';
 import { prisma } from '../utils/prisma';
+import { ensureUserShareCode } from '../services/distribution.service';
 
 export async function miniProgramLogin(ctx: Context) {
   const { code, userInfo, referralCode } = ctx.request.body as any;
@@ -28,16 +29,7 @@ export async function mpOAuthLogin(ctx: Context) {
 
 export async function getProfile(ctx: Context) {
   const userId = ctx.state.user.userId;
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      id: true,
-      nickname: true,
-      avatar: true,
-      phone: true,
-      createdAt: true,
-    },
-  });
+  const user = await ensureUserShareCode(userId);
 
   ctx.body = { success: true, data: user };
 }
@@ -49,7 +41,7 @@ export async function updateProfile(ctx: Context) {
   const user = await prisma.user.update({
     where: { id: userId },
     data: { nickname, avatar, phone },
-    select: { id: true, nickname: true, avatar: true, phone: true },
+    select: { id: true, nickname: true, avatar: true, phone: true, shareCode: true, createdAt: true },
   });
 
   ctx.body = { success: true, data: user };

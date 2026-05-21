@@ -85,6 +85,12 @@
             <el-menu-item index="/content/admission-scores">
               <span>录取分数线</span>
             </el-menu-item>
+            <el-menu-item index="/content/art-admission-rules">
+              <span>艺术类规则</span>
+            </el-menu-item>
+            <el-menu-item index="/content/art-admission-scores">
+              <span>艺术类投档线</span>
+            </el-menu-item>
             <el-menu-item index="/content/volunteer-data">
               <span>志愿报告</span>
             </el-menu-item>

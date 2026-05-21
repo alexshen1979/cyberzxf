@@ -17,10 +17,10 @@ type RechargeProductInput = {
 };
 
 const DEFAULT_RECHARGE_PRODUCTS = [
-  { id: 'pkg_120', name: '120 咨询点数', description: '首充体验，适合生成报告后继续追问', price: 1990, originalPrice: 2990, points: 120, bonus: 0, isDefault: false, badgeType: null, sortOrder: 10, enabled: true },
-  { id: 'pkg_280', name: '240 咨询点数 + 赠40点', description: '推荐套餐，适合志愿季集中使用', price: 3990, originalPrice: 5990, points: 240, bonus: 40, isDefault: false, badgeType: null, sortOrder: 20, enabled: true },
-  { id: 'pkg_560', name: '480 咨询点数 + 赠80点', description: '适合多省市、多院校反复对比', price: 6990, originalPrice: 9990, points: 480, bonus: 80, isDefault: true, badgeType: 'hot', sortOrder: 30, enabled: true },
-  { id: 'pkg_1000', name: '800 咨询点数 + 赠200点', description: '家庭规划包，适合长期升学咨询', price: 9990, originalPrice: 14990, points: 800, bonus: 200, isDefault: false, badgeType: 'best_value', sortOrder: 40, enabled: true },
+  { id: 'pkg_120', name: '120 咨询点数', description: '首充体验，适合生成报告后继续追问', price: 2990, originalPrice: 3990, points: 120, bonus: 0, isDefault: false, badgeType: null, sortOrder: 10, enabled: true },
+  { id: 'pkg_280', name: '240 咨询点数 + 赠40点', description: '推荐套餐，适合志愿季集中使用', price: 5990, originalPrice: 7990, points: 240, bonus: 40, isDefault: false, badgeType: null, sortOrder: 20, enabled: true },
+  { id: 'pkg_560', name: '480 咨询点数 + 赠80点', description: '适合多省市、多院校反复对比', price: 9990, originalPrice: 13990, points: 480, bonus: 80, isDefault: true, badgeType: 'hot', sortOrder: 30, enabled: true },
+  { id: 'pkg_1000', name: '800 咨询点数 + 赠200点', description: '家庭规划包，适合长期升学咨询', price: 16990, originalPrice: 22990, points: 800, bonus: 200, isDefault: false, badgeType: 'best_value', sortOrder: 40, enabled: true },
 ];
 
 export async function ensurePointSettings() {

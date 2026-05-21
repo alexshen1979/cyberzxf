@@ -11,20 +11,13 @@
   },
   "mp-weixin": {
     "appid": "wxff240cd6f229ec91",
+    "lazyCodeLoading": "requiredComponents",
     "setting": {
       "urlCheck": false,
       "es6": true,
       "postcss": true,
       "minified": true
     },
-    "permission": {
-      "scope.userLocation": {
-        "desc": "用于根据当前位置自动默认高考省份"
-      }
-    },
-    "requiredPrivateInfos": [
-      "getLocation"
-    ],
     "usingComponents": true,
     "plugins": {
       "WechatSI": {

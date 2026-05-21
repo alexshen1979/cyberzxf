@@ -646,12 +646,12 @@ export async function streamConsult(params: ConsultParams): Promise<StreamConsul
 }
 
 // 获取会话历史（多轮对话上下文）
-export async function getSessionHistory(sessionId: string, limit = 10) {
+export async function getSessionHistory(sessionId: string, limit = 100) {
   const records = await prisma.consultationRecord.findMany({
     where: { sessionId },
     orderBy: { createdAt: 'asc' },
     take: limit,
-    select: { question: true, answer: true },
+    select: { id: true, question: true, answer: true, pointsCost: true, type: true, createdAt: true },
   });
   return records.map(record => ({
     ...record,

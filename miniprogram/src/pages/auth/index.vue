@@ -2,7 +2,7 @@
   <view class="auth-page">
     <view class="sheet">
       <view class="brand-mark">
-        <text>张</text>
+        <image class="brand-logo" src="/static/images/brand-logo.png" mode="aspectFit" />
       </view>
       <text class="title">手机号快捷登录</text>
       <text class="desc">用于领取体验点数、保存志愿报告和同步咨询记录。</text>
@@ -93,13 +93,18 @@ function goBack() {
   height: 112rpx;
   margin: 0 auto 28rpx;
   border-radius: 28rpx;
-  background: $primary;
-  color: #fff;
+  overflow: hidden;
+  background: #101010;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 52rpx;
-  font-weight: 900;
+  box-shadow: 0 18rpx 42rpx rgba(15, 23, 42, 0.16);
+}
+
+.brand-logo {
+  width: 112rpx;
+  height: 112rpx;
+  display: block;
 }
 
 .title {

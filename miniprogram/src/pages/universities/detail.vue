@@ -11,6 +11,10 @@
       <view class="tag-row">
         <text class="tag" v-for="tag in universityTags" :key="tag">{{ tag }}</text>
       </view>
+      <view class="favorite-pill" :class="{ active: isFavorited }" @click="toggleFavorite">
+        <image class="favorite-icon" :src="favoriteIcon" mode="aspectFit" />
+        <text>{{ isFavorited ? '已收藏' : '收藏院校' }}</text>
+      </view>
       <text class="intro" v-if="university?.introduction">{{ university.introduction }}</text>
       <text class="intro muted" v-else>{{ loading ? '正在读取院校资料...' : '该院校简介暂未补充。' }}</text>
     </view>
@@ -52,13 +56,16 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { onLoad } from '@dcloudio/uni-app';
+import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app';
 import { api } from '@/api';
 import { useUserStore } from '@/store/user';
+import { buildIconSrc } from '@/utils/iconSvgs';
+import { recordShare, withShareRef } from '@/utils/share';
 
 const userStore = useUserStore();
 const university = ref<any>(null);
 const loading = ref(false);
+const isFavorited = ref(false);
 
 const universityTags = computed(() => {
   const item = university.value || {};
@@ -71,6 +78,7 @@ const universityTags = computed(() => {
     item.properties,
   ].filter(Boolean);
 });
+const favoriteIcon = computed(() => buildIconSrc('Star', isFavorited.value ? '#ffffff' : '#b45309'));
 
 async function loadUniversity(id?: string) {
   if (!id) {
@@ -84,11 +92,41 @@ async function loadUniversity(id?: string) {
     if (res.data?.name) {
       uni.setNavigationBarTitle({ title: res.data.name });
     }
+    checkFavorite(id);
   } catch (err: any) {
     uni.showToast({ title: err?.message || '院校加载失败', icon: 'none' });
   } finally {
     loading.value = false;
   }
+}
+
+async function checkFavorite(id?: string) {
+  if (!id || !hasLoginToken()) return;
+  try {
+    const res = await api.favorites.check('university', id);
+    isFavorited.value = Boolean((res.data as any)?.favorited);
+  } catch { /* ignore */ }
+}
+
+async function toggleFavorite() {
+  const id = university.value?.id;
+  if (!id) return;
+  if (!hasLoginToken()) {
+    userStore.loginWithWechatProfile();
+    return;
+  }
+  try {
+    const res = await api.favorites.toggle('university', id);
+    const result = res.data as any;
+    isFavorited.value = Boolean(result.favorited);
+    uni.showToast({ title: result.favorited ? '已收藏' : '已取消', icon: 'none' });
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '操作失败', icon: 'none' });
+  }
+}
+
+function hasLoginToken() {
+  return userStore.isLogin || Boolean(uni.getStorageSync('token'));
 }
 
 function goBack() {
@@ -126,6 +164,24 @@ function buildUniversityContext(item: any) {
 
 onLoad((query: any) => {
   loadUniversity(query?.id);
+});
+
+onShareAppMessage(() => {
+  const path = withShareRef(university.value?.id ? `/pages/universities/detail?id=${university.value.id}` : '/pages/knowledge/index?tab=universities');
+  recordShare('friend', path);
+  return {
+    title: university.value?.name || '院校详情',
+    path,
+  };
+});
+
+onShareTimeline(() => {
+  const path = withShareRef(university.value?.id ? `/pages/universities/detail?id=${university.value.id}` : '/pages/knowledge/index?tab=universities');
+  recordShare('timeline', path);
+  return {
+    title: university.value?.name || '院校详情',
+    query: path.split('?')[1] || '',
+  };
 });
 </script>
 
@@ -188,6 +244,35 @@ onLoad((query: any) => {
   flex-wrap: wrap;
   gap: 10rpx;
   margin-top: 20rpx;
+}
+
+.favorite-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  margin-top: 20rpx;
+  padding: 13rpx 24rpx;
+  border-radius: $radius-full;
+  background: #fff7ed;
+  color: #b45309;
+  border: 2rpx solid rgba(180, 83, 9, 0.22);
+  font-size: 24rpx;
+  font-weight: 900;
+  box-shadow: 0 8rpx 20rpx rgba(180, 83, 9, 0.10);
+}
+
+.favorite-pill.active {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 10rpx 24rpx rgba(217, 119, 6, 0.24);
+}
+
+.favorite-icon {
+  width: 28rpx;
+  height: 28rpx;
+  flex-shrink: 0;
 }
 
 .tag {

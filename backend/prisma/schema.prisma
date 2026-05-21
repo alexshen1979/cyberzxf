@@ -15,6 +15,7 @@ model User {
   nickname   String?
   avatar     String?
   phone      String?
+  shareCode  String?  @unique @map("share_code")
   status     Int      @default(1)
   referredByDistributorId String? @map("referred_by_distributor_id")
   referredAt DateTime? @map("referred_at")
@@ -27,12 +28,60 @@ model User {
   consultationRecords  ConsultationRecord[]
   favorites            Favorite[]
   volunteerReports     VolunteerReport[]
+  shareEvents          ShareEvent[]
+  dailyShareRewards    DailyShareReward[]
+  shareReferralRecord  ShareReferral? @relation("ShareReferralCustomer")
+  shareReferrals       ShareReferral[] @relation("UserShareReferrer")
   distributorProfile    Distributor? @relation("UserDistributor")
   referredByDistributor Distributor? @relation("UserReferrer", fields: [referredByDistributorId], references: [id], onDelete: SetNull)
   referralRecord        DistributionReferral? @relation("ReferralCustomer")
 
   @@index([referredByDistributorId])
   @@map("users")
+}
+
+model ShareEvent {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shareCode    String?  @map("share_code")
+  channel      String
+  path         String?
+  rewarded     Boolean  @default(false)
+  rewardPoints Int      @default(0) @map("reward_points")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([shareCode])
+  @@map("share_events")
+}
+
+model DailyShareReward {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rewardDate    String   @map("reward_date")
+  points        Int      @default(10)
+  transactionId String?  @map("transaction_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, rewardDate])
+  @@index([rewardDate])
+  @@map("daily_share_rewards")
+}
+
+model ShareReferral {
+  id             String   @id @default(uuid())
+  userId         String   @unique @map("user_id")
+  user           User     @relation("ShareReferralCustomer", fields: [userId], references: [id], onDelete: Cascade)
+  referrerUserId String   @map("referrer_user_id")
+  referrer       User     @relation("UserShareReferrer", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  sourceCode     String   @map("source_code")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([referrerUserId])
+  @@index([sourceCode])
+  @@map("share_referrals")
 }
 
 model PointsAccount {
@@ -392,6 +441,7 @@ model University {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   admissionScores  AdmissionScore[]
+  artAdmissionScores ArtAdmissionScore[]
   universityMajors UniversityMajor[]
 
   @@index([provinceRegionId])
@@ -485,6 +535,66 @@ model AdmissionScore {
   @@index([sourceType])
   @@index([year, province, subjectType, lineType])
   @@map("admission_scores")
+}
+
+model ArtAdmissionRule {
+  id                  String   @id @default(uuid())
+  province            String
+  year                Int
+  artCategory         String   @map("art_category")
+  batch               String
+  subjectType         String   @default("不限") @map("subject_type")
+  formulaType         String   @default("weighted") @map("formula_type")
+  cultureFullScore    Int      @default(750) @map("culture_full_score")
+  professionalFullScore Int    @default(300) @map("professional_full_score")
+  cultureWeight       Float    @map("culture_weight")
+  professionalWeight  Float    @map("professional_weight")
+  scaleTo             Int      @default(750) @map("scale_to")
+  minCultureScore     Float?   @map("min_culture_score")
+  minProfessionalScore Float?  @map("min_professional_score")
+  sourceName          String?  @map("source_name")
+  sourceUrl           String?  @map("source_url")
+  sourceType          String?  @map("source_type")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@unique([province, year, artCategory, batch, subjectType])
+  @@index([province, year, artCategory])
+  @@map("art_admission_rules")
+}
+
+model ArtAdmissionScore {
+  id                 String      @id @default(uuid())
+  universityId       String?     @map("university_id")
+  university         University? @relation(fields: [universityId], references: [id], onDelete: SetNull)
+  universityName     String      @map("university_name")
+  province           String
+  year               Int
+  batch              String
+  artCategory        String      @map("art_category")
+  subjectType        String      @default("不限") @map("subject_type")
+  majorName          String?     @map("major_name")
+  groupCode          String?     @map("group_code")
+  groupName          String?     @map("group_name")
+  minCompositeScore  Float?      @map("min_composite_score")
+  minCultureScore    Float?      @map("min_culture_score")
+  minProfessionalScore Float?    @map("min_professional_score")
+  minRank            Int?        @map("min_rank")
+  planCount          Int?        @map("plan_count")
+  admissionMethod    String?     @map("admission_method")
+  sourceName         String?     @map("source_name")
+  sourceUrl          String?     @map("source_url")
+  sourceType         String?     @map("source_type")
+  dataQuality        String      @default("unknown") @map("data_quality")
+  rawData            String?     @map("raw_data")
+  createdAt          DateTime    @default(now()) @map("created_at")
+
+  @@index([province, year, artCategory])
+  @@index([universityName])
+  @@index([universityId])
+  @@index([sourceType])
+  @@map("art_admission_scores")
 }
 
 model Major {

@@ -7,11 +7,26 @@ import { sanitizeAiOutput } from './ai.service';
 import { createLogger } from '../utils/logger';
 import { getPointSettings } from './point-config.service';
 import { deductPoints } from './points.service';
+import { previewVolunteer, VolunteerAnalyzeInput } from './volunteer-analysis.service';
 
 const logger = createLogger('volunteer-export');
 const REPORT_OUTPUT_DIR = path.resolve(process.cwd(), 'uploads', 'reports');
+const BRAND_LOGO_PATHS = [
+  path.resolve(process.cwd(), 'src', 'assets', 'brand-logo.png'),
+  path.resolve(process.cwd(), '..', 'miniprogram', 'src', 'static', 'images', 'brand-logo.png'),
+  path.resolve(__dirname, '..', 'assets', 'brand-logo.png'),
+  path.resolve(__dirname, '..', '..', 'miniprogram', 'src', 'static', 'images', 'brand-logo.png'),
+];
 const SCREENSHOT_WIDTH = 1125;
 const SCREENSHOT_HEIGHT = 1600;
+const EXPORT_TEMPLATE_VERSION = 'v5';
+const EXPORT_PREVIEW_RECOMMENDATION_LIMIT = 120;
+const EXPORT_RECOMMENDATION_LIMITS = {
+  rush: 15,
+  stable: 25,
+  safe: 20,
+} as const;
+const EXPORT_RECOMMENDATION_TOTAL = Object.values(EXPORT_RECOMMENDATION_LIMITS).reduce((sum, count) => sum + count, 0);
 
 export type VolunteerReportExportType = 'pdf' | 'image';
 
@@ -26,14 +41,17 @@ export async function exportVolunteerReport(
   reportId: string,
   type: VolunteerReportExportType,
 ): Promise<ExportedReportFile> {
-  const report = await prisma.volunteerReport.findFirst({ where: { id: reportId, userId } });
+  const report = await prisma.volunteerReport.findFirst({
+    where: { id: reportId, userId },
+    include: { user: { select: { nickname: true, phone: true } } },
+  });
   if (!report) {
     throw new AppError(404, '志愿分析报告不存在', 'VOLUNTEER_REPORT_NOT_FOUND');
   }
 
   const extension = type === 'pdf' ? 'pdf' : 'png';
-  const filename = `涨识志愿分析报告-${safeFilename(report.province)}-${report.score}分.${extension}`;
-  const filePath = path.join(REPORT_OUTPUT_DIR, safeFilename(userId), `${safeFilename(report.id)}.${extension}`);
+  const filename = buildExportFilename(report, userId, extension);
+  const filePath = path.join(REPORT_OUTPUT_DIR, safeFilename(userId), `${safeFilename(report.id)}-${EXPORT_TEMPLATE_VERSION}.${extension}`);
   const pointsCost = await getExportPointsCost(type);
   const sourceId = `${report.id}:${type}`;
   const alreadyPaid = await hasPaidExport(userId, sourceId);
@@ -113,7 +131,7 @@ async function refundExportPoints(userId: string, amount: number, sourceId: stri
 }
 
 async function renderVolunteerReport(report: any, type: VolunteerReportExportType, filePath: string) {
-  const html = buildReportHtml(report);
+  const html = await buildReportHtml(report, type);
   let browser: any;
 
   try {
@@ -137,16 +155,6 @@ async function renderVolunteerReport(report: any, type: VolunteerReportExportTyp
     });
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: 45000 });
 
-    if (type === 'pdf') {
-      await page.pdf({
-        path: filePath,
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
-      });
-      return;
-    }
-
     const pageHeight = await page.evaluate(() => {
       const doc = (globalThis as any).document;
       const body = doc.body;
@@ -159,6 +167,24 @@ async function renderVolunteerReport(report: any, type: VolunteerReportExportTyp
         htmlEl.offsetHeight,
       );
     });
+    await page.evaluate((height: number) => {
+      const doc = (globalThis as any).document;
+      const layer = doc.querySelector('.watermark-layer') as any;
+      if (layer) layer.style.height = `${height}px`;
+      const printLayer = doc.querySelector('.watermark-print') as any;
+      if (printLayer) printLayer.style.height = `${height}px`;
+    }, pageHeight);
+
+    if (type === 'pdf') {
+      await page.pdf({
+        path: filePath,
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+      });
+      return;
+    }
+
     await page.setViewport({
       width: SCREENSHOT_WIDTH,
       height: Math.min(Math.max(pageHeight, SCREENSHOT_HEIGHT), 24000),
@@ -174,20 +200,22 @@ async function renderVolunteerReport(report: any, type: VolunteerReportExportTyp
   }
 }
 
-function buildReportHtml(report: any) {
+async function buildReportHtml(report: any, type: VolunteerReportExportType) {
   const input = safeJson(report.input, {});
-  const result = safeJson(report.result, {});
+  const result = await buildExportResult(input, safeJson(report.result, {}), type);
   const markdown = sanitizeAiOutput(report.markdownReport || '');
   const generatedAt = formatDate(report.createdAt);
+  const watermarkLogo = getWatermarkLogoDataUrl();
+  const watermarkLogoCss = watermarkLogo ? `background-image: url("${watermarkLogo}");` : '';
   const metrics = [
     ['考生省份', input.province || report.province],
     ['科类/选科', input.subjectType || report.subjectType],
     ['高考分数', `${input.score || report.score} 分`],
     ['参考位次', input.rank || report.rank ? `${input.rank || report.rank}` : '未填写'],
-    ['分析年份', `${input.year || report.year} 年`],
     ['风险偏好', riskPreferenceLabel(input.riskPreference)],
   ];
-  const recommendationCards = buildRecommendationCards(result.recommendations || {});
+  const summaryPoints = buildSummaryPoints(input, result);
+  const recommendationSections = buildRecommendationSections(result.recommendations || {}, result.recommendationStats || {});
   const preferenceItems = [
     ['目标城市/省份', joinList(input.preferredCities)],
     ['偏好专业', joinList(input.preferredMajors)],
@@ -211,6 +239,7 @@ function buildReportHtml(report: any) {
       letter-spacing: 0;
     }
     .page {
+      position: relative;
       width: 1125px;
       min-height: 100vh;
       padding: 56px 64px 72px;
@@ -222,8 +251,8 @@ function buildReportHtml(report: any) {
     .cover {
       position: relative;
       overflow: hidden;
-      min-height: 440px;
-      padding: 54px 58px 46px;
+      min-height: 390px;
+      padding: 48px 56px 42px;
       border-radius: 34px;
       color: #fff;
       background: linear-gradient(132deg, #435238 0%, #476f63 55%, #ba6f48 100%);
@@ -240,29 +269,46 @@ function buildReportHtml(report: any) {
       border-radius: 50%;
     }
     .brand { position: relative; z-index: 1; font-size: 26px; font-weight: 800; opacity: 0.92; }
-    .title { position: relative; z-index: 1; max-width: 760px; margin: 54px 0 18px; font-size: 64px; line-height: 1.08; font-weight: 900; }
+    .title { position: relative; z-index: 1; max-width: 760px; margin: 42px 0 18px; font-size: 62px; line-height: 1.08; font-weight: 900; }
     .subtitle { position: relative; z-index: 1; max-width: 840px; font-size: 28px; line-height: 1.55; opacity: 0.9; }
-    .cover-meta { position: relative; z-index: 1; display: flex; gap: 18px; flex-wrap: wrap; margin-top: 46px; }
+    .cover-meta { position: relative; z-index: 1; display: flex; gap: 18px; flex-wrap: wrap; margin-top: 34px; }
     .cover-pill { padding: 13px 22px; border-radius: 999px; background: rgba(255,255,255,0.16); font-size: 22px; font-weight: 750; }
     .section { margin-top: 34px; padding: 34px; border: 1px solid rgba(39, 55, 46, 0.08); border-radius: 26px; background: rgba(255,255,255,0.9); box-shadow: 0 16px 44px rgba(40, 55, 46, 0.06); break-inside: avoid; }
+    .profile-section { margin-top: 26px; }
+    .summary-section { break-before: page; page-break-before: always; }
+    .plan-section { break-before: page; page-break-before: always; break-inside: auto; page-break-inside: auto; }
+    .plan-section .section-header { break-after: avoid; page-break-after: avoid; }
+    .plan-section .plan-stack { break-before: avoid; page-break-before: avoid; }
     .section-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
     .section-title { margin: 0; font-size: 34px; line-height: 1.25; font-weight: 900; color: #1f2a24; }
     .section-kicker { color: #698052; font-size: 20px; font-weight: 900; }
-    .summary { color: #415047; font-size: 27px; line-height: 1.72; font-weight: 650; }
-    .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .summary-list { display: grid; gap: 16px; }
+    .summary-point { position: relative; padding: 20px 22px 20px 56px; border-radius: 18px; background: #f7f9f5; border: 1px solid rgba(39, 55, 46, 0.07); color: #31423a; font-size: 25px; line-height: 1.58; font-weight: 720; }
+    .summary-point::before { content: ""; position: absolute; left: 24px; top: 31px; width: 13px; height: 13px; border-radius: 50%; background: #ba6f48; box-shadow: 0 0 0 7px rgba(186, 111, 72, 0.12); }
+    .metric-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
     .metric { min-height: 112px; padding: 22px 24px; border-radius: 20px; background: #f7f9f5; border: 1px solid rgba(39, 55, 46, 0.06); }
     .metric-label { display: block; color: #778277; font-size: 19px; margin-bottom: 12px; }
     .metric-value { display: block; color: #1f2a24; font-size: 28px; line-height: 1.22; font-weight: 900; word-break: break-word; }
-    .band-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-    .band { padding: 24px; min-height: 230px; border-radius: 24px; border: 1px solid transparent; }
-    .band.rush { background: #fff7f5; border-color: rgba(197, 90, 62, 0.18); }
-    .band.stable { background: #fffaf0; border-color: rgba(198, 144, 52, 0.18); }
-    .band.safe { background: #f3fbf6; border-color: rgba(73, 132, 84, 0.18); }
-    .band-name { display: flex; justify-content: space-between; align-items: center; color: #1f2a24; font-size: 30px; font-weight: 900; margin-bottom: 16px; }
+    .plan-stack { display: grid; gap: 22px; }
+    .band { padding: 24px; border-radius: 24px; border: 1px solid transparent; break-inside: auto; }
+    .band.rush { background: #fff7f5; border-color: rgba(197, 90, 62, 0.20); }
+    .band.stable { background: #fffaf0; border-color: rgba(198, 144, 52, 0.22); }
+    .band.safe { background: #f3fbf6; border-color: rgba(73, 132, 84, 0.20); }
+    .band-name { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px 18px; color: #1f2a24; font-size: 31px; font-weight: 900; margin-bottom: 18px; }
     .band-count { color: #74806f; font-size: 18px; font-weight: 800; }
-    .school-list { display: grid; gap: 10px; }
-    .school-item { padding: 12px 14px; border-radius: 16px; background: rgba(255,255,255,0.72); color: #334138; font-size: 22px; line-height: 1.35; font-weight: 750; }
-    .school-meta { display: block; margin-top: 4px; color: #7a857a; font-size: 17px; font-weight: 650; }
+    .school-list { display: grid; gap: 14px; }
+    .school-item { padding: 18px 20px; border-radius: 18px; background: rgba(255,255,255,0.78); border: 1px solid rgba(39,55,46,0.06); break-inside: avoid; }
+    .school-top { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px 22px; margin-bottom: 8px; }
+    .school-name { flex: 1 1 420px; min-width: 0; color: #1f2a24; font-size: 26px; line-height: 1.3; font-weight: 900; overflow-wrap: anywhere; word-break: break-word; }
+    .school-meta { flex: 1 1 260px; min-width: 0; color: #7a857a; font-size: 18px; line-height: 1.35; font-weight: 700; text-align: right; overflow-wrap: anywhere; word-break: break-word; }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+    .tag { padding: 5px 10px; border-radius: 999px; background: #eef4ed; color: #58705f; font-size: 16px; font-weight: 800; white-space: nowrap; }
+    .tag.risk { background: #fff1f2; color: #b4535f; }
+    .option-list { display: grid; gap: 8px; margin-top: 10px; }
+    .option-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 5px 14px; padding: 11px 14px; border-radius: 12px; background: rgba(247,249,245,0.9); color: #34433a; font-size: 18px; line-height: 1.4; }
+    .option-title { flex: 1 1 430px; min-width: 0; font-weight: 850; overflow-wrap: anywhere; word-break: break-word; }
+    .option-meta { flex: 1 1 260px; min-width: 0; color: #687667; font-weight: 760; text-align: right; overflow-wrap: anywhere; word-break: break-word; }
+    .reason { margin-top: 10px; color: #59675f; font-size: 18px; line-height: 1.55; }
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
     .info-row { padding: 18px 0; border-bottom: 1px solid rgba(39, 55, 46, 0.08); }
     .info-row:last-child { border-bottom: 0; }
@@ -279,22 +325,41 @@ function buildReportHtml(report: any) {
     .markdown ul { margin: 8px 0 18px; padding-left: 28px; }
     .markdown li { margin: 8px 0; }
     .footer { margin-top: 34px; padding: 28px 10px 0; color: #738173; font-size: 20px; line-height: 1.6; text-align: center; }
+    .watermark-layer { position: absolute; left: 0; top: 0; width: 100%; z-index: 10; pointer-events: none; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 260px; align-content: start; overflow: hidden; opacity: 0.085; }
+    .watermark-print { display: none; }
+    .watermark-item { display: flex; align-items: center; justify-content: center; transform: rotate(-24deg); }
+    .watermark-stamp { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #435238; font-weight: 900; }
+    .watermark-logo { width: 132px; height: 132px; background-position: center; background-repeat: no-repeat; background-size: contain; ${watermarkLogoCss} }
+    .watermark-text { font-size: 28px; line-height: 1; letter-spacing: 0; }
+    .page > *:not(.watermark-layer) { position: relative; z-index: 1; }
     @page { size: A4; margin: 0; }
     @media print {
       .page { width: 210mm; padding: 12mm; }
-      .cover { min-height: 86mm; padding: 12mm; border-radius: 8mm; }
+      .cover { min-height: 72mm; padding: 10mm; border-radius: 8mm; }
       .title { font-size: 13mm; }
       .subtitle { font-size: 5.2mm; }
       .section { margin-top: 8mm; padding: 8mm; border-radius: 6mm; box-shadow: none; }
-      .metric-grid, .band-grid, .two-col { gap: 4mm; }
+      .profile-section { margin-top: 6mm; padding: 6mm; }
+      .summary-section { break-before: page; page-break-before: always; }
+      .plan-section { break-before: page; page-break-before: always; break-inside: auto; page-break-inside: auto; }
+      .metric-grid { grid-template-columns: repeat(3, 1fr); }
+      .metric-grid, .plan-stack, .two-col { gap: 4mm; }
       .section-title { font-size: 7mm; }
-      .summary, .metric-value { font-size: 5.4mm; }
+      .summary-point, .metric-value { font-size: 5.1mm; }
       .school-item, .info-value, .advice, .markdown { font-size: 4.7mm; }
+      .school-name { font-size: 5.2mm; }
+      .school-meta, .option-meta { text-align: left; }
+      .option-line, .reason { font-size: 3.9mm; }
+      .watermark-layer { display: none; }
+      .watermark-print { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: grid; grid-template-columns: repeat(2, 1fr); grid-auto-rows: 58mm; align-content: start; overflow: hidden; opacity: 0.078; }
+      .watermark-logo { width: 30mm; height: 30mm; }
+      .watermark-text { font-size: 6mm; }
     }
   </style>
 </head>
 <body>
   <main class="page">
+    ${watermarkHtml()}
     <section class="cover">
       <div class="brand">涨识 · 赛博张老师</div>
       <h1 class="title">${escapeHtml(report.province)} ${escapeHtml(report.subjectType)} ${escapeHtml(String(report.score))}分志愿分析报告</h1>
@@ -306,7 +371,7 @@ function buildReportHtml(report: any) {
       </div>
     </section>
 
-    <section class="section">
+    <section class="section profile-section">
       <div class="section-header">
         <h2 class="section-title">考生画像</h2>
         <div class="section-kicker">PROFILE</div>
@@ -314,20 +379,20 @@ function buildReportHtml(report: any) {
       <div class="metric-grid">${metrics.map(([label, value]) => metricHtml(label, value)).join('')}</div>
     </section>
 
-    <section class="section">
+    <section class="section summary-section">
       <div class="section-header">
         <h2 class="section-title">核心结论</h2>
         <div class="section-kicker">SUMMARY</div>
       </div>
-      <div class="summary">${escapeHtml(result.summary || '暂无核心结论。')}</div>
+      <div class="summary-list">${summaryPoints.map(point => `<div class="summary-point">${escapeHtml(point)}</div>`).join('')}</div>
     </section>
 
-    <section class="section">
+    <section class="section plan-section">
       <div class="section-header">
         <h2 class="section-title">冲稳保方案</h2>
         <div class="section-kicker">PLAN</div>
       </div>
-      <div class="band-grid">${recommendationCards.join('')}</div>
+      <div class="plan-stack">${recommendationSections.join('')}</div>
     </section>
 
     <section class="section">
@@ -371,38 +436,212 @@ function buildReportHtml(report: any) {
 </html>`;
 }
 
-function buildRecommendationCards(recommendations: Record<string, any[]>) {
+async function buildExportResult(input: any, storedResult: any, type: VolunteerReportExportType) {
+  const normalizedInput = buildExportInput(input);
+  if (!normalizedInput) return storedResult || {};
+
+  try {
+    return await previewVolunteer(Object.assign({}, normalizedInput, {
+      recommendationLimit: EXPORT_PREVIEW_RECOMMENDATION_LIMIT,
+    }));
+  } catch (err) {
+    logger.warn({ err, province: input?.province, score: input?.score }, 'volunteer export preview refresh failed');
+    return storedResult || {};
+  }
+}
+
+function buildExportInput(input: any): VolunteerAnalyzeInput | null {
+  const province = String(input?.province || '').trim();
+  const subjectType = String(input?.subjectType || '').trim();
+  const score = Number(input?.score);
+  if (!province || !subjectType || !Number.isFinite(score)) return null;
+
+  return {
+    province,
+    subjectType,
+    score,
+    year: Number(input?.year) || undefined,
+    rank: input?.rank ? Number(input.rank) : undefined,
+    targetBatch: input?.targetBatch,
+    preferredCities: Array.isArray(input?.preferredCities) ? input.preferredCities : [],
+    preferredMajors: Array.isArray(input?.preferredMajors) ? input.preferredMajors : [],
+    avoidMajors: Array.isArray(input?.avoidMajors) ? input.avoidMajors : [],
+    familyExpectation: input?.familyExpectation,
+    riskPreference: input?.riskPreference,
+  };
+}
+
+function buildSummaryPoints(input: any, result: any) {
+  const stats = result.recommendationStats || {};
+  const totalShown = ['rush', 'stable', 'safe']
+    .reduce((sum, key) => sum + ((result.recommendations?.[key] || []) as any[]).length, 0);
+  const totalCandidates = ['rush', 'stable', 'safe']
+    .reduce((sum, key) => sum + Number(stats[key] || 0), 0);
+  const preferenceParts = [
+    joinList(input.preferredCities) !== '未填写' ? `目标城市/省份：${joinList(input.preferredCities)}` : '',
+    joinList(input.preferredMajors) !== '未填写' ? `偏好专业：${joinList(input.preferredMajors)}` : '',
+    joinList(input.avoidMajors) !== '未填写' ? `规避专业：${joinList(input.avoidMajors)}` : '',
+  ].filter(Boolean);
+
+  return [
+    result.summary || `${input.province || ''}${input.subjectType || ''}${input.score || ''}分，建议按位次优先做冲稳保配置。`,
+    result.scorePosition || (input.rank ? `以 ${input.rank} 位次作为核心参照，不直接用分数跨年份硬比。` : '未填写位次，建议先补齐一分一段位次再做最终排序。'),
+    `候选池共识别 ${totalCandidates || totalShown} 所院校，本报告提炼 ${EXPORT_RECOMMENDATION_TOTAL} 个重点推荐：冲刺${EXPORT_RECOMMENDATION_LIMITS.rush}个、稳妥${EXPORT_RECOMMENDATION_LIMITS.stable}个、保底${EXPORT_RECOMMENDATION_LIMITS.safe}个。如果想要查看更多，请到涨识小程序上查看。`,
+    preferenceParts.length ? `已按${preferenceParts.join('；')}重排候选；明确命中规避方向的专业线会优先剔除，专业组线仍需核对组内专业。` : '当前没有填写城市或专业偏好，排序主要依据位次/分差和风险偏好。',
+    `建议执行顺序：先锁定稳妥档主体，再用冲刺档拉上限，用保底档守住可接受底线。`,
+  ].filter(Boolean);
+}
+
+function buildRecommendationSections(recommendations: Record<string, any[]>, stats: Record<string, any>) {
   const configs = [
-    ['rush', '冲刺', '适合冲击更高层次院校'],
-    ['stable', '稳妥', '录取概率和专业选择更均衡'],
-    ['safe', '保底', '用于守住可接受底线'],
+    { key: 'rush', label: '冲刺', desc: '适合冲击更高层次院校，注意专业组和调剂风险。' },
+    { key: 'stable', label: '稳妥', desc: '录取概率和专业选择更均衡，是方案主体。' },
+    { key: 'safe', label: '保底', desc: '用于守住可接受底线，优先确认专业接受度。' },
   ];
-  return configs.map(([key, label, desc]) => {
-    const schools = uniqueSchools(recommendations[key] || []).slice(0, 5);
+  return configs.map(({ key, label, desc }) => {
+    const limit = EXPORT_RECOMMENDATION_LIMITS[key as keyof typeof EXPORT_RECOMMENDATION_LIMITS];
+    const allSchools = groupRecommendationsBySchool(recommendations[key] || []);
+    const schools = allSchools.slice(0, limit);
+    const total = Math.max(Number(stats?.[key] || 0), allSchools.length);
     return `<div class="band ${key}">
-      <div class="band-name"><span>${label}</span><span class="band-count">${schools.length || 0} 所重点展示</span></div>
+      <div class="band-name"><span>${label}</span><span class="band-count">重点推荐 ${schools.length}/${limit} · 候选 ${total} 所</span></div>
       <div class="school-list">
-        ${schools.length ? schools.map(item => `<div class="school-item">${escapeHtml(item.name)}<span class="school-meta">${escapeHtml(item.meta || desc)}</span></div>`).join('') : `<div class="school-item">${escapeHtml(desc)}</div>`}
+        ${schools.length ? schools.map(item => schoolItemHtml(item, key)).join('') : `<div class="school-item">${escapeHtml(desc)}</div>`}
       </div>
     </div>`;
   });
 }
 
-function uniqueSchools(items: any[]) {
-  const seen = new Set<string>();
-  const result: Array<{ name: string; meta: string }> = [];
-  for (const item of items) {
+function groupRecommendationsBySchool(items: any[]) {
+  const map = new Map<string, any>();
+  for (const item of items || []) {
     const name = String(item?.universityName || '').trim();
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    result.push({
-      name,
-      meta: [item.city || item.province, item.type, item.level, item.minScore ? `最低${item.minScore}分` : '', item.minRank ? `位次${item.minRank}` : '']
-        .filter(Boolean)
-        .join(' · '),
-    });
+    if (!name) continue;
+    const key = item.universityId || name;
+    const lines = optionLines(item);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, Object.assign({}, item, {
+        optionLines: lines,
+        preferenceTags: uniqueStrings(item.preferenceTags || []),
+        warningTags: uniqueStrings(item.warningTags || []),
+      }));
+      continue;
+    }
+    existing.preferenceTags = uniqueStrings([...(existing.preferenceTags || []), ...(item.preferenceTags || [])]);
+    existing.warningTags = uniqueStrings([...(existing.warningTags || []), ...(item.warningTags || [])]);
+    existing.optionLines = mergeOptionLines(existing.optionLines || [], lines);
+  }
+  return [...map.values()];
+}
+
+function schoolItemHtml(item: any, bucket: string) {
+  const tags = [
+    ...(item.tags || []).filter(Boolean),
+    item.batch || '',
+    ...visiblePreferenceTags(item),
+  ].filter(Boolean) as string[];
+  const warnings = (item.warningTags || []) as string[];
+  const lines = optionLines(item).slice(0, 8);
+  const reason = displayReason(item);
+  return `<div class="school-item">
+    <div class="school-top">
+      <div class="school-name">${escapeHtml(item.universityName)}</div>
+      <div class="school-meta">${escapeHtml([item.city, item.province, item.type, item.level].filter(Boolean).join(' · ') || bucketLabel(bucket))}</div>
+    </div>
+    ${tags.length || warnings.length ? `<div class="tag-row">${tags.map((tag: string) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}${warnings.map((tag: string) => `<span class="tag risk">${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
+    <div class="option-list">${lines.map((line: any, index: number) => optionLineHtml(line, index)).join('')}</div>
+    ${reason ? `<div class="reason">${escapeHtml(reason)}</div>` : ''}
+  </div>`;
+}
+
+function optionLineHtml(line: any, index: number) {
+  const title = optionLineTitle(line, index);
+  const meta = [
+    line.groupCode ? `专业组${line.groupCode}` : optionLineType(line),
+    line.subjectRequirement && line.subjectRequirement !== '不限' ? line.subjectRequirement : '',
+    line.artCategory ? `${line.artCategory}` : '',
+    line.compositeScore ? `综合分${formatExportScore(line.compositeScore)}` : line.minScore ? `${line.minScore}分` : '',
+    line.minRank ? `位次${line.minRank}` : '',
+  ].filter(Boolean).join(' · ');
+  return `<div class="option-line">
+    <div class="option-title">${escapeHtml(title)}</div>
+    <div class="option-meta">${escapeHtml(meta || bucketLabel(line.bucket || 'stable'))}</div>
+  </div>`;
+}
+
+function optionLines(item: any) {
+  const lines = Array.isArray(item.optionLines) && item.optionLines.length
+    ? item.optionLines
+    : [{
+        title: item.majorName || '院校录取线',
+        bucket: item.bucket,
+        lineType: item.lineType || null,
+        groupCode: item.groupCode || null,
+        groupName: item.groupName || null,
+        subjectRequirement: item.subjectRequirement || null,
+        year: item.year,
+        batch: item.batch,
+        subjectType: item.subjectType,
+        majorName: item.majorName,
+        minScore: item.minScore,
+        minRank: item.minRank,
+        avgScore: item.avgScore,
+        planCount: item.planCount,
+        compositeScore: item.compositeScore,
+        cultureScore: item.cultureScore,
+        professionalScore: item.professionalScore,
+        artCategory: item.artCategory,
+        admissionMethod: item.admissionMethod,
+        preferenceTags: item.preferenceTags || [],
+        warningTags: item.warningTags || [],
+        reason: item.reason || '',
+      }];
+  return lines.filter((line: any) => line?.title || line?.minScore || line?.minRank);
+}
+
+function mergeOptionLines(current: any[], incoming: any[]) {
+  const seen = new Set<string>();
+  const result: any[] = [];
+  for (const line of [...current, ...incoming]) {
+    const key = [line.title, line.year, line.batch, line.minScore, line.minRank, line.subjectRequirement].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(line);
   }
   return result;
+}
+
+function optionLineTitle(line: any, index: number) {
+  const title = line.title || line.majorName || line.groupName || (line.groupCode ? `专业组${line.groupCode}` : '');
+  return title || `录取线 ${index + 1}`;
+}
+
+function optionLineType(line: any) {
+  if (line.groupCode) return `专业组${line.groupCode}`;
+  if (line.groupName && line.groupName !== line.title) return line.groupName;
+  if (line.majorName) return '专业线';
+  return '院校线';
+}
+
+function visiblePreferenceTags(item: any) {
+  return (item.preferenceTags || []).filter((tag: string) => !/^目标(?:省份|城市)：/.test(String(tag)));
+}
+
+function displayReason(item: any) {
+  return String(item?.reason || '')
+    .replace(/匹配目标城市或省份：[^。]*。?/g, '')
+    .trim();
+}
+
+function uniqueStrings(items: any[]) {
+  return [...new Set((items || []).map(item => String(item || '').trim()).filter(Boolean))];
+}
+
+function bucketLabel(bucket: string) {
+  if (bucket === 'rush') return '冲刺';
+  if (bucket === 'safe') return '保底';
+  return '稳妥';
 }
 
 function metricHtml(label: string, value: unknown) {
@@ -492,6 +731,53 @@ function formatDate(value: Date | string | null | undefined) {
   if (Number.isNaN(date.getTime())) return '';
   const pad = (num: number) => String(num).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatExportScore(value: unknown) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function buildExportFilename(report: any, userId: string, extension: string) {
+  const input = safeJson(report.input, {});
+  const userName = report.user?.nickname || report.user?.phone || `用户${String(userId).slice(0, 6)}`;
+  const score = formatExportScore(input.score || report.score);
+  const parts = [
+    '涨识',
+    '志愿分析报告',
+    userName,
+    input.province || report.province,
+    input.subjectType || report.subjectType,
+    score ? `${score}分` : '',
+    formatDateForFilename(report.createdAt),
+  ].filter(Boolean);
+  return `${parts.map(part => safeFilename(String(part))).join('_')}.${extension}`;
+}
+
+function formatDateForFilename(value: Date | string | null | undefined) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+}
+
+function getWatermarkLogoDataUrl() {
+  const logoPath = BRAND_LOGO_PATHS.find(candidate => fs.existsSync(candidate));
+  if (!logoPath) return '';
+  try {
+    return `data:image/png;base64,${fs.readFileSync(logoPath).toString('base64')}`;
+  } catch (err) {
+    logger.warn({ err, logoPath }, 'read watermark logo failed');
+    return '';
+  }
+}
+
+function watermarkHtml() {
+  const items = Array.from({ length: 360 }, () => {
+    return `<div class="watermark-item" aria-hidden="true"><div class="watermark-stamp"><div class="watermark-logo"></div><div class="watermark-text">涨识</div></div></div>`;
+  });
+  return `<div class="watermark-layer">${items.join('')}</div><div class="watermark-print">${items.join('')}</div>`;
 }
 
 function escapeHtml(value: unknown) {
