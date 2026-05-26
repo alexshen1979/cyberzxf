@@ -32,6 +32,18 @@
     <el-table :data="orders" style="width: 100%" v-loading="loading">
       <el-table-column prop="orderNo" label="订单号" width="180" />
       <el-table-column prop="transactionId" label="微信交易号" min-width="220" show-overflow-tooltip />
+      <el-table-column label="充值账户" min-width="240">
+        <template #default="{ row }">
+          <div class="user-cell">
+            <div class="user-main">
+              <strong>{{ userDisplayName(row.user) }}</strong>
+              <el-tag :type="userRoleTagType(row.user)" size="small">{{ userRoleLabel(row.user) }}</el-tag>
+            </div>
+            <span>ID：{{ row.user?.id || row.userId || '-' }}</span>
+            <span v-if="row.user?.phone">手机号：{{ row.user.phone }}</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="productName" label="套餐" min-width="200" />
       <el-table-column label="金额" width="100">
         <template #default="{ row }">¥{{ (row.amount / 100).toFixed(2) }}</template>
@@ -85,6 +97,9 @@
         <el-form-item label="支付回调地址">
           <el-input v-model="paymentConfigForm.notifyUrl" placeholder="https://你的域名/api/v1/payments/callback" />
         </el-form-item>
+        <el-form-item label="商家转账回调地址">
+          <el-input v-model="paymentConfigForm.transferNotifyUrl" placeholder="https://你的域名/api/v1/distribution/transfer-callback" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="paymentConfigDialogVisible = false">取消</el-button>
@@ -114,6 +129,7 @@ const paymentConfigForm = reactive({
   privateKeyPath: '',
   platformPublicKeyPath: '',
   notifyUrl: '',
+  transferNotifyUrl: '',
 });
 
 function statusType(s: string) {
@@ -125,7 +141,26 @@ function roleLabel(role: string) {
   if (role === 'level1_direct') return '直接推荐奖励';
   if (role === 'level2_direct') return '推荐奖励';
   if (role === 'level1_override') return '合作伙伴奖励';
+  if (role === 'level1_recurring_direct') return '复充直接奖励';
+  if (role === 'level2_recurring_direct') return '复充推荐奖励';
+  if (role === 'level1_recurring_override') return '复充合作伙伴奖励';
   return role || '-';
+}
+
+function userDisplayName(user: any) {
+  return user?.nickname || user?.phone || user?.shareCode || '未命名用户';
+}
+
+function userRoleLabel(user: any) {
+  const profile = user?.distributorProfile;
+  if (!profile || profile.status !== 'active') return '普通用户';
+  return profile.level === 1 ? '合作伙伴' : '推荐官';
+}
+
+function userRoleTagType(user: any) {
+  const profile = user?.distributorProfile;
+  if (!profile || profile.status !== 'active') return 'info';
+  return profile.level === 1 ? 'success' : 'warning';
 }
 
 function commissionTotal(row: any) {
@@ -160,6 +195,7 @@ async function openPaymentConfig() {
     privateKeyPath: res.data.privateKeyPath || '',
     platformPublicKeyPath: res.data.platformPublicKeyPath || '',
     notifyUrl: res.data.notifyUrl || '',
+    transferNotifyUrl: res.data.transferNotifyUrl || '',
   });
   paymentConfigDialogVisible.value = true;
 }
@@ -195,6 +231,25 @@ h2 { margin-bottom: 20px; }
 }
 .payment-config-title { font-weight: 600; color: #1f2937; }
 .payment-config-subtitle { margin-top: 4px; font-size: 13px; color: #6b7280; }
+.user-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  span {
+    color: #6b7280;
+    font-size: 12px;
+  }
+}
+.user-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  strong {
+    color: #111827;
+  }
+}
 .commission-cell {
   display: flex;
   flex-direction: column;

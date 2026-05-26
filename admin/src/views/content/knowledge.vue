@@ -140,7 +140,7 @@
                 </div>
                 <div class="toolbar-right">
                   <el-button type="warning" @click="doPolish" :loading="polishing" :icon="MagicStick">
-                    {{ polishing ? 'AI 润色中...' : 'AI 润色 (DeepSeek)' }}
+                    {{ polishing ? 'AI 润色中...' : 'AI 润色' }}
                   </el-button>
                 </div>
               </div>
@@ -201,7 +201,7 @@
               </div>
               <div class="toolbar-right">
                 <el-button type="warning" @click="doPolish" :loading="polishing" :icon="MagicStick">
-                  {{ polishing ? 'AI 润色中...' : 'AI 润色 (DeepSeek)' }}
+                  {{ polishing ? 'AI 润色中...' : 'AI 润色' }}
                 </el-button>
               </div>
             </div>

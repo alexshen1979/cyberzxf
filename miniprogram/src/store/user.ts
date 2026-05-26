@@ -11,6 +11,7 @@ export const useUserStore = defineStore('user', () => {
   const consultType = ref('gaokao');
   const consultContext = ref('');
   const pendingConsult = ref(false);
+  const forceNewConsult = ref(false);
   const showHistoryTab = ref(false);
   const loadSessionId = ref('');
 
@@ -114,6 +115,7 @@ export const useUserStore = defineStore('user', () => {
     consultType,
     consultContext,
     pendingConsult,
+    forceNewConsult,
     showHistoryTab,
     loadSessionId,
     isLogin,

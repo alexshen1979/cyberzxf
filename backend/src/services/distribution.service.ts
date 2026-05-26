@@ -6,6 +6,12 @@ import { AppError } from '../middleware/errorHandler';
 import { createLogger } from '../utils/logger';
 import { config } from '../config';
 import { getPointSettings } from './point-config.service';
+import {
+  createWechatMerchantTransfer,
+  getWechatTransferRuntimeConfig,
+  handleWechatTransferNotify,
+  queryWechatMerchantTransferByOutBillNo,
+} from './wechat-transfer.service';
 
 const logger = createLogger('distribution');
 const SYSTEM_DISTRIBUTOR_ID = 'system-distributor';
@@ -14,12 +20,31 @@ const DEFAULT_LEVEL1_RATE = 5000;
 const DEFAULT_LEVEL2_RATE = 2000;
 const DEFAULT_MIN_WITHDRAWAL_AMOUNT = 1000;
 const DEFAULT_WITHDRAWAL_FREEZE_DAYS = 7;
+const DEFAULT_TRANSFER_SCENE_ID = '1005';
+const DEFAULT_TRANSFER_SCENE_NAME = '佣金报酬';
+const DEFAULT_TRANSFER_DAILY_LIMIT = 5000000;
+const DEFAULT_TRANSFER_SINGLE_MIN = 10;
+const DEFAULT_TRANSFER_SINGLE_MAX = 20000;
+const DEFAULT_TRANSFER_USER_DAILY_LIMIT = 200000;
+const DEFAULT_TRANSFER_USER_CONFIRM = true;
+const DEFAULT_TRANSFER_REPORT_JOB_TYPE = '推广服务';
+const DEFAULT_TRANSFER_REPORT_REWARD_DESC = '涨识推荐合作佣金报酬';
+const DEFAULT_RECURRING_COMMISSION_ENABLED = false;
+const DEFAULT_RECURRING_LEVEL1_RATE = 1000;
+const DEFAULT_RECURRING_LEVEL2_RATE = 500;
+const DEFAULT_RECURRING_COMMISSION_DAYS = 180;
 const DEFAULT_DAILY_SHARE_REWARD_POINTS = 10;
 const DAILY_SHARE_REWARD_SOURCE = 'daily_share_reward';
 const DEFAULT_SHARE_REFERRAL_REWARD_POINTS = 20;
 const SHARE_REFERRAL_REWARD_SOURCE = 'share_referral_reward';
+const PARTNER_NEW_USER_EXTRA_GIFT_SOURCE = 'partner_new_user_extra_gift';
 const DIRECT_COMMISSION_ROLES = ['level1_direct', 'level2_direct'];
-const LOCKED_WITHDRAWAL_STATUSES = ['pending', 'approved'];
+const TRANSFERRING_WITHDRAWAL_STATUSES = ['transferring', 'wait_user_confirm'];
+const LOCKED_WITHDRAWAL_STATUSES = ['pending', 'approved', ...TRANSFERRING_WITHDRAWAL_STATUSES];
+const WECHAT_TRANSFER_SUCCESS_STATES = ['SUCCESS'];
+const WECHAT_TRANSFER_CONFIRM_STATES = ['WAIT_USER_CONFIRM'];
+const WECHAT_TRANSFER_PROCESSING_STATES = ['ACCEPTED', 'PROCESSING', 'WAIT_USER_CONFIRM'];
+const WECHAT_TRANSFER_FAILED_STATES = ['FAIL', 'CANCELING', 'CANCELLED'];
 
 let miniAccessTokenCache: { token: string; expiresAt: number } | null = null;
 
@@ -37,6 +62,19 @@ export async function ensureDistributionDefaults(db: any = prisma) {
         referralReward: DEFAULT_SHARE_REFERRAL_REWARD_POINTS,
         minWithdrawalAmount: DEFAULT_MIN_WITHDRAWAL_AMOUNT,
         withdrawalFreezeDays: DEFAULT_WITHDRAWAL_FREEZE_DAYS,
+        transferSceneId: DEFAULT_TRANSFER_SCENE_ID,
+        transferSceneName: DEFAULT_TRANSFER_SCENE_NAME,
+        transferDailyLimit: DEFAULT_TRANSFER_DAILY_LIMIT,
+        transferSingleMin: DEFAULT_TRANSFER_SINGLE_MIN,
+        transferSingleMax: DEFAULT_TRANSFER_SINGLE_MAX,
+        transferUserDailyLimit: DEFAULT_TRANSFER_USER_DAILY_LIMIT,
+        transferUserConfirm: DEFAULT_TRANSFER_USER_CONFIRM,
+        transferReportJobType: DEFAULT_TRANSFER_REPORT_JOB_TYPE,
+        transferReportRewardDesc: DEFAULT_TRANSFER_REPORT_REWARD_DESC,
+        recurringCommissionEnabled: DEFAULT_RECURRING_COMMISSION_ENABLED,
+        recurringLevel1Rate: DEFAULT_RECURRING_LEVEL1_RATE,
+        recurringLevel2Rate: DEFAULT_RECURRING_LEVEL2_RATE,
+        recurringCommissionDays: DEFAULT_RECURRING_COMMISSION_DAYS,
       },
     }),
     db.distributor.upsert({
@@ -85,23 +123,72 @@ export async function createReferralForNewUser(db: any, userId: string, referral
   return createDistributionReferralFromDistributor(db, userId, distributor, code, shareReferral.createdAt);
 }
 
-export async function resolveNewUserGiftPoints(db: any, userId: string, referralCode?: string, defaultGift?: number) {
-  const settings = await getPointSettings();
-  const fallbackGift = normalizePointAmount(defaultGift ?? settings.freeGift, '新用户赠送点数');
+export async function grantPartnerNewUserExtraGift(db: any, userId: string, referralCode?: string) {
   const code = normalizeDistributorCode(referralCode);
-  if (!code) return fallbackGift;
+  if (!code) return null;
+
+  const existing = await db.pointsTransaction.findFirst({
+    where: { userId, source: PARTNER_NEW_USER_EXTRA_GIFT_SOURCE },
+    select: { id: true },
+  });
+  if (existing) return null;
 
   const resolved = await resolveReferralCode(db, userId, code);
-  const distributor = resolved?.distributor;
-  const levelOne = distributor?.level === 1
+  const levelOne = await resolveLevelOneDistributorForExtraGift(db, resolved?.distributor);
+  const extraPoints = normalizeOptionalPointAmount(levelOne?.newUserGiftOverride, '特邀合作伙伴新用户额外赠点') || 0;
+  if (!levelOne || extraPoints <= 0) return null;
+
+  const settings = await getPointSettings();
+  const now = new Date();
+  const expiredAt = new Date(now);
+  expiredAt.setDate(expiredAt.getDate() + settings.expireDays);
+
+  let account = await db.pointsAccount.findUnique({ where: { userId } });
+  if (!account) {
+    account = await db.pointsAccount.create({
+      data: { userId, balance: 0, frozen: 0, expiredAt },
+    });
+  } else if (account.expiredAt < now) {
+    account = await db.pointsAccount.update({
+      where: { userId },
+      data: { balance: 0, expiredAt },
+    });
+  }
+
+  const updated = await db.pointsAccount.update({
+    where: { userId },
+    data: {
+      balance: { increment: extraPoints },
+      expiredAt,
+    },
+  });
+
+  return db.pointsTransaction.create({
+    data: {
+      id: crypto.randomUUID(),
+      userId,
+      type: 'gift',
+      amount: extraPoints,
+      balanceAfter: updated.balance,
+      source: PARTNER_NEW_USER_EXTRA_GIFT_SOURCE,
+      sourceId: levelOne.id,
+      remark: `特邀合作伙伴额外赠送 ${extraPoints} 点`,
+    },
+  });
+}
+
+async function resolveLevelOneDistributorForExtraGift(db: any, distributor?: any) {
+  if (!distributor) return null;
+  if (distributor.status !== 'active') return null;
+  const levelOne = distributor.level === 1
     ? distributor
-    : (distributor?.parent || (distributor?.parentId
+    : (distributor.parent || (distributor.parentId
       ? await db.distributor.findUnique({ where: { id: distributor.parentId } })
       : null));
-  const override = levelOne?.level === 1 ? levelOne.newUserGiftOverride : null;
-  return override === null || override === undefined
-    ? fallbackGift
-    : normalizePointAmount(override, '特邀合作伙伴新用户赠点');
+
+  if (!levelOne || levelOne.level !== 1 || levelOne.status !== 'active') return null;
+  if (levelOne.code === SYSTEM_DISTRIBUTOR_CODE) return null;
+  return levelOne;
 }
 
 async function createDistributionReferralFromDistributor(db: any, userId: string, distributor: any, sourceCode?: string, relationshipCreatedAt?: Date | string | null) {
@@ -303,6 +390,7 @@ export async function bindShareReferral(userId: string, referralCode?: string) {
     }
 
     const shareReferral = await createShareReferralAndReward(tx, userId, resolved.referrerUserId, code);
+    const extraGift = await grantPartnerNewUserExtraGift(tx, userId, code);
     let distributionReferral = null;
     const distributor = resolved.distributor;
     if (distributor?.status === 'active' && distributor.userId !== userId) {
@@ -312,6 +400,7 @@ export async function bindShareReferral(userId: string, referralCode?: string) {
     return {
       shareReferral,
       distributionReferral,
+      extraGiftPoints: extraGift?.amount || 0,
       rewardPoints: getReferralRewardPoints(await getCurrentDistributionSetting(tx)),
     };
   });
@@ -449,6 +538,7 @@ export async function applyDistributionWithdrawal(userId: string, input: Record<
   if (amount < minAmount) {
     throw new AppError(422, `提现金额不能低于 ${formatYuan(minAmount)}`, 'WITHDRAWAL_AMOUNT_TOO_LOW');
   }
+  await assertWithdrawalTransferRule(amount, userId, setting);
 
   const summary = await getDistributorWithdrawalSummary(distributor.id, setting);
   if (amount > summary.availableWithdrawalAmount) {
@@ -803,6 +893,30 @@ function maxDate(...values: Array<Date | string | null | undefined>) {
   return new Date(Math.max(...dates.map((date) => date.getTime())));
 }
 
+function addDays(date: Date | string, days: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function isRecurringCommissionEnabled(setting: any) {
+  return Boolean(setting?.recurringCommissionEnabled) && Number(setting?.recurringCommissionDays || 0) > 0;
+}
+
+function recurringCommissionWindow(after: Date | string | null | undefined, days: number) {
+  if (!after || Number(days || 0) <= 0) return null;
+  const start = new Date(after);
+  const end = addDays(start, Number(days || 0));
+  return { start, end };
+}
+
+function isOrderInRecurringWindow(order: any, after: Date | string | null | undefined, days: number) {
+  const window = recurringCommissionWindow(after, days);
+  if (!window) return false;
+  const paidAt = order.paidAt ? new Date(order.paidAt) : new Date();
+  return paidAt >= window.start && paidAt <= window.end;
+}
+
 async function backfillMissingCommissionsForDistributor(distributorId: string) {
   await ensureDistributionDefaults();
 
@@ -845,6 +959,10 @@ async function backfillMissingCommissionsForDistributor(distributorId: string) {
           const firstDirectOrder = await findFirstPaidOrderForUserAfter(tx, referral.userId, directEligibleAfter);
           if (firstDirectOrder) candidateOrderIds.add(firstDirectOrder.id);
         }
+        if (isRecurringCommissionEnabled(setting)) {
+          const directRecurringOrders = await findRecurringPaidOrdersForUser(tx, referral.userId, directEligibleAfter, setting.recurringCommissionDays);
+          for (const order of directRecurringOrders) candidateOrderIds.add(order.id);
+        }
       }
 
       if (distributor.level === 1 && direct.level === 2 && referral.firstLevelDistributorId === distributor.id) {
@@ -857,6 +975,10 @@ async function backfillMissingCommissionsForDistributor(distributorId: string) {
             overrideEligibleAfter,
           );
           if (firstOverrideOrder) candidateOrderIds.add(firstOverrideOrder.id);
+        }
+        if (isRecurringCommissionEnabled(setting)) {
+          const parentRecurringOrders = await findRecurringPaidOrdersForUser(tx, referral.userId, overrideEligibleAfter, setting.recurringCommissionDays);
+          for (const order of parentRecurringOrders) candidateOrderIds.add(order.id);
         }
       }
     }
@@ -894,6 +1016,21 @@ async function findFirstPaidOrderForUserAfter(db: any, userId: string, after?: D
   });
 }
 
+async function findRecurringPaidOrdersForUser(db: any, userId: string, after: Date | string | null | undefined, days: number) {
+  const window = recurringCommissionWindow(after, days);
+  if (!window) return [];
+  return db.order.findMany({
+    where: {
+      userId,
+      status: 'paid',
+      paidAt: { gte: window.start, lte: window.end },
+    },
+    orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true },
+    take: 200,
+  });
+}
+
 async function isFirstPaidOrderForUserAfter(db: any, userId: string, orderId: string, after?: Date | string | null) {
   const firstPaidOrder = await findFirstPaidOrderForUserAfter(db, userId, after);
   return firstPaidOrder?.id === orderId;
@@ -917,6 +1054,13 @@ async function hasDirectCommissionForReferral(db: any, referralUserId: string, d
       distributorId,
       role: { in: DIRECT_COMMISSION_ROLES },
     },
+  });
+  return count > 0;
+}
+
+async function hasCommissionForOrderRole(db: any, orderId: string, distributorId: string, role: string) {
+  const count = await db.distributionCommission.count({
+    where: { orderId, distributorId, role },
   });
   return count > 0;
 }
@@ -1026,7 +1170,17 @@ async function ensureDistributionReferralForOrder(db: any, order: any) {
 
 export async function getDistributionSettingsForAdmin() {
   const { setting } = await ensureDistributionDefaults();
-  return formatDistributionSetting(setting);
+  const runtimeTransferConfig = await getWechatTransferRuntimeConfig().catch(() => null);
+  const formatted = formatDistributionSetting(setting);
+  return {
+    ...formatted,
+    transferNotifyUrl: formatted.transferNotifyUrl || runtimeTransferConfig?.transferNotifyUrl || '',
+    transferRule: {
+      ...formatted.transferRule,
+      notifyUrl: formatted.transferRule.notifyUrl || runtimeTransferConfig?.transferNotifyUrl || '',
+    },
+    transferRuntimeConfig: runtimeTransferConfig,
+  };
 }
 
 export async function updateDistributionSettingsForAdmin(input: Record<string, any>) {
@@ -1036,11 +1190,24 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
   const referralReward = normalizePointAmount(input.referralReward ?? DEFAULT_SHARE_REFERRAL_REWARD_POINTS, '好友注册奖励');
   const minWithdrawalAmount = normalizeMoneyAmount(input.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT, true);
   const withdrawalFreezeDays = normalizeFreezeDays(input.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS);
+  const transferRule = normalizeTransferRule(input);
+  const recurringLevel1Rate = normalizeRateBps(input.recurringLevel1Rate ?? DEFAULT_RECURRING_LEVEL1_RATE);
+  const recurringLevel2Rate = normalizeRateBps(input.recurringLevel2Rate ?? DEFAULT_RECURRING_LEVEL2_RATE);
+  const recurringCommissionDays = normalizeRecurringCommissionDays(input.recurringCommissionDays ?? DEFAULT_RECURRING_COMMISSION_DAYS);
   if (level1Rate < level2Rate) {
-    throw new AppError(422, '一级分销比例不能低于二级分销比例', 'DISTRIBUTION_RATE_INVALID');
+    throw new AppError(422, '特邀总比例不能低于推荐官比例', 'DISTRIBUTION_RATE_INVALID');
   }
-  if (minWithdrawalAmount < 100) {
-    throw new AppError(422, '最低提现金额不能低于 1 元', 'WITHDRAWAL_MIN_AMOUNT_INVALID');
+  if (recurringLevel1Rate < recurringLevel2Rate) {
+    throw new AppError(422, '复充特邀总比例不能低于复充推荐官比例', 'DISTRIBUTION_RATE_INVALID');
+  }
+  if (recurringLevel1Rate > level1Rate || recurringLevel2Rate > level2Rate) {
+    throw new AppError(422, '复充比例不能高于首充比例', 'DISTRIBUTION_RECURRING_RATE_INVALID');
+  }
+  if (minWithdrawalAmount < transferRule.transferSingleMin) {
+    throw new AppError(422, `最低提现金额不能低于转账场景单笔下限 ${formatYuan(transferRule.transferSingleMin)}`, 'WITHDRAWAL_MIN_AMOUNT_INVALID');
+  }
+  if (minWithdrawalAmount > transferRule.transferSingleMax) {
+    throw new AppError(422, `最低提现金额不能高于转账场景单笔上限 ${formatYuan(transferRule.transferSingleMax)}`, 'WITHDRAWAL_MIN_AMOUNT_INVALID');
   }
 
   const setting = await prisma.distributionSetting.upsert({
@@ -1053,6 +1220,11 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
       referralReward,
       minWithdrawalAmount,
       withdrawalFreezeDays,
+      ...transferRule,
+      recurringCommissionEnabled: input.recurringCommissionEnabled === true,
+      recurringLevel1Rate,
+      recurringLevel2Rate,
+      recurringCommissionDays,
     },
     create: {
       id: 'default',
@@ -1063,6 +1235,11 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
       referralReward,
       minWithdrawalAmount,
       withdrawalFreezeDays,
+      ...transferRule,
+      recurringCommissionEnabled: input.recurringCommissionEnabled === true,
+      recurringLevel1Rate,
+      recurringLevel2Rate,
+      recurringCommissionDays,
     },
   });
   return formatDistributionSetting(setting);
@@ -1098,7 +1275,7 @@ export async function getDistributionDashboardForAdmin() {
       _sum: { amount: true },
     }),
     prisma.distributionWithdrawal.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
-    prisma.distributionWithdrawal.aggregate({ where: { status: { in: ['pending', 'approved'] } }, _sum: { amount: true } }),
+    prisma.distributionWithdrawal.aggregate({ where: { status: { in: LOCKED_WITHDRAWAL_STATUSES } }, _sum: { amount: true } }),
   ]);
   const commissionAmount = commissionTotal._sum.amount || 0;
   const settledCommissionAmount = settledCommissionTotal._sum.amount || 0;
@@ -1115,6 +1292,27 @@ export async function getDistributionDashboardForAdmin() {
     paidWithdrawalAmount: withdrawalTotal._sum.amount || 0,
     pendingWithdrawalAmount: withdrawalPendingTotal._sum.amount || 0,
     withdrawalFreezeDays: freezeDays,
+  };
+}
+
+export async function getDistributionPendingCountsForAdmin() {
+  await ensureDistributionDefaults();
+  const [pendingDistributors, pendingWithdrawals] = await Promise.all([
+    prisma.distributor.count({
+      where: {
+        status: 'pending',
+        code: { not: SYSTEM_DISTRIBUTOR_CODE },
+      },
+    }),
+    prisma.distributionWithdrawal.count({
+      where: { status: 'pending' },
+    }),
+  ]);
+
+  return {
+    pendingDistributors,
+    pendingWithdrawals,
+    total: pendingDistributors + pendingWithdrawals,
   };
 }
 
@@ -1260,7 +1458,7 @@ export async function createDistributorForAdmin(input: Record<string, any>) {
     ? await resolveDistributorParentFromShareReferral(prisma, userId)
     : null;
   const parentId = level === 2 ? await resolveLevel2ParentId(input.parentId || invitedParentId) : null;
-  const newUserGiftOverride = level === 1 ? normalizeOptionalPointAmount(input.newUserGiftOverride, '特邀合作伙伴新用户赠点') : null;
+  const newUserGiftOverride = level === 1 ? normalizeOptionalPointAmount(input.newUserGiftOverride, '特邀合作伙伴新用户额外赠点') : null;
   const distributor = await prisma.distributor.create({
     data: {
       userId,
@@ -1303,7 +1501,7 @@ export async function updateDistributorForAdmin(id: string, input: Record<string
   if (nextLevel === 1) {
     data.parentId = null;
     if (input.newUserGiftOverride !== undefined) {
-      data.newUserGiftOverride = normalizeOptionalPointAmount(input.newUserGiftOverride, '特邀合作伙伴新用户赠点');
+      data.newUserGiftOverride = normalizeOptionalPointAmount(input.newUserGiftOverride, '特邀合作伙伴新用户额外赠点');
     }
   } else {
     const invitedParentId = data.status === 'active' || (!data.status && distributor.status === 'active')
@@ -1366,6 +1564,12 @@ export async function reviewWithdrawalForAdmin(id: string, input: Record<string,
   if (status === 'approved') data.reviewedAt = withdrawal.reviewedAt || now;
   if (status === 'rejected') data.reviewedAt = now;
   if (status === 'paid') {
+    const { setting } = await ensureDistributionDefaults();
+    await assertWithdrawalTransferRule(withdrawal.amount, withdrawal.userId || '', setting, {
+      excludeWithdrawalId: withdrawal.id,
+      usageDateField: 'paidAt',
+      usageStatuses: ['paid'],
+    });
     data.reviewedAt = withdrawal.reviewedAt || now;
     data.paidAt = now;
     data.transferNo = String(input.transferNo || withdrawal.transferNo || '').trim().slice(0, 100) || null;
@@ -1382,6 +1586,109 @@ export async function reviewWithdrawalForAdmin(id: string, input: Record<string,
     withdrawal: updated,
     summary: await getDistributorWithdrawalSummary(updated.distributorId),
   };
+}
+
+export async function startWechatTransferForAdmin(id: string, input: Record<string, any> = {}) {
+  const { setting } = await ensureDistributionDefaults();
+  const withdrawal = await prisma.distributionWithdrawal.findUnique({
+    where: { id },
+    include: withdrawalInclude(),
+  });
+  if (!withdrawal) throw new AppError(404, '提现申请不存在', 'WITHDRAWAL_NOT_FOUND');
+  if (withdrawal.status === 'paid') {
+    throw new AppError(409, '该提现已打款完成', 'WITHDRAWAL_ALREADY_PAID');
+  }
+  if (!['approved', 'failed', 'transferring', 'wait_user_confirm'].includes(withdrawal.status)) {
+    throw new AppError(409, '请先审核通过提现申请，再发起微信转账', 'WITHDRAWAL_STATUS_INVALID');
+  }
+  await assertWithdrawalTransferRule(withdrawal.amount, withdrawal.userId || '', setting, {
+    excludeWithdrawalId: withdrawal.id,
+    usageDateField: 'transferRequestedAt',
+    usageStatuses: [...TRANSFERRING_WITHDRAWAL_STATUSES, 'paid'],
+  });
+
+  const outBillNo = withdrawal.outBillNo || await generateTransferOutBillNo();
+  const rule = formatTransferRule(setting);
+  const remark = String(input.remark || `涨识${rule.sceneName}`).trim().slice(0, 32) || `涨识${rule.sceneName}`;
+  await markWithdrawalTransferRequested(withdrawal.id, {
+    outBillNo,
+    remark,
+    transferSceneId: rule.sceneId,
+  });
+  let response: any;
+  try {
+    response = await createWechatMerchantTransfer({
+      openId: withdrawal.openId || withdrawal.distributor?.user?.miniOpenId || withdrawal.distributor?.user?.mpOpenId || '',
+      outBillNo,
+      amount: withdrawal.amount,
+      sceneId: rule.sceneId,
+      sceneName: rule.sceneName,
+      remark,
+      jobType: rule.reportJobType,
+      rewardDesc: rule.reportRewardDesc,
+      userName: null,
+    });
+  } catch (err: any) {
+    await markWithdrawalTransferFailed(withdrawal.id, err?.details?.message || err?.message || '微信商家转账发起失败');
+    throw err;
+  }
+  const updated = await updateWithdrawalFromWechatTransferResponse(withdrawal.id, response, {
+    outBillNo,
+    remark,
+    transferSceneId: rule.sceneId,
+    fallbackStatus: 'transferring',
+  });
+  const runtimeConfig = await getWechatTransferRuntimeConfig().catch(() => null);
+  return {
+    withdrawal: updated,
+    transfer: buildMiniTransferPayload(updated, runtimeConfig),
+    summary: await getDistributorWithdrawalSummary(updated.distributorId),
+  };
+}
+
+export async function queryWechatTransferForAdmin(id: string) {
+  const withdrawal = await prisma.distributionWithdrawal.findUnique({ where: { id }, include: withdrawalInclude() });
+  if (!withdrawal) throw new AppError(404, '提现申请不存在', 'WITHDRAWAL_NOT_FOUND');
+  return syncWithdrawalWechatTransfer(withdrawal);
+}
+
+export async function getWithdrawalTransferPackage(userId: string, id: string) {
+  const withdrawal = await prisma.distributionWithdrawal.findFirst({
+    where: { id, userId },
+    include: withdrawalInclude(),
+  });
+  if (!withdrawal) throw new AppError(404, '提现申请不存在', 'WITHDRAWAL_NOT_FOUND');
+  const synced = await syncWithdrawalWechatTransfer(withdrawal).catch(() => ({ withdrawal }));
+  const runtimeConfig = await getWechatTransferRuntimeConfig().catch(() => null);
+  return {
+    withdrawal: synced.withdrawal,
+    transfer: buildMiniTransferPayload(synced.withdrawal, runtimeConfig),
+  };
+}
+
+export async function syncMyWechatWithdrawal(userId: string, id: string) {
+  const withdrawal = await prisma.distributionWithdrawal.findFirst({
+    where: { id, userId },
+    include: withdrawalInclude(),
+  });
+  if (!withdrawal) throw new AppError(404, '提现申请不存在', 'WITHDRAWAL_NOT_FOUND');
+  return syncWithdrawalWechatTransfer(withdrawal);
+}
+
+export async function handleWechatTransferCallbackForDistribution(body: Record<string, any>, headers?: Record<string, any>, rawBody?: string) {
+  const payload = await handleWechatTransferNotify(body, headers, rawBody);
+  const outBillNo = payload.out_bill_no || payload.out_detail_no || payload.out_batch_no;
+  if (!outBillNo) {
+    logger.warn({ payload }, '商家转账回调缺少商户单号');
+    return payload;
+  }
+  const withdrawal = await prisma.distributionWithdrawal.findUnique({ where: { outBillNo }, include: withdrawalInclude() });
+  if (!withdrawal) {
+    logger.warn({ outBillNo, payload }, '商家转账回调找不到提现单');
+    return payload;
+  }
+  await updateWithdrawalFromWechatTransferResponse(withdrawal.id, payload, { outBillNo });
+  return payload;
 }
 
 function realDistributorCommissionWhere() {
@@ -1414,7 +1721,8 @@ async function buildEligibleCommissionRows(db: any, order: any, referral: any, s
 
   if (direct.level === 1) {
     const directEligibleAfter = maxDate(referral.createdAt, direct.approvedAt);
-    const canSettleDirect = await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, directEligibleAfter)
+    const isFirstDirectOrder = await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, directEligibleAfter);
+    const canSettleDirect = isFirstDirectOrder
       && !await hasDirectCommissionForReferral(db, referral.userId, direct.id);
     if (canSettleDirect) {
       const amount = calculateCommission(order.amount, setting.level1Rate);
@@ -1422,11 +1730,25 @@ async function buildEligibleCommissionRows(db: any, order: any, referral: any, s
         rows.push(buildCommissionRow(order, direct.id, referral.userId, 'level1_direct', setting.level1Rate, amount));
       }
     }
+    if (!isFirstDirectOrder) {
+      await addRecurringCommissionRowIfEligible(
+        db,
+        rows,
+        order,
+        referral.userId,
+        direct.id,
+        'level1_recurring_direct',
+        setting.recurringLevel1Rate,
+        directEligibleAfter,
+        setting,
+      );
+    }
     return rows;
   }
 
   const directEligibleAfter = maxDate(referral.createdAt, direct.approvedAt);
-  const canSettleLevel2Direct = await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, directEligibleAfter)
+  const isFirstLevel2DirectOrder = await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, directEligibleAfter);
+  const canSettleLevel2Direct = isFirstLevel2DirectOrder
     && !await hasDirectCommissionForReferral(db, referral.userId, direct.id);
   if (canSettleLevel2Direct) {
     const level2Amount = calculateCommission(order.amount, setting.level2Rate);
@@ -1438,12 +1760,15 @@ async function buildEligibleCommissionRows(db: any, order: any, referral: any, s
   const parent = direct.parent;
   const parentRate = Math.max(0, setting.level1Rate - setting.level2Rate);
   const parentEligibleAfter = maxDate(referral.createdAt, direct.approvedAt, parent?.approvedAt);
+  const isFirstParentOrder = parent?.id
+    ? await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, parentEligibleAfter)
+    : false;
   const canSettleParentOverride = parent?.id
     && parent.id !== SYSTEM_DISTRIBUTOR_ID
     && parent.status === 'active'
     && parentRate > 0
     && isOrderAfterDate(order, parentEligibleAfter)
-    && await isFirstPaidOrderForUserAfter(db, referral.userId, order.id, parentEligibleAfter)
+    && isFirstParentOrder
     && !await hasCommissionForReferral(db, referral.userId, parent.id, 'level1_override');
   if (canSettleParentOverride) {
     const parentAmount = calculateCommission(order.amount, parentRate);
@@ -1452,7 +1777,57 @@ async function buildEligibleCommissionRows(db: any, order: any, referral: any, s
     }
   }
 
+  if (!isFirstLevel2DirectOrder) {
+    await addRecurringCommissionRowIfEligible(
+      db,
+      rows,
+      order,
+      referral.userId,
+      direct.id,
+      'level2_recurring_direct',
+      setting.recurringLevel2Rate,
+      directEligibleAfter,
+      setting,
+    );
+  }
+
+  if (!isFirstParentOrder && parent?.id && parent.id !== SYSTEM_DISTRIBUTOR_ID && parent.status === 'active') {
+    const recurringParentRate = Math.max(0, setting.recurringLevel1Rate - setting.recurringLevel2Rate);
+    await addRecurringCommissionRowIfEligible(
+      db,
+      rows,
+      order,
+      referral.userId,
+      parent.id,
+      'level1_recurring_override',
+      recurringParentRate,
+      parentEligibleAfter,
+      setting,
+    );
+  }
+
   return rows;
+}
+
+async function addRecurringCommissionRowIfEligible(
+  db: any,
+  rows: any[],
+  order: any,
+  referralUserId: string,
+  distributorId: string,
+  role: string,
+  rateBps: number,
+  eligibleAfter: Date | string | null | undefined,
+  setting: any,
+) {
+  if (!isRecurringCommissionEnabled(setting) || rateBps <= 0) return;
+  if (!isOrderInRecurringWindow(order, eligibleAfter, setting.recurringCommissionDays)) return;
+  if (await hasCommissionForOrderRole(db, order.id, distributorId, role)) return;
+
+  const amount = calculateCommission(order.amount, rateBps);
+  if (amount > 0) {
+    rows.push(buildCommissionRow(order, distributorId, referralUserId, role, rateBps, amount));
+  }
 }
 
 function buildCommissionRow(order: any, distributorId: string, referralUserId: string, role: string, rateBps: number, amount: number) {
@@ -1513,6 +1888,121 @@ async function listWithdrawalsByWhere(where: any, page: number, pageSize: number
   ]);
 
   return { list, total, page, pageSize };
+}
+
+async function markWithdrawalTransferRequested(id: string, input: {
+  outBillNo: string;
+  remark: string;
+  transferSceneId: string;
+}) {
+  const now = new Date();
+  return prisma.distributionWithdrawal.update({
+    where: { id },
+    data: {
+      outBillNo: input.outBillNo,
+      transferRemark: input.remark,
+      transferSceneId: input.transferSceneId,
+      transferRequestedAt: now,
+      transferFailReason: null,
+      failedAt: null,
+    },
+  });
+}
+
+async function markWithdrawalTransferFailed(id: string, reason: string) {
+  return prisma.distributionWithdrawal.update({
+    where: { id },
+    data: {
+      status: 'failed',
+      transferState: 'FAIL',
+      transferFailReason: String(reason || '微信商家转账发起失败').slice(0, 500),
+      failedAt: new Date(),
+    },
+  });
+}
+
+async function syncWithdrawalWechatTransfer(withdrawal: any) {
+  if (!withdrawal.outBillNo) {
+    return {
+      withdrawal,
+      transfer: buildMiniTransferPayload(withdrawal),
+      summary: await getDistributorWithdrawalSummary(withdrawal.distributorId),
+    };
+  }
+  const response = await queryWechatMerchantTransferByOutBillNo(withdrawal.outBillNo);
+  const updated = await updateWithdrawalFromWechatTransferResponse(withdrawal.id, response, {
+    outBillNo: withdrawal.outBillNo,
+    fallbackStatus: withdrawal.status,
+  });
+  const runtimeConfig = await getWechatTransferRuntimeConfig().catch(() => null);
+  return {
+    withdrawal: updated,
+    transfer: buildMiniTransferPayload(updated, runtimeConfig),
+    summary: await getDistributorWithdrawalSummary(updated.distributorId),
+  };
+}
+
+async function updateWithdrawalFromWechatTransferResponse(id: string, response: any, options: {
+  outBillNo?: string;
+  remark?: string;
+  transferSceneId?: string;
+  fallbackStatus?: string;
+} = {}) {
+  const transferState = normalizeWechatTransferState(response);
+  const status = mapWechatTransferStateToWithdrawalStatus(transferState, options.fallbackStatus);
+  const now = new Date();
+  const data: any = {
+    outBillNo: response.out_bill_no || options.outBillNo || undefined,
+    transferNo: response.transfer_bill_no || response.detail_id || response.bill_id || response.wechatpay_transfer_bill_no || undefined,
+    wechatTransferBillNo: response.transfer_bill_no || response.detail_id || response.bill_id || response.wechatpay_transfer_bill_no || undefined,
+    transferState,
+    transferPackageInfo: response.package_info || undefined,
+    transferSceneId: response.transfer_scene_id || options.transferSceneId || undefined,
+    transferFailReason: response.fail_reason || response.fail_message || response.state_desc || undefined,
+    transferRemark: options.remark || response.transfer_remark || undefined,
+    status,
+  };
+  Object.keys(data).forEach((key) => data[key] === undefined && delete data[key]);
+  if (options.remark && !data.adminRemark) data.adminRemark = options.remark;
+  if (['transferring', 'wait_user_confirm'].includes(status) && !data.transferRequestedAt) data.transferRequestedAt = now;
+  if (status === 'paid') {
+    data.paidAt = response.success_time ? new Date(response.success_time) : now;
+    data.transferConfirmedAt = data.paidAt;
+    data.failedAt = null;
+  }
+  if (status === 'failed') {
+    data.failedAt = now;
+  }
+  const updated = await prisma.distributionWithdrawal.update({
+    where: { id },
+    data,
+    include: withdrawalInclude(),
+  });
+  return updated;
+}
+
+function normalizeWechatTransferState(response: any) {
+  const state = String(response.state || response.transfer_state || response.status || response.bill_status || '').trim().toUpperCase();
+  if (!state && response.package_info) return 'WAIT_USER_CONFIRM';
+  return state || 'UNKNOWN';
+}
+
+function mapWechatTransferStateToWithdrawalStatus(state: string, fallback = 'transferring') {
+  if (WECHAT_TRANSFER_SUCCESS_STATES.includes(state)) return 'paid';
+  if (WECHAT_TRANSFER_CONFIRM_STATES.includes(state)) return 'wait_user_confirm';
+  if (WECHAT_TRANSFER_FAILED_STATES.includes(state)) return 'failed';
+  if (WECHAT_TRANSFER_PROCESSING_STATES.includes(state)) return 'transferring';
+  return fallback || 'transferring';
+}
+
+function buildMiniTransferPayload(withdrawal: any, runtimeConfig?: any) {
+  if (!withdrawal?.transferPackageInfo || withdrawal.status !== 'wait_user_confirm') return null;
+  return {
+    mchId: runtimeConfig?.mchId || '',
+    appId: runtimeConfig?.appId || '',
+    package: withdrawal.transferPackageInfo,
+    outBillNo: withdrawal.outBillNo,
+  };
 }
 
 function withdrawalInclude() {
@@ -1584,7 +2074,55 @@ async function getDistributorWithdrawalSummary(distributorId: string, setting?: 
     paidWithdrawalAmount,
     minWithdrawalAmount: currentSetting.minWithdrawalAmount || DEFAULT_MIN_WITHDRAWAL_AMOUNT,
     withdrawalFreezeDays: freezeDays,
+    transferRule: formatTransferRule(currentSetting),
   };
+}
+
+async function assertWithdrawalTransferRule(
+  amount: number,
+  userId: string,
+  setting: any,
+  options: { excludeWithdrawalId?: string; usageDateField?: 'requestedAt' | 'paidAt' | 'transferRequestedAt'; usageStatuses?: string[] } = {},
+) {
+  const rule = formatTransferRule(setting);
+  if (amount < rule.singleMin) {
+    throw new AppError(422, `提现金额不能低于转账场景单笔下限 ${formatYuan(rule.singleMin)}`, 'WITHDRAWAL_TRANSFER_SINGLE_MIN');
+  }
+  if (amount > rule.singleMax) {
+    throw new AppError(422, `提现金额不能超过转账场景单笔上限 ${formatYuan(rule.singleMax)}`, 'WITHDRAWAL_TRANSFER_SINGLE_MAX');
+  }
+
+  const todayStart = startOfShanghaiDay(new Date());
+  const usageDateField = options.usageDateField || 'requestedAt';
+  const countedStatuses = options.usageStatuses || ['pending', 'approved', 'paid'];
+  const baseWhere: any = {
+    status: { in: countedStatuses },
+    [usageDateField]: { gte: todayStart },
+  };
+  if (options.excludeWithdrawalId) {
+    baseWhere.id = { not: options.excludeWithdrawalId };
+  }
+  const [dailyTotal, userDailyTotal] = await Promise.all([
+    prisma.distributionWithdrawal.aggregate({
+      where: baseWhere,
+      _sum: { amount: true },
+    }),
+    prisma.distributionWithdrawal.aggregate({
+      where: {
+        ...baseWhere,
+        userId: userId || '__missing_user__',
+      },
+      _sum: { amount: true },
+    }),
+  ]);
+  const usedDailyAmount = dailyTotal._sum.amount || 0;
+  const usedUserDailyAmount = userDailyTotal._sum.amount || 0;
+  if (usedDailyAmount + amount > rule.dailyLimit) {
+    throw new AppError(422, `今日商家转账总额度剩余 ${formatYuan(Math.max(0, rule.dailyLimit - usedDailyAmount))}，请明天再试`, 'WITHDRAWAL_TRANSFER_DAILY_LIMIT');
+  }
+  if (usedUserDailyAmount + amount > rule.userDailyLimit) {
+    throw new AppError(422, `你今日可提现额度剩余 ${formatYuan(Math.max(0, rule.userDailyLimit - usedUserDailyAmount))}，请明天再试`, 'WITHDRAWAL_TRANSFER_USER_DAILY_LIMIT');
+  }
 }
 
 async function resolveLevel2ParentId(parentId?: string) {
@@ -1626,6 +2164,15 @@ async function generateWithdrawalNo() {
     withdrawalNo = `WD${date}${crypto.randomInt(100000, 999999)}`;
   } while (await prisma.distributionWithdrawal.findUnique({ where: { withdrawalNo }, select: { id: true } }));
   return withdrawalNo;
+}
+
+async function generateTransferOutBillNo() {
+  const date = formatShanghaiDate(new Date()).replace(/-/g, '');
+  let outBillNo = '';
+  do {
+    outBillNo = `MT${date}${crypto.randomInt(100000, 999999)}`;
+  } while (await prisma.distributionWithdrawal.findUnique({ where: { outBillNo }, select: { id: true } }));
+  return outBillNo;
 }
 
 async function isShareOrDistributorCodeTaken(code: string, db: any = prisma) {
@@ -1720,6 +2267,15 @@ function normalizeMoneyAmount(value: any, allowZero = false) {
   return amount;
 }
 
+function normalizeOptionalUrl(value: any) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  if (!/^https:\/\/[^/\s]+\/.+/i.test(text)) {
+    throw new AppError(422, '回调地址必须是 https 完整地址', 'URL_INVALID');
+  }
+  return text.slice(0, 500);
+}
+
 function formatYuan(amount: number) {
   return `${(Number(amount || 0) / 100).toFixed(2)} 元`;
 }
@@ -1732,13 +2288,62 @@ function normalizeFreezeDays(value: any) {
   return days;
 }
 
+function normalizeTransferRule(input: Record<string, any>) {
+  const transferSceneId = String(input.transferSceneId ?? DEFAULT_TRANSFER_SCENE_ID).trim() || DEFAULT_TRANSFER_SCENE_ID;
+  const transferSceneName = String(input.transferSceneName ?? DEFAULT_TRANSFER_SCENE_NAME).trim().slice(0, 30) || DEFAULT_TRANSFER_SCENE_NAME;
+  const transferDailyLimit = normalizeMoneyAmount(input.transferDailyLimit ?? DEFAULT_TRANSFER_DAILY_LIMIT);
+  const transferSingleMin = normalizeMoneyAmount(input.transferSingleMin ?? DEFAULT_TRANSFER_SINGLE_MIN);
+  const transferSingleMax = normalizeMoneyAmount(input.transferSingleMax ?? DEFAULT_TRANSFER_SINGLE_MAX);
+  const transferUserDailyLimit = normalizeMoneyAmount(input.transferUserDailyLimit ?? DEFAULT_TRANSFER_USER_DAILY_LIMIT);
+  const transferNotifyUrl = normalizeOptionalUrl(input.transferNotifyUrl);
+  const transferUserConfirm = input.transferUserConfirm !== false;
+  const transferReportJobType = String(input.transferReportJobType ?? DEFAULT_TRANSFER_REPORT_JOB_TYPE).trim().slice(0, 32) || DEFAULT_TRANSFER_REPORT_JOB_TYPE;
+  const transferReportRewardDesc = String(input.transferReportRewardDesc ?? DEFAULT_TRANSFER_REPORT_REWARD_DESC).trim().slice(0, 128) || DEFAULT_TRANSFER_REPORT_REWARD_DESC;
+  if (!/^\d{1,10}$/.test(transferSceneId)) {
+    throw new AppError(422, '转账场景 ID 格式不正确', 'TRANSFER_SCENE_ID_INVALID');
+  }
+  if (transferSingleMax < transferSingleMin) {
+    throw new AppError(422, '单笔转账上限不能低于下限', 'TRANSFER_SINGLE_LIMIT_INVALID');
+  }
+  if (transferDailyLimit < transferSingleMax) {
+    throw new AppError(422, '单日转账额度不能低于单笔上限', 'TRANSFER_DAILY_LIMIT_INVALID');
+  }
+  if (transferUserDailyLimit < transferSingleMax) {
+    throw new AppError(422, '单日向单用户转账额度不能低于单笔上限', 'TRANSFER_USER_DAILY_LIMIT_INVALID');
+  }
+  if (transferUserDailyLimit > transferDailyLimit) {
+    throw new AppError(422, '单日向单用户转账额度不能高于单日转账额度', 'TRANSFER_USER_DAILY_LIMIT_INVALID');
+  }
+  return {
+    transferSceneId,
+    transferSceneName,
+    transferDailyLimit,
+    transferSingleMin,
+    transferSingleMax,
+    transferUserDailyLimit,
+    transferNotifyUrl,
+    transferUserConfirm,
+    transferReportJobType,
+    transferReportRewardDesc,
+  };
+}
+
+function normalizeRecurringCommissionDays(value: any) {
+  const days = Math.round(Number(value));
+  if (!Number.isFinite(days) || days < 0 || days > 730) {
+    throw new AppError(422, '复充有效期必须在 0 到 730 天之间', 'DISTRIBUTION_RECURRING_DAYS_INVALID');
+  }
+  return days;
+}
+
 function normalizeWithdrawalStatus(value: any) {
   const status = String(value || '').trim();
-  if (['approved', 'rejected', 'paid', 'failed'].includes(status)) return status;
+  if (['approved', 'rejected', 'paid', 'failed', 'transferring', 'wait_user_confirm'].includes(status)) return status;
   throw new AppError(422, '提现状态不正确', 'WITHDRAWAL_STATUS_INVALID');
 }
 
 function formatDistributionSetting(setting: any) {
+  const transferRule = formatTransferRule(setting);
   return {
     enabled: setting.enabled,
     level1Rate: setting.level1Rate,
@@ -1747,9 +2352,41 @@ function formatDistributionSetting(setting: any) {
     referralReward: getReferralRewardPoints(setting),
     minWithdrawalAmount: setting.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT,
     withdrawalFreezeDays: setting.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS,
+    transferSceneId: transferRule.sceneId,
+    transferSceneName: transferRule.sceneName,
+    transferDailyLimit: transferRule.dailyLimit,
+    transferSingleMin: transferRule.singleMin,
+    transferSingleMax: transferRule.singleMax,
+    transferUserDailyLimit: transferRule.userDailyLimit,
+    transferNotifyUrl: transferRule.notifyUrl,
+    transferUserConfirm: transferRule.userConfirm,
+    transferReportJobType: transferRule.reportJobType,
+    transferReportRewardDesc: transferRule.reportRewardDesc,
+    transferRule,
+    recurringCommissionEnabled: setting.recurringCommissionEnabled ?? DEFAULT_RECURRING_COMMISSION_ENABLED,
+    recurringLevel1Rate: setting.recurringLevel1Rate ?? DEFAULT_RECURRING_LEVEL1_RATE,
+    recurringLevel2Rate: setting.recurringLevel2Rate ?? DEFAULT_RECURRING_LEVEL2_RATE,
+    recurringCommissionDays: setting.recurringCommissionDays ?? DEFAULT_RECURRING_COMMISSION_DAYS,
     level1Percent: setting.level1Rate / 100,
     level2Percent: setting.level2Rate / 100,
+    recurringLevel1Percent: (setting.recurringLevel1Rate ?? DEFAULT_RECURRING_LEVEL1_RATE) / 100,
+    recurringLevel2Percent: (setting.recurringLevel2Rate ?? DEFAULT_RECURRING_LEVEL2_RATE) / 100,
     minWithdrawalYuan: (setting.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT) / 100,
+  };
+}
+
+function formatTransferRule(setting: any = {}) {
+  return {
+    sceneId: setting.transferSceneId || DEFAULT_TRANSFER_SCENE_ID,
+    sceneName: setting.transferSceneName || DEFAULT_TRANSFER_SCENE_NAME,
+    dailyLimit: setting.transferDailyLimit ?? DEFAULT_TRANSFER_DAILY_LIMIT,
+    singleMin: setting.transferSingleMin ?? DEFAULT_TRANSFER_SINGLE_MIN,
+    singleMax: setting.transferSingleMax ?? DEFAULT_TRANSFER_SINGLE_MAX,
+    userDailyLimit: setting.transferUserDailyLimit ?? DEFAULT_TRANSFER_USER_DAILY_LIMIT,
+    notifyUrl: setting.transferNotifyUrl || '',
+    userConfirm: setting.transferUserConfirm ?? DEFAULT_TRANSFER_USER_CONFIRM,
+    reportJobType: setting.transferReportJobType || DEFAULT_TRANSFER_REPORT_JOB_TYPE,
+    reportRewardDesc: setting.transferReportRewardDesc || DEFAULT_TRANSFER_REPORT_REWARD_DESC,
   };
 }
 

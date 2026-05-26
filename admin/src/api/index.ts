@@ -38,6 +38,7 @@ export const api = {
   },
   users: {
     list: (params?: any) => http.get('/admin/users', { params }),
+    menuStats: (params?: any) => http.get('/admin/users/menu-stats', { params }),
     detail: (id: string) => http.get(`/admin/users/${id}`),
     update: (id: string, data: any) => http.put(`/admin/users/${id}`, data),
     purge: (id: string) => http.delete(`/admin/users/${id}/purge`),
@@ -54,6 +55,7 @@ export const api = {
   },
   orders: {
     list: (params?: any) => http.get('/admin/orders', { params }),
+    menuStats: (params?: any) => http.get('/admin/orders/menu-stats', { params }),
     detail: (id: string) => http.get(`/admin/orders/${id}`),
     paymentConfigStatus: () => http.get('/admin/payment-config/status'),
     paymentConfig: () => http.get('/admin/payment-config'),
@@ -63,6 +65,7 @@ export const api = {
     settings: () => http.get('/admin/distribution/settings'),
     updateSettings: (data: any) => http.put('/admin/distribution/settings', data),
     dashboard: () => http.get('/admin/distribution/dashboard'),
+    pendingCounts: () => http.get('/admin/distribution/pending-counts'),
     distributors: (params?: any) => http.get('/admin/distribution/distributors', { params }),
     distributorTree: (params?: any) => http.get('/admin/distribution/distributor-tree', { params }),
     levelOne: () => http.get('/admin/distribution/level-one'),
@@ -71,6 +74,8 @@ export const api = {
     commissions: (params?: any) => http.get('/admin/distribution/commissions', { params }),
     withdrawals: (params?: any) => http.get('/admin/distribution/withdrawals', { params }),
     reviewWithdrawal: (id: string, data: any) => http.put(`/admin/distribution/withdrawals/${id}`, data),
+    startWechatTransfer: (id: string, data?: any) => http.post(`/admin/distribution/withdrawals/${id}/wechat-transfer`, data || {}),
+    queryWechatTransfer: (id: string) => http.post(`/admin/distribution/withdrawals/${id}/query-transfer`),
   },
   articles: {
     list: (params?: any) => http.get('/admin/articles', { params }),

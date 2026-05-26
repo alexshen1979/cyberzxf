@@ -64,6 +64,8 @@ export async function streamConsult(ctx: Context) {
   let fullAnswer = '';
   let actualModel = '';
   let actualCost = 0;
+  const startedAt = Date.now();
+  let firstTokenAt = 0;
 
   try {
     const result = await aiStreamConsult({
@@ -79,6 +81,8 @@ export async function streamConsult(ctx: Context) {
     // 读取流，逐块转发给客户端
     const reader = result.stream.getReader();
     const decoder = new TextDecoder();
+    actualModel = result.model;
+    actualCost = result.pointsCost;
 
     let streamBuffer = '';
     const consumeUpstreamChunk = (chunk: string, flush = false) => {
@@ -97,6 +101,8 @@ export async function streamConsult(ctx: Context) {
             const delta = parsed.choices?.[0]?.delta?.content;
             if (delta) {
               fullAnswer += delta;
+              if (!firstTokenAt) firstTokenAt = Date.now();
+              res.write(`data: ${JSON.stringify({ content: delta })}\n\n`);
             }
           } catch {
             // 非 JSON 行跳过
@@ -114,8 +120,6 @@ export async function streamConsult(ctx: Context) {
     }
     consumeUpstreamChunk(decoder.decode(), true);
 
-    actualModel = result.model;
-    actualCost = result.pointsCost;
     fullAnswer = sanitizeAiOutput(fullAnswer);
 
     // 保存咨询记录
@@ -134,10 +138,6 @@ export async function streamConsult(ctx: Context) {
       });
     }
 
-    for (const part of chunkText(fullAnswer)) {
-      res.write(`data: ${JSON.stringify({ content: part })}\n\n`);
-    }
-
     // 发送完成信号
     res.write(`data: ${JSON.stringify({
       done: true,
@@ -145,6 +145,15 @@ export async function streamConsult(ctx: Context) {
       model: actualModel,
       sessionId: result.sessionId,
     })}\n\n`);
+    logger.info(
+      '流式AI咨询完成: userId=%s provider=%s model=%s firstTokenMs=%d totalMs=%d chars=%d',
+      userId,
+      result.providerName,
+      actualModel,
+      firstTokenAt ? firstTokenAt - startedAt : -1,
+      Date.now() - startedAt,
+      fullAnswer.length,
+    );
     res.end();
 
   } catch (err: any) {
@@ -221,4 +230,17 @@ export async function getQuickQuestions(ctx: Context) {
     orderBy: { sortOrder: 'asc' },
   });
   ctx.body = { success: true, data: questions };
+}
+
+export async function getActiveSkill(ctx: Context) {
+  const skill = await prisma.skill.findFirst({
+    where: { isDefault: true, status: 'enabled' },
+    select: { name: true },
+  });
+  ctx.body = {
+    success: true,
+    data: {
+      name: skill?.name || '赛博张老师',
+    },
+  };
 }

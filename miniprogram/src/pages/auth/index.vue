@@ -13,13 +13,29 @@
         <view class="benefit"><text>充值与订单可追踪</text></view>
       </view>
 
-      <button class="phone-login" open-type="getPhoneNumber" @getphonenumber="onGetPhoneNumber">
-        手机号一键登录
+      <button
+        class="phone-login"
+        :class="{ disabled: !agreementChecked || loading }"
+        :disabled="!agreementChecked || loading"
+        open-type="getPhoneNumber"
+        @getphonenumber="onGetPhoneNumber"
+      >
+        {{ loading ? '登录中...' : '手机号一键登录' }}
       </button>
       <text class="error-text" v-if="phoneError">{{ phoneError }}</text>
       <button class="ghost-button" @click="goBack">暂不登录</button>
 
-      <text class="terms">登录即表示同意《用户协议》和《隐私政策》</text>
+      <view class="terms-row" @click="toggleAgreement">
+        <view class="terms-check" :class="{ checked: agreementChecked }">
+          <text v-if="agreementChecked">✓</text>
+        </view>
+        <view class="terms-copy">
+          <text>我已阅读并同意</text>
+          <text class="terms-link" @click.stop="openAgreement('user')">《用户服务协议》</text>
+          <text>和</text>
+          <text class="terms-link" @click.stop="openAgreement('privacy')">《隐私政策》</text>
+        </view>
+      </view>
     </view>
   </view>
 </template>
@@ -31,9 +47,15 @@ import { useUserStore } from '@/store/user';
 const userStore = useUserStore();
 const loading = ref(false);
 const phoneError = ref('');
+const agreementChecked = ref(false);
 
 async function onGetPhoneNumber(e: any) {
   if (loading.value) return;
+  if (!agreementChecked.value) {
+    phoneError.value = '请先阅读并勾选同意用户服务协议和隐私政策';
+    uni.showToast({ title: phoneError.value, icon: 'none' });
+    return;
+  }
   if (e?.detail?.errMsg !== 'getPhoneNumber:ok' || !e?.detail?.code) {
     const errMsg = String(e?.detail?.errMsg || 'getPhoneNumber:fail');
     phoneError.value = readablePhoneError(errMsg);
@@ -49,6 +71,15 @@ async function onGetPhoneNumber(e: any) {
     uni.showToast({ title: '登录成功', icon: 'success' });
     setTimeout(() => goBack(), 500);
   }
+}
+
+function toggleAgreement() {
+  agreementChecked.value = !agreementChecked.value;
+  if (agreementChecked.value && phoneError.value.includes('协议')) phoneError.value = '';
+}
+
+function openAgreement(type: 'user' | 'privacy') {
+  uni.navigateTo({ url: `/pages/agreement/index?type=${type}` });
 }
 
 function readablePhoneError(errMsg: string) {
@@ -147,6 +178,11 @@ function goBack() {
   font-weight: 800;
 }
 
+.phone-login.disabled {
+  background: #cbd5e1;
+  color: #f8fafc;
+}
+
 .error-text {
   display: block;
   margin: -12rpx 0 18rpx;
@@ -169,10 +205,45 @@ function goBack() {
   border: 0;
 }
 
-.terms {
-  display: block;
+.terms-row {
   margin-top: 24rpx;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12rpx;
+  text-align: left;
+}
+
+.terms-check {
+  width: 30rpx;
+  height: 30rpx;
+  margin-top: 2rpx;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2rpx solid #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: $text-dim;
   font-size: $font-xs;
+}
+
+.terms-check.checked {
+  border-color: #07c160;
+  background: #07c160;
+  color: #fff;
+}
+
+.terms-copy {
+  flex: 0 1 auto;
+  max-width: 540rpx;
+  color: $text-dim;
+  font-size: $font-xs;
+  line-height: 1.5;
+}
+
+.terms-link {
+  color: #2563eb;
+  font-weight: 700;
 }
 </style>

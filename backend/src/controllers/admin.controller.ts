@@ -18,6 +18,12 @@ import {
   updatePointSettings,
   updateRechargeProduct,
 } from '../services/point-config.service';
+import {
+  DEFAULT_BAILIAN_MODEL,
+  DEFAULT_DEEPSEEK_MODEL,
+  inferAiProvider,
+  normalizeAiProvider,
+} from '../services/ai-runtime.service';
 
 const logger = createLogger('admin-ctrl');
 const REPORT_OUTPUT_DIR = path.resolve(process.cwd(), 'uploads', 'reports');
@@ -57,12 +63,25 @@ function validateAdminShareCode(value: string) {
   }
 }
 
+function parseDateQuery(value: any) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function normalizeAdminRole(value: any) {
   const role = String(value || '').trim();
   if (!['admin', 'editor'].includes(role)) {
     throw new AppError(422, '管理员角色参数错误', 'ADMIN_ROLE_INVALID');
   }
   return role;
+}
+
+function normalizeSkillModel(value: any) {
+  const model = String(value || '').trim() || 'global';
+  if (model === 'global') return model;
+  return normalizeModelId(model, 'global');
 }
 
 // ─── 管理员登录 ─────────────────────────────────────
@@ -266,6 +285,22 @@ export async function getUsers(ctx: Context) {
   ctx.body = { success: true, data: { list, total, page, pageSize } };
 }
 
+export async function getUserMenuStats(ctx: Context) {
+  const lastSeen = parseDateQuery(ctx.query.lastSeen);
+  const where = lastSeen ? { createdAt: { gt: lastSeen } } : {};
+  const [newCount, latest] = await Promise.all([
+    prisma.user.count({ where }),
+    prisma.user.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+  ]);
+  ctx.body = {
+    success: true,
+    data: {
+      newCount,
+      latestCreatedAt: latest?.createdAt || null,
+    },
+  };
+}
+
 async function getUserInvitationTree(params: { page: number; pageSize: number; keyword?: string }) {
   const keyword = String(params.keyword || '').trim();
   const [users, shareReferrals] = await Promise.all([
@@ -394,6 +429,7 @@ export async function getUserDetail(ctx: Context) {
       pointsAccount: true,
       orders: { orderBy: { createdAt: 'desc' }, take: 10 },
       consultationRecords: { orderBy: { createdAt: 'desc' }, take: 10 },
+      distributorProfile: { select: { code: true, level: true, status: true } },
       shareReferralRecord: {
         select: {
           sourceCode: true,
@@ -761,7 +797,15 @@ export async function getAllOrders(ctx: Context) {
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: {
-        user: { select: { id: true, nickname: true, phone: true, shareCode: true } },
+        user: {
+          select: {
+            id: true,
+            nickname: true,
+            phone: true,
+            shareCode: true,
+            distributorProfile: { select: { id: true, level: true, status: true, name: true, code: true } },
+          },
+        },
         distributionCommissions: {
           orderBy: { createdAt: 'desc' },
           include: {
@@ -776,11 +820,35 @@ export async function getAllOrders(ctx: Context) {
   ctx.body = { success: true, data: { list, total, page, pageSize } };
 }
 
+export async function getOrderMenuStats(ctx: Context) {
+  const lastSeen = parseDateQuery(ctx.query.lastSeen);
+  const where = lastSeen ? { createdAt: { gt: lastSeen } } : {};
+  const [newCount, latest] = await Promise.all([
+    prisma.order.count({ where }),
+    prisma.order.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+  ]);
+  ctx.body = {
+    success: true,
+    data: {
+      newCount,
+      latestCreatedAt: latest?.createdAt || null,
+    },
+  };
+}
+
 export async function getOrderDetail(ctx: Context) {
   const order = await prisma.order.findUnique({
     where: { id: ctx.params.id },
     include: {
-      user: { select: { id: true, nickname: true, phone: true, shareCode: true } },
+      user: {
+        select: {
+          id: true,
+          nickname: true,
+          phone: true,
+          shareCode: true,
+          distributorProfile: { select: { id: true, level: true, status: true, name: true, code: true } },
+        },
+      },
       distributionCommissions: {
         orderBy: { createdAt: 'desc' },
         include: {
@@ -965,14 +1033,64 @@ export async function getAiConfig(ctx: Context) {
 }
 
 export async function updateAiConfig(ctx: Context) {
-  const { model, temperature, maxTokens, topP, contextWindow, skillEnabled, skillWeight, pointsPerQuery, pointsPerDeep, freeAskLimit, apiKey, apiBaseUrl, timeout } = ctx.request.body as any;
+  const {
+    provider,
+    model,
+    temperature,
+    maxTokens,
+    topP,
+    contextWindow,
+    skillEnabled,
+    skillWeight,
+    pointsPerQuery,
+    pointsPerDeep,
+    freeAskLimit,
+    apiKey,
+    apiBaseUrl,
+    bailianModel,
+    bailianApiKey,
+    bailianBaseUrl,
+    normalModel,
+    deepModel,
+    normalMaxTokens,
+    deepMaxTokens,
+    timeout,
+  } = ctx.request.body as any;
 
   const aiConfig = await prisma.aiConfig.findFirst();
   if (!aiConfig) throw new AppError(404, 'AI 配置不存在', 'AI_CONFIG_NOT_FOUND');
 
+  const selectedProvider = provider ? normalizeAiProvider(provider) : inferAiProvider(undefined, bailianModel || model);
+  const normalizedDeepSeekModel = normalizeDeepSeekModel(model || aiConfig.model || DEFAULT_DEEPSEEK_MODEL);
+  const normalizedBailianModel = normalizeModelId(bailianModel || (selectedProvider === 'bailian' ? model : '') || DEFAULT_BAILIAN_MODEL, DEFAULT_BAILIAN_MODEL);
+  const normalizedNormalModel = normalizeScenarioModel(normalModel, normalizedBailianModel);
+  const normalizedDeepModel = normalizeScenarioModel(deepModel, selectedProvider === 'bailian' ? DEFAULT_BAILIAN_MODEL : normalizedDeepSeekModel);
+
   const updated = await prisma.aiConfig.update({
     where: { id: aiConfig.id },
-    data: { model, temperature, maxTokens, topP, contextWindow, skillEnabled, skillWeight, pointsPerQuery, pointsPerDeep, freeAskLimit, apiKey, apiBaseUrl, timeout },
+    data: {
+      provider: selectedProvider,
+      model: normalizedDeepSeekModel,
+      temperature,
+      maxTokens,
+      topP,
+      contextWindow,
+      skillEnabled,
+      skillWeight,
+      pointsPerQuery,
+      pointsPerDeep,
+      freeAskLimit,
+      apiKey: normalizeOptionalSecret(apiKey),
+      apiBaseUrl: normalizeOptionalUrl(apiBaseUrl),
+      bailianModel: normalizedBailianModel,
+      bailianApiKey: normalizeOptionalSecret(bailianApiKey),
+      bailianBaseUrl: normalizeOptionalUrl(bailianBaseUrl),
+      normalModel: normalizedNormalModel,
+      deepModel: normalizedDeepModel,
+      normalMaxTokens: normalizeTokenLimit(normalMaxTokens, 700, 100, 3000),
+      deepMaxTokens: normalizeTokenLimit(deepMaxTokens, 2600, 500, 8000),
+      timeout,
+    },
   });
   if (pointsPerQuery !== undefined || pointsPerDeep !== undefined) {
     const current = await getPointSettings();
@@ -988,6 +1106,55 @@ export async function updateAiConfig(ctx: Context) {
   }
 
   ctx.body = { success: true, data: updated };
+}
+
+function normalizeDeepSeekModel(value: any) {
+  const model = String(value || '').trim() || DEFAULT_DEEPSEEK_MODEL;
+  if (!['deepseek-chat', 'deepseek-flash'].includes(model)) {
+    throw new AppError(422, 'DeepSeek 官方模型只能选择 deepseek-chat 或 deepseek-flash', 'AI_MODEL_INVALID');
+  }
+  return model;
+}
+
+function normalizeScenarioModel(value: any, fallback: string) {
+  const model = String(value || '').trim();
+  if (!model || model === 'global') return 'global';
+  return normalizeModelId(model, fallback);
+}
+
+function normalizeTokenLimit(value: any, fallback: number, min: number, max: number) {
+  const raw = value === undefined || value === null || value === '' ? fallback : Number(value);
+  const n = Math.round(raw);
+  if (!Number.isFinite(n) || n < min || n > max) {
+    throw new AppError(422, `最大回复长度必须是 ${min}-${max} 之间的整数`, 'AI_TOKEN_LIMIT_INVALID');
+  }
+  return n;
+}
+
+function normalizeModelId(value: any, fallback: string) {
+  const model = String(value || '').trim();
+  if (!model) return fallback;
+  if (!/^[a-zA-Z0-9._:-]{2,100}$/.test(model)) {
+    throw new AppError(422, '模型 ID 格式不正确，只能包含字母、数字、点、下划线、中横线和冒号', 'AI_MODEL_INVALID');
+  }
+  if (['qwen-image-2.0', 'qwen-image-2.0-pro', 'wan2.7-image', 'wan2.7-image-pro'].includes(model)) {
+    throw new AppError(422, '图片生成模型不能用于 AI 文本咨询，请选择文本生成或推理模型', 'AI_TEXT_MODEL_REQUIRED');
+  }
+  return model;
+}
+
+function normalizeOptionalSecret(value: any) {
+  const text = String(value || '').trim();
+  return text || null;
+}
+
+function normalizeOptionalUrl(value: any) {
+  const text = String(value || '').trim().replace(/\/+$/, '');
+  if (!text) return null;
+  if (!/^https?:\/\//i.test(text)) {
+    throw new AppError(422, 'API 地址必须以 http:// 或 https:// 开头', 'AI_API_BASE_URL_INVALID');
+  }
+  return text;
 }
 
 // ─── 点数规则与充值套餐 ──────────────────────────────
@@ -1105,7 +1272,7 @@ export async function createSkill(ctx: Context) {
         name,
         description,
         systemPrompt,
-        model: model || 'deepseek-chat',
+        model: normalizeSkillModel(model),
         temperature,
         maxTokens,
         topP,
@@ -1131,7 +1298,7 @@ export async function updateSkill(ctx: Context) {
           data: { isDefault: false },
         });
       }
-      const data: any = { name, description, systemPrompt, model, temperature, maxTokens, topP, status, isDefault, sortOrder };
+      const data: any = { name, description, systemPrompt, model: normalizeSkillModel(model), temperature, maxTokens, topP, status, isDefault, sortOrder };
       if (keywords !== undefined) {
         data.keywords = Array.isArray(keywords) ? JSON.stringify(keywords) : keywords;
       }

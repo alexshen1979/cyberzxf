@@ -5,11 +5,14 @@ import {
   bindShareReferral,
   createDistributorForAdmin,
   getDistributionDashboardForAdmin,
+  getDistributionPendingCountsForAdmin,
   getDistributionSettingsForAdmin,
   getMyDistribution,
   getMyDistributionCommissions,
   getMyDistributionQrCode,
   getMyDistributionWithdrawals,
+  getWithdrawalTransferPackage,
+  handleWechatTransferCallbackForDistribution,
   listCommissionsForAdmin,
   listDistributorsForAdmin,
   listDistributorTreeForAdmin,
@@ -17,6 +20,9 @@ import {
   listWithdrawalsForAdmin,
   recordUserShare,
   reviewWithdrawalForAdmin,
+  queryWechatTransferForAdmin,
+  startWechatTransferForAdmin,
+  syncMyWechatWithdrawal,
   updateDistributionSettingsForAdmin,
   updateDistributorForAdmin,
 } from '../services/distribution.service';
@@ -66,6 +72,16 @@ export async function applyWithdrawal(ctx: Context) {
   ctx.body = { success: true, data: await applyDistributionWithdrawal(userId, ctx.request.body as Record<string, any>) };
 }
 
+export async function withdrawalTransferPackage(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  ctx.body = { success: true, data: await getWithdrawalTransferPackage(userId, ctx.params.id) };
+}
+
+export async function syncWithdrawalTransfer(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  ctx.body = { success: true, data: await syncMyWechatWithdrawal(userId, ctx.params.id) };
+}
+
 export async function adminSettings(ctx: Context) {
   ctx.body = { success: true, data: await getDistributionSettingsForAdmin() };
 }
@@ -76,6 +92,10 @@ export async function adminUpdateSettings(ctx: Context) {
 
 export async function adminDashboard(ctx: Context) {
   ctx.body = { success: true, data: await getDistributionDashboardForAdmin() };
+}
+
+export async function adminPendingCounts(ctx: Context) {
+  ctx.body = { success: true, data: await getDistributionPendingCountsForAdmin() };
 }
 
 export async function adminDistributors(ctx: Context) {
@@ -108,4 +128,17 @@ export async function adminWithdrawals(ctx: Context) {
 
 export async function adminReviewWithdrawal(ctx: Context) {
   ctx.body = { success: true, data: await reviewWithdrawalForAdmin(ctx.params.id, ctx.request.body as Record<string, any>) };
+}
+
+export async function adminStartWechatTransfer(ctx: Context) {
+  ctx.body = { success: true, data: await startWechatTransferForAdmin(ctx.params.id, ctx.request.body as Record<string, any>) };
+}
+
+export async function adminQueryWechatTransfer(ctx: Context) {
+  ctx.body = { success: true, data: await queryWechatTransferForAdmin(ctx.params.id) };
+}
+
+export async function transferCallback(ctx: Context) {
+  await handleWechatTransferCallbackForDistribution(ctx.request.body as Record<string, any>, ctx.headers, (ctx.request as any).rawBody);
+  ctx.body = { code: 'SUCCESS', message: 'OK' };
 }

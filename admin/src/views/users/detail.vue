@@ -10,6 +10,12 @@
         <el-descriptions-item label="UnionID">{{ user.unionId || '--' }}</el-descriptions-item>
         <el-descriptions-item label="手机号">{{ user.phone || '--' }}</el-descriptions-item>
         <el-descriptions-item label="邀请码">{{ user.shareCode || '--' }}</el-descriptions-item>
+        <el-descriptions-item label="合作身份">
+          <el-tag v-if="user.distributorProfile" :type="user.distributorProfile.level === 1 ? 'success' : 'info'" size="small">
+            {{ distributorIdentityLabel(user.distributorProfile) }}
+          </el-tag>
+          <span v-else>--</span>
+        </el-descriptions-item>
         <el-descriptions-item label="邀请人">{{ inviterLabel(user) }}</el-descriptions-item>
         <el-descriptions-item label="点数余额">{{ user.pointsAccount?.balance || 0 }}</el-descriptions-item>
         <el-descriptions-item label="注册时间">{{ new Date(user.createdAt).toLocaleString() }}</el-descriptions-item>
@@ -96,6 +102,18 @@ function inviterLabel(row: any) {
   const referrer = row?.shareReferralRecord?.referrer;
   if (!referrer) return '系统';
   return userLabel(referrer);
+}
+
+function distributorIdentityLabel(profile: any) {
+  if (!profile) return '--';
+  const level = profile.level === 1 ? '特邀合作伙伴' : '涨识推荐官';
+  const statusMap: Record<string, string> = {
+    pending: '待审核',
+    active: '启用',
+    rejected: '已驳回',
+    disabled: '禁用',
+  };
+  return `${level} / ${statusMap[profile.status] || profile.status || '--'}`;
 }
 
 function formatTime(value: any) {

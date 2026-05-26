@@ -1,5 +1,5 @@
 import Router from '@koa/router';
-import { auth, optionalAuth, adminAuth, adminContentAuth } from '../middleware/auth';
+import { auth, optionalAuth, adminAuth, adminContentAuth, adminDistributionAuth } from '../middleware/auth';
 import * as authCtrl from '../controllers/auth.controller';
 import * as aiCtrl from '../controllers/ai.controller';
 import * as pointsCtrl from '../controllers/points.controller';
@@ -26,6 +26,8 @@ router.post('/auth/miniprogram-login', authCtrl.miniProgramLogin);   // 小程�
 router.post('/auth/mp-oauth', authCtrl.mpOAuthLogin);                // 公众号网页授权
 router.get('/auth/profile', auth, authCtrl.getProfile);               // 获取用户信息
 router.put('/auth/profile', auth, authCtrl.updateProfile);            // 更新用户信息
+router.post('/auth/avatar', auth, authCtrl.uploadAvatar);             // 上传头像
+router.get('/uploads/avatars/:filename', authCtrl.getUploadedAvatar);  // 访问头像
 
 // ─── AI 咨询 ───────────────────────────────────────
 router.post('/ai/consult', optionalAuth, aiCtrl.consult);                    // AI 咨询（未登录用户可免费试用）
@@ -33,6 +35,7 @@ router.post('/ai/stream-consult', optionalAuth, aiCtrl.streamConsult);       // 
 router.get('/ai/history', optionalAuth, aiCtrl.getHistory);                  // 咨询历史
 router.get('/ai/session/:sessionId', optionalAuth, aiCtrl.getSession);       // 会话详情
 router.get('/ai/quick-questions', optionalAuth, aiCtrl.getQuickQuestions); // 快捷提问
+router.get('/ai/active-skill', optionalAuth, aiCtrl.getActiveSkill);       // 当前 AI Skill 名称
 
 // ─── 点数系统 ───────────────────────────────────────
 router.get('/points/balance', auth, pointsCtrl.getBalance);          // 查询余额
@@ -96,6 +99,7 @@ router.get('/volunteer/major-suggestions', optionalAuth, volunteerCtrl.majorSugg
 router.get('/volunteer/report-export-costs', optionalAuth, volunteerCtrl.reportExportCosts);
 router.get('/volunteer/reports', auth, volunteerCtrl.reports);
 router.get('/volunteer/reports/:id', auth, volunteerCtrl.reportDetail);
+router.put('/volunteer/reports/:id/title', auth, volunteerCtrl.updateReportTitle);
 router.get('/volunteer/reports/:id/export', auth, volunteerCtrl.exportReport);
 
 // ─── 分销体系 ─────────────────────────────────────
@@ -107,11 +111,15 @@ router.post('/distribution/bind-referral', auth, distributionCtrl.bindReferral);
 router.get('/distribution/commissions', auth, distributionCtrl.commissions);
 router.get('/distribution/withdrawals', auth, distributionCtrl.withdrawals);
 router.post('/distribution/withdrawals', auth, distributionCtrl.applyWithdrawal);
+router.get('/distribution/withdrawals/:id/transfer-package', auth, distributionCtrl.withdrawalTransferPackage);
+router.post('/distribution/withdrawals/:id/sync-transfer', auth, distributionCtrl.syncWithdrawalTransfer);
+router.post('/distribution/transfer-callback', distributionCtrl.transferCallback);
 
 // ─── 管理后台接口（需要 admin 权限） ─────────────────
 const admin = new Router({ prefix: '/admin' });
 
 // 用户管理
+admin.get('/users/menu-stats', adminAuth, adminCtrl.getUserMenuStats);
 admin.get('/users', adminAuth, adminCtrl.getUsers);
 admin.get('/users/:id', adminAuth, adminCtrl.getUserDetail);
 admin.put('/users/:id', adminAuth, adminCtrl.updateUser);
@@ -128,6 +136,7 @@ admin.put('/recharge-products/:id', adminAuth, adminCtrl.updateRechargeProductFo
 admin.delete('/recharge-products/:id', adminAuth, adminCtrl.deleteRechargeProductForAdmin);
 
 // 订单管理
+admin.get('/orders/menu-stats', adminAuth, adminCtrl.getOrderMenuStats);
 admin.get('/orders', adminAuth, adminCtrl.getAllOrders);
 admin.get('/orders/:id', adminAuth, adminCtrl.getOrderDetail);
 admin.get('/payment-config/status', adminAuth, paymentCtrl.getConfigStatus);
@@ -138,14 +147,17 @@ admin.put('/payment-config', adminAuth, paymentCtrl.updateAdminPaymentConfig);
 admin.get('/distribution/settings', adminAuth, distributionCtrl.adminSettings);
 admin.put('/distribution/settings', adminAuth, distributionCtrl.adminUpdateSettings);
 admin.get('/distribution/dashboard', adminAuth, distributionCtrl.adminDashboard);
+admin.get('/distribution/pending-counts', adminDistributionAuth, distributionCtrl.adminPendingCounts);
 admin.get('/distribution/distributors', adminAuth, distributionCtrl.adminDistributors);
-admin.get('/distribution/distributor-tree', adminAuth, distributionCtrl.adminDistributorTree);
-admin.get('/distribution/level-one', adminAuth, distributionCtrl.adminLevelOneDistributors);
-admin.post('/distribution/distributors', adminAuth, distributionCtrl.adminCreateDistributor);
-admin.put('/distribution/distributors/:id', adminAuth, distributionCtrl.adminUpdateDistributor);
+admin.get('/distribution/distributor-tree', adminDistributionAuth, distributionCtrl.adminDistributorTree);
+admin.get('/distribution/level-one', adminDistributionAuth, distributionCtrl.adminLevelOneDistributors);
+admin.post('/distribution/distributors', adminDistributionAuth, distributionCtrl.adminCreateDistributor);
+admin.put('/distribution/distributors/:id', adminDistributionAuth, distributionCtrl.adminUpdateDistributor);
 admin.get('/distribution/commissions', adminAuth, distributionCtrl.adminCommissions);
 admin.get('/distribution/withdrawals', adminAuth, distributionCtrl.adminWithdrawals);
 admin.put('/distribution/withdrawals/:id', adminAuth, distributionCtrl.adminReviewWithdrawal);
+admin.post('/distribution/withdrawals/:id/wechat-transfer', adminAuth, distributionCtrl.adminStartWechatTransfer);
+admin.post('/distribution/withdrawals/:id/query-transfer', adminAuth, distributionCtrl.adminQueryWechatTransfer);
 
 // 内容管理
 admin.get('/articles', adminAuth, articleCtrl.adminList);

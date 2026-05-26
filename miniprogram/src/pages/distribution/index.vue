@@ -86,7 +86,7 @@
     <view class="apply-section" v-if="canApplyDistribution">
       <view class="empty-card">
         <text class="empty-title">申请成为涨识推荐官</text>
-        <text class="empty-desc">邀请码已可正常使用。申请通过后，通过你的邀请码带来的新用户首单才会按后台规则产生推荐奖励。</text>
+        <text class="empty-desc">邀请码已可正常使用。申请通过后，通过你的邀请码带来的新用户充值会按后台规则产生推荐奖励。</text>
         <view class="primary-btn" @click="apply" :class="{ disabled: applying }">
           <text>{{ applying ? '申请中...' : '申请推荐官身份' }}</text>
         </view>
@@ -96,7 +96,7 @@
     <view v-else>
       <view class="status-card pending" v-if="isPending">
         <text class="empty-title">申请已提交，等待后台审核</text>
-        <text class="empty-desc">邀请码仍可正常追踪和领取每日分享点数；审核通过后，符合规则的首单才会产生推荐奖励。</text>
+        <text class="empty-desc">邀请码仍可正常追踪和领取每日分享点数；审核通过后，符合规则的充值才会产生推荐奖励。</text>
       </view>
       <view class="withdraw-card" v-if="isActive">
         <view class="section-head">
@@ -122,6 +122,7 @@
           </view>
         </view>
         <view class="withdraw-tip">最低 {{ formatMoney(stats.minWithdrawalAmount || 1000) }} 可申请；新奖励满 {{ stats.withdrawalFreezeDays ?? 7 }} 天后可提现。</view>
+        <view class="transfer-rule" v-if="transferRuleText">{{ transferRuleText }}</view>
         <view class="withdraw-form">
           <input class="withdraw-input" v-model="withdrawAmountInput" type="digit" placeholder="输入提现金额" />
           <view class="primary-btn withdraw-btn" :class="{ disabled: withdrawing }" @click="applyWithdrawal">
@@ -136,9 +137,14 @@
           <view>
             <text class="commission-title">{{ withdrawalStatusLabel(item.status) }}</text>
             <text class="commission-sub">{{ item.withdrawalNo }} · {{ formatDate(item.requestedAt || item.createdAt) }}</text>
+            <text class="commission-sub" v-if="item.transferState">微信状态：{{ item.transferState }}</text>
             <text class="commission-sub" v-if="item.adminRemark">{{ item.adminRemark }}</text>
           </view>
-          <text class="commission-amount">{{ formatMoney(item.amount) }}</text>
+          <view class="withdraw-right">
+            <text class="commission-amount">{{ formatMoney(item.amount) }}</text>
+            <view class="mini-btn" v-if="item.status === 'wait_user_confirm'" @click="confirmMerchantTransfer(item)">确认收款</view>
+            <view class="mini-btn ghost" v-if="item.outBillNo" @click="syncTransfer(item)">刷新</view>
+          </view>
         </view>
       </view>
       <view class="commission-card" v-if="isActive">
@@ -167,6 +173,8 @@ import QRCode from 'qrcode';
 import { api } from '@/api';
 import { useUserStore } from '@/store/user';
 import { recordShare, withShareRef } from '@/utils/share';
+
+declare const wx: any;
 
 const userStore = useUserStore();
 const data = ref<any>(null);
@@ -197,6 +205,13 @@ const shareCode = computed(() => data.value?.shareCode || userStore.userInfo?.sh
 const sharePath = computed(() => data.value?.sharePath || withShareRef('pages/volunteer/index'));
 const dailyShareRewardPoints = computed(() => data.value?.dailyShareRewardPoints ?? 10);
 const referralRewardPoints = computed(() => data.value?.referralRewardPoints ?? 20);
+const transferRule = computed(() => stats.value?.transferRule || setting.value?.transferRule || {});
+const transferRuleText = computed(() => {
+  const rule = transferRule.value || {};
+  const singleMax = rule.singleMax ?? 20000;
+  const userDailyLimit = rule.userDailyLimit ?? 200000;
+  return `转账规则：受微信支付限制，单笔不超过 ${formatRuleMoney(singleMax)}，单日不超过 ${formatRuleMoney(userDailyLimit)}。`;
+});
 const rewardTipText = computed(() => {
   const tips = [];
   if (dailyShareRewardPoints.value > 0) tips.push(`每天分享可领 ${dailyShareRewardPoints.value} 点`);
@@ -231,8 +246,17 @@ const pageSubtitle = computed(() => {
 });
 const rateText = computed(() => {
   if (!distributor.value) return '-';
-  if (distributor.value.level === 1) return `特邀合作奖励 ${setting.value.level1Percent || 0}%`;
-  return `推荐奖励 ${setting.value.level2Percent || 0}%`;
+  const firstRate = distributor.value.level === 1
+    ? Number(setting.value.level1Percent || 0)
+    : Number(setting.value.level2Percent || 0);
+  const parts = [`首充 ${formatPercent(firstRate)}`];
+  if (setting.value.recurringCommissionEnabled) {
+    const recurringRate = distributor.value.level === 1
+      ? Number(setting.value.recurringLevel1Percent || 0)
+      : Number(setting.value.recurringLevel2Percent || 0);
+    parts.push(`复充 ${formatPercent(recurringRate)}，限 ${setting.value.recurringCommissionDays || 0} 天`);
+  }
+  return parts.join('；');
 });
 
 async function loadAll() {
@@ -331,6 +355,15 @@ async function applyWithdrawal() {
     uni.showToast({ title: `最低${formatMoney(stats.value.minWithdrawalAmount || 1000)}可提现`, icon: 'none' });
     return;
   }
+  const rule = transferRule.value || {};
+  if (amount < Number(rule.singleMin || 10)) {
+    uni.showToast({ title: `单笔最低${formatMoney(rule.singleMin || 10)}`, icon: 'none' });
+    return;
+  }
+  if (amount > Number(rule.singleMax || 20000)) {
+    uni.showToast({ title: `单笔最高${formatMoney(rule.singleMax || 20000)}`, icon: 'none' });
+    return;
+  }
   withdrawing.value = true;
   try {
     await api.distribution.applyWithdrawal(amount);
@@ -341,6 +374,45 @@ async function applyWithdrawal() {
     uni.showToast({ title: e.message || '申请失败', icon: 'none' });
   } finally {
     withdrawing.value = false;
+  }
+}
+
+async function confirmMerchantTransfer(item: any) {
+  try {
+    const res = await api.distribution.transferPackage(item.id);
+    const transfer = (res.data as any)?.transfer;
+    if (!transfer?.package) {
+      uni.showToast({ title: '暂无可确认的收款单', icon: 'none' });
+      await loadAll();
+      return;
+    }
+    const wxApi = (wx as any);
+    if (!wxApi?.requestMerchantTransfer) {
+      uni.showToast({ title: '当前微信版本暂不支持确认收款', icon: 'none' });
+      return;
+    }
+    await new Promise((resolve, reject) => {
+      wxApi.requestMerchantTransfer({
+        mchId: transfer.mchId,
+        appId: transfer.appId,
+        package: transfer.package,
+        success: resolve,
+        fail: reject,
+      });
+    });
+    uni.showToast({ title: '已提交确认', icon: 'success' });
+    await syncTransfer(item);
+  } catch (e: any) {
+    uni.showToast({ title: e?.errMsg || e.message || '确认收款失败', icon: 'none' });
+  }
+}
+
+async function syncTransfer(item: any) {
+  try {
+    await api.distribution.syncTransfer(item.id);
+    await Promise.all([loadWithdrawals(), loadAll()]);
+  } catch (e: any) {
+    uni.showToast({ title: e.message || '刷新失败', icon: 'none' });
   }
 }
 
@@ -485,18 +557,28 @@ function roleLabel(role: string) {
   if (role === 'level1_direct') return '直接推荐奖励';
   if (role === 'level2_direct') return '推荐奖励';
   if (role === 'level1_override') return '合作伙伴奖励';
+  if (role === 'level1_recurring_direct') return '复充直接奖励';
+  if (role === 'level2_recurring_direct') return '复充推荐奖励';
+  if (role === 'level1_recurring_override') return '复充合作奖励';
   return '分享奖励';
 }
 
 function commissionSourceText(item: any) {
   const userName = item.referralUser?.nickname || item.referralUser?.phone || item.referralUserId || '用户';
   const orderAmount = formatMoney(item.order?.amount || 0);
-  return `${userName} 充值 ${orderAmount}，产生推荐奖励`;
+  const orderType = isRecurringRole(item.role) ? '复充' : '首充';
+  return `${userName} ${orderType} ${orderAmount}，产生推荐奖励`;
+}
+
+function isRecurringRole(role: string) {
+  return String(role || '').includes('_recurring_');
 }
 
 function withdrawalStatusLabel(status: string) {
   if (status === 'pending') return '待审核';
   if (status === 'approved') return '已通过，待打款';
+  if (status === 'transferring') return '微信转账中';
+  if (status === 'wait_user_confirm') return '待确认收款';
   if (status === 'paid') return '已打款';
   if (status === 'rejected') return '已驳回';
   if (status === 'failed') return '打款失败';
@@ -505,6 +587,16 @@ function withdrawalStatusLabel(status: string) {
 
 function formatMoney(value: number) {
   return `¥${(Number(value || 0) / 100).toFixed(2)}`;
+}
+
+function formatRuleMoney(value: number) {
+  const yuan = Number(value || 0) / 100;
+  return Number.isInteger(yuan) ? `¥${yuan}` : `¥${yuan.toFixed(2)}`;
+}
+
+function formatPercent(value: number) {
+  const normalized = Number(value || 0);
+  return Number.isInteger(normalized) ? `${normalized}%` : `${normalized.toFixed(2)}%`;
 }
 
 function formatDate(value: string) {
@@ -694,6 +786,16 @@ onShareTimeline(() => {
 
 .withdraw-tip {
   margin-top: 14rpx;
+  line-height: 1.5;
+}
+
+.transfer-rule {
+  margin-top: 10rpx;
+  padding: 12rpx 16rpx;
+  border-radius: 12rpx;
+  background: #f0fdfa;
+  color: #0f766e;
+  font-size: 22rpx;
   line-height: 1.5;
 }
 
@@ -966,6 +1068,31 @@ onShareTimeline(() => {
 }
 
 .commission-amount {
+  color: #0f766e;
+}
+
+.withdraw-right {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8rpx;
+}
+
+.mini-btn {
+  min-width: 112rpx;
+  height: 48rpx;
+  padding: 0 16rpx;
+  border-radius: 12rpx;
+  background: #0f766e;
+  color: #fff;
+  font-size: 22rpx;
+  line-height: 48rpx;
+  text-align: center;
+}
+
+.mini-btn.ghost {
+  background: #f0fdfa;
   color: #0f766e;
 }
 </style>

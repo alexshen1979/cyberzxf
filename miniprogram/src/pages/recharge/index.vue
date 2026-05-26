@@ -189,16 +189,16 @@ function badgeClass(product: Product) {
 <style lang="scss" scoped>
 
 .recharge-page {
-  padding: $spacing-md;
+  padding: 16rpx 20rpx 156rpx;
   min-height: 100vh;
   background:
-    linear-gradient(180deg, rgba(236, 253, 245, 0.64), rgba(248, 250, 252, 0) 320rpx),
+    linear-gradient(180deg, rgba(236, 253, 245, 0.58), rgba(248, 250, 252, 0) 260rpx),
     $bg-page;
 }
 
 .balance-card {
   text-align: center;
-  padding: $spacing-lg;
+  padding: 20rpx 24rpx;
   margin: 0;
 }
 
@@ -208,7 +208,7 @@ function badgeClass(product: Product) {
 }
 
 .balance-row {
-  margin-top: $spacing-xs;
+  margin-top: 4rpx;
   display: flex;
   align-items: baseline;
   justify-content: center;
@@ -216,7 +216,7 @@ function badgeClass(product: Product) {
 }
 
 .balance-value {
-  font-size: 80rpx;
+  font-size: 60rpx;
   font-weight: 800;
   @include gradient-text;
 }
@@ -227,22 +227,23 @@ function badgeClass(product: Product) {
 }
 
 .section-title {
-  font-size: $font-lg;
+  font-size: $font-md;
   font-weight: 600;
-  margin: $spacing-lg 0 $spacing-sm;
+  margin: 20rpx 0 12rpx;
 }
 
 .product-list {
   display: flex;
   flex-direction: column;
-  gap: $spacing-sm;
+  gap: 12rpx;
 }
 
 .product-card {
   @include card;
   display: flex;
   align-items: center;
-  padding: 44rpx $spacing-md $spacing-md;
+  min-height: 116rpx;
+  padding: 34rpx 20rpx 18rpx;
   position: relative;
   overflow: hidden;
   transition: border-color 0.2s;
@@ -258,13 +259,13 @@ function badgeClass(product: Product) {
   top: 0;
   left: 0;
   min-width: 104rpx;
-  height: 40rpx;
-  padding: 0 18rpx;
+  height: 34rpx;
+  padding: 0 16rpx;
   border-radius: $radius-md 0 $radius-md 0;
   color: #ffffff;
-  font-size: 22rpx;
+  font-size: 20rpx;
   font-weight: 800;
-  line-height: 40rpx;
+  line-height: 34rpx;
   text-align: center;
   letter-spacing: 0;
 
@@ -279,11 +280,11 @@ function badgeClass(product: Product) {
 
 .product-points {
   text-align: center;
-  width: 120rpx;
+  width: 108rpx;
 }
 
 .product-points-num {
-  font-size: $font-xl;
+  font-size: 34rpx;
   font-weight: 800;
   color: #059669;
   display: block;
@@ -296,7 +297,8 @@ function badgeClass(product: Product) {
 
 .product-detail {
   flex: 1;
-  margin: 0 $spacing-md;
+  margin: 0 16rpx;
+  min-width: 0;
 }
 
 .product-name {
@@ -308,22 +310,23 @@ function badgeClass(product: Product) {
 
 .product-desc {
   display: block;
-  margin-top: 4rpx;
+  margin-top: 2rpx;
   font-size: $font-xs;
   color: $text-tertiary;
+  @include text-ellipsis;
 }
 
 .product-bonus {
   font-size: $font-xs;
   color: #b45309;
-  margin-top: 8rpx;
+  margin-top: 4rpx;
 }
 
 .product-price {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  min-width: 132rpx;
+  min-width: 124rpx;
 }
 
 .original-price {
@@ -343,13 +346,13 @@ function badgeClass(product: Product) {
 }
 
 .price-value {
-  font-size: $font-xl;
+  font-size: 34rpx;
   font-weight: 700;
   color: #047857;
 }
 
 .discount-tag {
-  margin-top: 4rpx;
+  margin-top: 2rpx;
   padding: 2rpx 10rpx;
   border-radius: 999rpx;
   background: #fef3c7;
@@ -362,8 +365,8 @@ function badgeClass(product: Product) {
   position: absolute;
   top: 0;
   right: 0;
-  width: 48rpx;
-  height: 48rpx;
+  width: 42rpx;
+  height: 42rpx;
   background: #22c55e;
   color: #ffffff;
   border-radius: 0 $radius-md 0 $radius-md;
@@ -373,13 +376,13 @@ function badgeClass(product: Product) {
 }
 
 .compliance-notice {
-  margin-top: $spacing-lg;
-  padding: $spacing-md;
+  margin-top: 16rpx;
+  padding: 18rpx 20rpx;
   background: $bg-secondary;
   border-radius: $radius-md;
   font-size: $font-xs;
   color: $text-dim;
-  line-height: 1.8;
+  line-height: 1.55;
 
   text {
     display: block;
@@ -387,10 +390,15 @@ function badgeClass(product: Product) {
 }
 
 .pay-btn {
+  position: fixed;
+  left: 20rpx;
+  right: 20rpx;
+  bottom: 20rpx;
+  z-index: 20;
   background: linear-gradient(135deg, #059669, #14b8a6);
   color: #fff;
-  margin-top: $spacing-lg;
-  padding: $spacing-md;
+  margin-top: 0;
+  padding: 24rpx;
   border-radius: $radius-lg;
   text-align: center;
   font-size: $font-lg;

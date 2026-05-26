@@ -33,7 +33,7 @@ async function main() {
         name: '赛博张老师',
         description: '涨识小程序里的默认回答 Skill，聚焦高考志愿、考研规划和职业选择。',
         systemPrompt,
-        model: 'deepseek-chat',
+        model: 'global',
         temperature: 0.7,
         maxTokens: 2000,
         topP: 0.9,

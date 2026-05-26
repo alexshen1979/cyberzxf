@@ -1,0 +1,58 @@
+素材类型,适用层级,标题,文件路径,备注
+文案,全层级,朋友圈文案库.md,materials/copy/朋友圈文案库.md,Markdown，可直接复制编辑
+文案,全层级,社交媒体图文库.md,materials/copy/社交媒体图文库.md,Markdown，可直接复制编辑
+文案,全层级,私聊与群话术.md,materials/copy/私聊与群话术.md,Markdown，可直接复制编辑
+文案,全层级,Flyer与海报文案.md,materials/copy/Flyer与海报文案.md,Markdown，可直接复制编辑
+文案,全层级,短视频脚本库.md,materials/copy/短视频脚本库.md,Markdown，可直接复制编辑
+朋友圈九宫格图片,运营方招募合伙人,高考志愿服务需求集中,materials/images/social-cards/01_operator_partner/01_高考志愿服务需求集中.png,1080x1080 PNG
+朋友圈九宫格图片,运营方招募合伙人,我们提供完整工具链,materials/images/social-cards/01_operator_partner/02_我们提供完整工具链.png,1080x1080 PNG
+朋友圈九宫格图片,运营方招募合伙人,合伙人负责什么,materials/images/social-cards/01_operator_partner/03_合伙人负责什么.png,1080x1080 PNG
+朋友圈九宫格图片,运营方招募合伙人,谁最适合加入,materials/images/social-cards/01_operator_partner/04_谁最适合加入.png,1080x1080 PNG
+朋友圈九宫格图片,运营方招募合伙人,平台支持什么,materials/images/social-cards/01_operator_partner/05_平台支持什么.png,1080x1080 PNG
+朋友圈九宫格图片,运营方招募合伙人,现在预约沟通,materials/images/social-cards/01_operator_partner/06_现在预约沟通.png,1080x1080 PNG
+社交媒体长图/海报,运营方招募合伙人,招募高考志愿服务合伙人,materials/images/posters/01_operator_partner_招募高考志愿服务合伙人.png,1080x1440 PNG
+线下Flyer图片,运营方招募合伙人,招募高考志愿服务合伙人,materials/images/flyers/01_operator_partner_招募高考志愿服务合伙人.png,A4比例 PNG
+线下Flyer PDF,运营方招募合伙人,招募高考志愿服务合伙人,materials/images/flyers/01_operator_partner_招募高考志愿服务合伙人.pdf,A4 PDF，可打印
+短视频分镜图,运营方招募合伙人,高考志愿服务｜正在寻找靠谱合伙人,materials/videos/storyboards/01_operator_partner/01_高考志愿服务.png,1080x1920 PNG
+短视频分镜图,运营方招募合伙人,家长最焦虑｜信息乱、时间紧、怕滑档,materials/videos/storyboards/01_operator_partner/02_家长最焦虑.png,1080x1920 PNG
+短视频分镜图,运营方招募合伙人,涨识提供｜小程序、报告、素材、后台,materials/videos/storyboards/01_operator_partner/03_涨识提供.png,1080x1920 PNG
+短视频分镜图,运营方招募合伙人,你负责｜本地资源触达与团队组织,materials/videos/storyboards/01_operator_partner/04_你负责.png,1080x1920 PNG
+短视频分镜图,运营方招募合伙人,适合人群｜教培、升学老师、本地达人,materials/videos/storyboards/01_operator_partner/05_适合人群.png,1080x1920 PNG
+短视频分镜图,运营方招募合伙人,加入方式｜私信“合伙人”领取资料,materials/videos/storyboards/01_operator_partner/06_加入方式.png,1080x1920 PNG
+短视频字幕,运营方招募合伙人,招募高考志愿服务合伙人,materials/videos/subtitles/01_operator_partner_运营方招募合伙人.srt,SRT字幕，可导入剪映
+短视频草稿,运营方招募合伙人,招募高考志愿服务合伙人,materials/videos/drafts/01_operator_partner_运营方招募合伙人_无配音草稿.webm,竖版WebM，无配音，可预览节奏
+朋友圈九宫格图片,合伙人招募推荐官,身边有高三家长？,materials/images/social-cards/02_partner_referrer/01_身边有高三家长？.png,1080x1080 PNG
+朋友圈九宫格图片,合伙人招募推荐官,推荐官做什么,materials/images/social-cards/02_partner_referrer/02_推荐官做什么.png,1080x1080 PNG
+朋友圈九宫格图片,合伙人招募推荐官,平台给什么,materials/images/social-cards/02_partner_referrer/03_平台给什么.png,1080x1080 PNG
+朋友圈九宫格图片,合伙人招募推荐官,适合这些人,materials/images/social-cards/02_partner_referrer/04_适合这些人.png,1080x1080 PNG
+朋友圈九宫格图片,合伙人招募推荐官,推荐边界要清楚,materials/images/social-cards/02_partner_referrer/05_推荐边界要清楚.png,1080x1080 PNG
+朋友圈九宫格图片,合伙人招募推荐官,加入推荐官群,materials/images/social-cards/02_partner_referrer/06_加入推荐官群.png,1080x1080 PNG
+社交媒体长图/海报,合伙人招募推荐官,招募本地高考志愿推荐官,materials/images/posters/02_partner_referrer_招募本地高考志愿推荐官.png,1080x1440 PNG
+线下Flyer图片,合伙人招募推荐官,招募本地高考志愿推荐官,materials/images/flyers/02_partner_referrer_招募本地高考志愿推荐官.png,A4比例 PNG
+线下Flyer PDF,合伙人招募推荐官,招募本地高考志愿推荐官,materials/images/flyers/02_partner_referrer_招募本地高考志愿推荐官.pdf,A4 PDF，可打印
+短视频分镜图,合伙人招募推荐官,身边有高三家长？｜你可以成为推荐官,materials/videos/storyboards/02_partner_referrer/01_身边有高三家长？.png,1080x1920 PNG
+短视频分镜图,合伙人招募推荐官,不要求专业背景｜推荐工具，不替人做决定,materials/videos/storyboards/02_partner_referrer/02_不要求专业背景.png,1080x1920 PNG
+短视频分镜图,合伙人招募推荐官,平台提供｜海报、话术、培训、后台记录,materials/videos/storyboards/02_partner_referrer/03_平台提供.png,1080x1920 PNG
+短视频分镜图,合伙人招募推荐官,你只需要｜发入口、做提醒、收反馈,materials/videos/storyboards/02_partner_referrer/04_你只需要.png,1080x1920 PNG
+短视频分镜图,合伙人招募推荐官,适合人群｜群主、老师、往届家长、大学生,materials/videos/storyboards/02_partner_referrer/05_适合人群.png,1080x1920 PNG
+短视频分镜图,合伙人招募推荐官,加入方式｜私信“推荐官”进说明群,materials/videos/storyboards/02_partner_referrer/06_加入方式.png,1080x1920 PNG
+短视频字幕,合伙人招募推荐官,招募本地高考志愿推荐官,materials/videos/subtitles/02_partner_referrer_合伙人招募推荐官.srt,SRT字幕，可导入剪映
+短视频草稿,合伙人招募推荐官,招募本地高考志愿推荐官,materials/videos/drafts/02_partner_referrer_合伙人招募推荐官_无配音草稿.webm,竖版WebM，无配音，可预览节奏
+朋友圈九宫格图片,推荐官转化普通用户,出分后别只问能上哪,materials/images/social-cards/03_referrer_user/01_出分后别只问能上哪.png,1080x1080 PNG
+朋友圈九宫格图片,推荐官转化普通用户,几分钟生成报告,materials/images/social-cards/03_referrer_user/02_几分钟生成报告.png,1080x1080 PNG
+朋友圈九宫格图片,推荐官转化普通用户,报告重点看什么,materials/images/social-cards/03_referrer_user/03_报告重点看什么.png,1080x1080 PNG
+朋友圈九宫格图片,推荐官转化普通用户,适合这些家庭,materials/images/social-cards/03_referrer_user/04_适合这些家庭.png,1080x1080 PNG
+朋友圈九宫格图片,推荐官转化普通用户,使用边界,materials/images/social-cards/03_referrer_user/05_使用边界.png,1080x1080 PNG
+朋友圈九宫格图片,推荐官转化普通用户,现在扫码体验,materials/images/social-cards/03_referrer_user/06_现在扫码体验.png,1080x1080 PNG
+社交媒体长图/海报,推荐官转化普通用户,高考志愿先做一次AI分析,materials/images/posters/03_referrer_user_高考志愿先做一次AI分析.png,1080x1440 PNG
+线下Flyer图片,推荐官转化普通用户,高考志愿先做一次AI分析,materials/images/flyers/03_referrer_user_高考志愿先做一次AI分析.png,A4比例 PNG
+线下Flyer PDF,推荐官转化普通用户,高考志愿先做一次AI分析,materials/images/flyers/03_referrer_user_高考志愿先做一次AI分析.pdf,A4 PDF，可打印
+短视频分镜图,推荐官转化普通用户,高考志愿｜不要只问“能上哪”,materials/videos/storyboards/03_referrer_user/01_高考志愿.png,1080x1920 PNG
+短视频分镜图,推荐官转化普通用户,先做一次AI分析｜看冲稳保和风险点,materials/videos/storyboards/03_referrer_user/02_先做一次AI分析.png,1080x1920 PNG
+短视频分镜图,推荐官转化普通用户,输入关键信息｜省份、科类、分数、偏好,materials/videos/storyboards/03_referrer_user/03_输入关键信息.png,1080x1920 PNG
+短视频分镜图,推荐官转化普通用户,报告会整理｜院校方向、专业组、风险提示,materials/videos/storyboards/03_referrer_user/04_报告会整理.png,1080x1920 PNG
+短视频分镜图,推荐官转化普通用户,重要提醒｜最终以官方招生章程为准,materials/videos/storyboards/03_referrer_user/05_重要提醒.png,1080x1920 PNG
+短视频分镜图,推荐官转化普通用户,现在扫码｜生成你的志愿分析报告,materials/videos/storyboards/03_referrer_user/06_现在扫码.png,1080x1920 PNG
+短视频字幕,推荐官转化普通用户,高考志愿先做一次AI分析,materials/videos/subtitles/03_referrer_user_推荐官转化普通用户.srt,SRT字幕，可导入剪映
+短视频草稿,推荐官转化普通用户,高考志愿先做一次AI分析,materials/videos/drafts/03_referrer_user_推荐官转化普通用户_无配音草稿.webm,竖版WebM，无配音，可预览节奏
+使用说明,全层级,README,materials/README.md,素材包使用说明

@@ -31,15 +31,20 @@ function transformUniversity(item: any) {
 
 // 公开：高校列表（支持筛选）
 export async function list(ctx: Context) {
-  const { province, type, keyword, page: p, pageSize: ps } = ctx.query as Record<string, string>;
+  const { province, type, level, keyword, page: p, pageSize: ps } = ctx.query as Record<string, string>;
   const page = Math.max(1, parseInt(p || '1'));
   const pageSize = Math.min(100, Math.max(1, parseInt(ps || '50')));
 
   const where: any = {};
   if (province) where.province = province;
   if (type) where.type = type;
+  if (level) where.level = { contains: level };
   if (keyword) {
-    where.name = { contains: keyword };
+    where.OR = [
+      { name: { contains: keyword } },
+      { city: { contains: keyword } },
+      { province: { contains: keyword } },
+    ];
   }
 
   const [list, total] = await Promise.all([

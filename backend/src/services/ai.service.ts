@@ -1,12 +1,17 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { prisma } from '../utils/prisma';
-import { config } from '../config';
 import { deductPoints } from './points.service';
 import { AppError } from '../middleware/errorHandler';
 import { createLogger } from '../utils/logger';
 import { redisGet, redisSet } from '../utils/redis';
 import { getPointSettings } from './point-config.service';
+import {
+  chatCompletionsUrl,
+  DEFAULT_DEEPSEEK_MODEL,
+  resolveAiRuntime,
+  resolveScenarioModelOverride,
+} from './ai-runtime.service';
 
 const logger = createLogger('ai');
 
@@ -37,6 +42,8 @@ interface StreamConsultResult {
   stream: ReadableStream;
   pointsCost: number;
   model: string;
+  provider: string;
+  providerName: string;
   sessionId: string;
 }
 
@@ -48,7 +55,8 @@ async function getAiConfig() {
     // 使用默认配置
     aiConfig = await prisma.aiConfig.create({
       data: {
-        model: 'deepseek-chat',
+        provider: 'deepseek',
+        model: DEFAULT_DEEPSEEK_MODEL,
         temperature: 0.7,
         maxTokens: 2000,
         topP: 0.9,
@@ -61,19 +69,6 @@ async function getAiConfig() {
     });
   }
   return aiConfig;
-}
-
-// 解析 API 凭证：DB 配置优先，留空时回退环境变量
-function resolveApiCredentials(aiConfig: any) {
-  return {
-    apiKey: (aiConfig.apiKey && aiConfig.apiKey.trim())
-      ? aiConfig.apiKey
-      : config.deepseek.apiKey,
-    baseUrl: (aiConfig.apiBaseUrl && aiConfig.apiBaseUrl.trim())
-      ? aiConfig.apiBaseUrl
-      : config.deepseek.baseUrl,
-    timeout: aiConfig.timeout || 30000,
-  };
 }
 
 function normalizeAiTimeout(type: ConsultType, configured?: number | null) {
@@ -104,7 +99,7 @@ async function getDefaultSkill(): Promise<any | null> {
 }
 
 // 加载 Skill 知识库（检索相关知识点）
-async function retrieveKnowledge(question: string, aiConfig: any, skillKeywords?: string[]): Promise<string> {
+async function retrieveKnowledge(question: string, aiConfig: any, skillKeywords?: string[], type: ConsultType = 'normal'): Promise<string> {
   if (!aiConfig.skillEnabled) return '';
 
   try {
@@ -123,7 +118,7 @@ async function retrieveKnowledge(question: string, aiConfig: any, skillKeywords?
           ],
         })),
       },
-      take: 5,
+      take: type === 'deep' ? 5 : 2,
       orderBy: { viewCount: 'desc' },
     });
 
@@ -138,7 +133,7 @@ async function retrieveKnowledge(question: string, aiConfig: any, skillKeywords?
           ],
         })),
       },
-      take: 2,
+      take: type === 'deep' ? 2 : 1,
       orderBy: { viewCount: 'desc' },
     });
 
@@ -147,12 +142,12 @@ async function retrieveKnowledge(question: string, aiConfig: any, skillKeywords?
     let block = '';
     if (knowledgeEntries.length > 0) {
       block += `\n【参考知识库】\n${knowledgeEntries.map(e =>
-        `- [${e.category}] ${e.title}: ${e.content.slice(0, 300)}`
+        `- [${e.category}] ${e.title}: ${e.content.slice(0, type === 'deep' ? 300 : 160)}`
       ).join('\n')}`;
     }
     if (articles.length > 0) {
       block += `\n【相关文章】\n${articles.map(a =>
-        `- ${a.title}: ${a.content.slice(0, 200)}`
+        `- ${a.title}: ${a.content.slice(0, type === 'deep' ? 200 : 120)}`
       ).join('\n')}`;
     }
     return block;
@@ -178,7 +173,7 @@ function extractKeywords(question: string): string[] {
 function buildSystemPrompt(knowledge: string, context?: string, type: ConsultType = 'normal'): string {
   const mode = type === 'deep'
     ? `\n\n回答模式：深度分析。请先给结论，再分层拆解依据、风险、可执行步骤。回答要更完整，适合择校、专业取舍、院校对比和志愿风险判断。`
-    : `\n\n回答模式：普通问答。请直接回答核心问题，少铺垫，控制篇幅，适合快速解释和方向判断。`;
+    : `\n\n回答模式：普通问答。请直接回答核心问题，先给明确结论，再给 3-5 条关键依据。控制在 300-600 字；不要长篇展开，用户继续追问时再补充。`;
   const base = `你是赛博张老师，涨识小程序里的高考志愿填报、考研规划、职业规划 AI 咨询专家。
 你的回答要直接、接地气、讲依据，用大白话讲清楚复杂的升学问题。
 
@@ -290,7 +285,7 @@ function buildSkillPrompt(systemPrompt: string, knowledge: string, context?: str
   let prompt = hasUnsafeSkillPrompt(systemPrompt) ? sanitizeSkillPrompt(systemPrompt) : systemPrompt;
   prompt += type === 'deep'
     ? '\n\n回答模式：深度分析。请先给结论，再分层拆解依据、风险、可执行步骤。回答要更完整。'
-    : '\n\n回答模式：普通问答。请直接回答核心问题，少铺垫，控制篇幅。';
+    : '\n\n回答模式：普通问答。请直接回答核心问题，先给明确结论，再给 3-5 条关键依据。控制在 300-600 字；不要长篇展开，用户继续追问时再补充。';
   prompt += '\n\n内容安全要求：你是涨识小程序里的赛博张老师；严禁提及、模仿或暗示任何真实公众人物、教育博主、网红老师及其风格；严禁添加固定免责提示、第三方权利说明、话题标签、营销口号或类似开场标题。';
   prompt += '\n\n背景使用要求：如果用户提供了背景信息，必须优先使用其中的考生省份、科类/选科、分数、位次、目标城市/省份、偏好专业和规避专业；不要再假设这些信息缺失。回答开头要点明你正在按这些背景判断。';
   prompt += '\n\n排版要求：先给结论，再分段说明；每个要点单独换行；长段落不要挤成一整块。';
@@ -314,14 +309,30 @@ function buildUserMessage(question: string, context?: string) {
 }
 
 function normalizeMaxTokens(type: ConsultType, configured?: number | null) {
-  const base = Number(configured || 2000);
-  if (type === 'deep') return Math.max(base, 2600);
-  return Math.min(base, 1200);
+  const fallback = type === 'deep' ? 2600 : 700;
+  const base = Number(configured || fallback);
+  if (type === 'deep') return Math.min(Math.max(base, 500), 8000);
+  return Math.min(Math.max(base, 100), 3000);
+}
+
+function resolveMaxTokens(type: ConsultType, aiConfig: any, skillMaxTokens?: number | null) {
+  const scenarioMax = type === 'deep' ? aiConfig.deepMaxTokens : aiConfig.normalMaxTokens;
+  if (scenarioMax !== undefined && scenarioMax !== null) {
+    return normalizeMaxTokens(type, scenarioMax);
+  }
+  if (skillMaxTokens !== undefined && skillMaxTokens !== null) {
+    return normalizeMaxTokens(type, skillMaxTokens);
+  }
+  return normalizeMaxTokens(type, aiConfig.maxTokens);
 }
 
 function localFallbackAnswer(question: string, context?: string, type: ConsultType = 'normal') {
-  const school = extractContextValue(context, '关注院校') || extractSchoolFromQuestion(question);
+  const requestedLocation = extractRequestedLocation(question);
+  const schoolFromQuestion = extractSchoolFromQuestion(question);
+  const schoolFromContext = extractContextValue(context, '关注院校');
   const city = extractContextValue(context, '院校城市');
+  const shouldIgnoreContextSchool = Boolean(requestedLocation && city && !city.includes(requestedLocation) && !schoolFromQuestion);
+  const school = schoolFromQuestion || (shouldIgnoreContextSchool ? '' : schoolFromContext);
   const schoolType = extractContextValue(context, '院校类型');
   const level = extractContextValue(context, '院校层次');
   const province = extractContextValue(context, '考生省份') || extractContextValue(context, '省份');
@@ -379,6 +390,11 @@ function extractSchoolFromQuestion(question: string) {
   return match?.[1]?.trim() || '';
 }
 
+function extractRequestedLocation(question: string) {
+  const match = question.match(/(?:只看|推荐|只推荐|按.*?推荐)([^，,。；;\n]{2,8})(?:的)?(?:学校|院校|大学)/);
+  return match?.[1]?.replace(/[省市地区\s]/g, '').trim() || '';
+}
+
 export async function localFallbackConsult(params: ConsultParams): Promise<ConsultResult> {
   const { userId, question, channel, type = 'normal', context: userContext, isAnonymous } = params;
   const sessionId = params.sessionId || `${userId}_${Date.now()}`;
@@ -419,13 +435,10 @@ export async function consult(params: ConsultParams): Promise<ConsultResult> {
   // 1. 获取 AI 配置
   const aiConfig = await getAiConfig();
 
-  // 2. 解析 API 凭证（DB 优先，留空回退 env）
-  const creds = resolveApiCredentials(aiConfig);
-
-  // 3. 确定扣点数（未登录用户免费）
+  // 2. 确定扣点数（未登录用户免费）
   const pointsCost = isAnonymous ? 0 : (type === 'deep' ? aiConfig.pointsPerDeep : aiConfig.pointsPerQuery);
 
-  // 4. 扣减点数（未登录用户跳过）
+  // 3. 扣减点数（未登录用户跳过）
   if (!isAnonymous) {
     await deductPoints(userId, pointsCost, {
       source: 'consultation',
@@ -435,22 +448,31 @@ export async function consult(params: ConsultParams): Promise<ConsultResult> {
   }
 
   try {
-    // 5. 加载默认 Skill
+    // 4. 加载默认 Skill
     const skill = await getDefaultSkill();
 
-    // 6. 解析 Skill 参数：skill 有值则覆盖 AiConfig
-    const modelName = skill?.model || (aiConfig.model === 'deepseek-flash' ? 'deepseek-flash' : 'deepseek-chat');
+    // 5. 解析 Skill 参数：skill 有值则覆盖 AiConfig
+    const runtime = resolveAiRuntime(aiConfig, resolveScenarioModelOverride(type, aiConfig, skill?.model));
+    const modelName = runtime.model;
     const temperature = skill?.temperature ?? aiConfig.temperature;
-    const maxTokens = normalizeMaxTokens(type, skill?.maxTokens ?? aiConfig.maxTokens);
+    const maxTokens = resolveMaxTokens(type, aiConfig, skill?.maxTokens);
     const topP = skill?.topP ?? aiConfig.topP;
 
-    // 7. 解析 Skill 关键词
+    if (!runtime.apiKey) {
+      logger.warn('%s API Key 未配置，使用本地兜底回答', runtime.providerName);
+      if (!isAnonymous) {
+        await refundPoints(userId, pointsCost, sessionId);
+      }
+      return localFallbackConsult({ userId, question, channel, type, sessionId, context: userContext, isAnonymous });
+    }
+
+    // 6. 解析 Skill 关键词
     let skillKeywords: string[] | undefined;
     if (skill?.keywords) {
       try { skillKeywords = JSON.parse(skill.keywords); } catch { /* ignore */ }
     }
 
-    // 8. 检查缓存
+    // 7. 检查缓存
     const cacheable = isCacheable(question, userContext);
     const ck = cacheKey(question, type, userContext);
 
@@ -469,17 +491,17 @@ export async function consult(params: ConsultParams): Promise<ConsultResult> {
       }
     }
 
-    // 9. 检索知识库
-    const knowledge = await retrieveKnowledge(question, aiConfig, skillKeywords);
+    // 8. 检索知识库
+    const knowledge = await retrieveKnowledge(question, aiConfig, skillKeywords, type);
 
-    // 10. 构建 System Prompt：优先用 Skill，fallback 硬编码
+    // 9. 构建 System Prompt：优先用 Skill，fallback 硬编码
     const systemPrompt = skill?.systemPrompt
       ? buildSkillPrompt(skill.systemPrompt, knowledge, userContext, type)
       : buildSystemPrompt(knowledge, userContext, type);
 
-    // 11. 调用 DeepSeek 模型
+    // 10. 调用 OpenAI 兼容模型
     const response = await axios.post(
-      `${creds.baseUrl}/v1/chat/completions`,
+      chatCompletionsUrl(runtime.baseUrl),
       {
         model: modelName,
         messages: [
@@ -492,10 +514,10 @@ export async function consult(params: ConsultParams): Promise<ConsultResult> {
       },
       {
         headers: {
-          'Authorization': `Bearer ${creds.apiKey}`,
+          'Authorization': `Bearer ${runtime.apiKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: normalizeAiTimeout(type, creds.timeout),
+        timeout: normalizeAiTimeout(type, runtime.timeout),
       }
     );
 
@@ -527,7 +549,7 @@ export async function consult(params: ConsultParams): Promise<ConsultResult> {
     }
     if (axios.isAxiosError(err)) {
       const detail = err.response?.data || err.code || err.message;
-      logger.error('DeepSeek API 调用失败: %s', String(detail));
+      logger.error('%s API 调用失败: %s', resolveAiRuntime(aiConfig).providerName, String(detail));
       return localFallbackConsult({ userId, question, channel, type, sessionId, context: userContext, isAnonymous });
     }
     throw err;
@@ -565,7 +587,6 @@ export async function streamConsult(params: ConsultParams): Promise<StreamConsul
 
   // 1. 获取 AI 配置
   const aiConfig = await getAiConfig();
-  const creds = resolveApiCredentials(aiConfig);
 
   // 2. 确定扣点数（未登录用户免费）
   const pointsCost = isAnonymous ? 0 : (type === 'deep' ? aiConfig.pointsPerDeep : aiConfig.pointsPerQuery);
@@ -584,28 +605,33 @@ export async function streamConsult(params: ConsultParams): Promise<StreamConsul
     const skill = await getDefaultSkill();
 
     // 5. 解析模型参数
-    const modelName = skill?.model || (aiConfig.model === 'deepseek-flash' ? 'deepseek-flash' : 'deepseek-chat');
+    const runtime = resolveAiRuntime(aiConfig, resolveScenarioModelOverride(type, aiConfig, skill?.model));
+    const modelName = runtime.model;
     const temperature = skill?.temperature ?? aiConfig.temperature;
-    const maxTokens = normalizeMaxTokens(type, skill?.maxTokens ?? aiConfig.maxTokens);
+    const maxTokens = resolveMaxTokens(type, aiConfig, skill?.maxTokens);
     const topP = skill?.topP ?? aiConfig.topP;
+
+    if (!runtime.apiKey) {
+      throw new AppError(502, `${runtime.providerName} API Key 未配置`, 'AI_API_ERROR');
+    }
 
     // 6. 检索知识库
     let skillKeywords: string[] | undefined;
     if (skill?.keywords) {
       try { skillKeywords = JSON.parse(skill.keywords); } catch { /* ignore */ }
     }
-    const knowledge = await retrieveKnowledge(question, aiConfig, skillKeywords);
+    const knowledge = await retrieveKnowledge(question, aiConfig, skillKeywords, type);
 
     // 7. 构建 System Prompt
     const systemPrompt = skill?.systemPrompt
       ? buildSkillPrompt(skill.systemPrompt, knowledge, userContext, type)
       : buildSystemPrompt(knowledge, userContext, type);
 
-    // 8. 调用 DeepSeek API（stream 模式）
-    const response = await fetch(`${creds.baseUrl}/v1/chat/completions`, {
+    // 8. 调用 OpenAI 兼容 API（stream 模式）
+    const response = await fetch(chatCompletionsUrl(runtime.baseUrl), {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${creds.apiKey}`,
+        'Authorization': `Bearer ${runtime.apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -619,22 +645,24 @@ export async function streamConsult(params: ConsultParams): Promise<StreamConsul
         top_p: topP,
         stream: true,
       }),
-      signal: AbortSignal.timeout(normalizeAiTimeout(type, creds.timeout)),
+      signal: AbortSignal.timeout(normalizeAiTimeout(type, runtime.timeout)),
     });
 
     if (!response.ok) {
       const errText = await response.text().catch(() => 'Unknown error');
-      throw new AppError(502, `DeepSeek API error ${response.status}: ${errText}`, 'AI_API_ERROR');
+      throw new AppError(502, `${runtime.providerName} API error ${response.status}: ${errText}`, 'AI_API_ERROR');
     }
 
     if (!response.body) {
-      throw new AppError(502, 'DeepSeek API 未返回流式响应', 'AI_NO_STREAM');
+      throw new AppError(502, `${runtime.providerName} API 未返回流式响应`, 'AI_NO_STREAM');
     }
 
     return {
       stream: response.body,
       pointsCost,
       model: modelName,
+      provider: runtime.provider,
+      providerName: runtime.providerName,
       sessionId,
     };
   } catch (err) {

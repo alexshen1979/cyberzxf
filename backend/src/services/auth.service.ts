@@ -5,7 +5,7 @@ import { config } from '../config';
 import axios from 'axios';
 import { getWechatMiniProgramCredentials } from './payment.service';
 import { getPointSettings } from './point-config.service';
-import { createReferralForNewUser, ensureUserShareCode, resolveNewUserGiftPoints } from './distribution.service';
+import { createReferralForNewUser, ensureUserShareCode, grantPartnerNewUserExtraGift } from './distribution.service';
 
 let accessTokenCache: { token: string; expiresAt: number } | null = null;
 
@@ -142,7 +142,7 @@ export async function findOrCreateByMpOpenId(mpOpenId: string, unionId?: string)
 async function giftNewUserPoints(userId: string, tx?: any, referralCode?: string) {
   const db = tx || prisma;
   const settings = await getPointSettings();
-  const giftPoints = await resolveNewUserGiftPoints(db, userId, referralCode, settings.freeGift);
+  const giftPoints = Math.max(0, Math.round(Number(settings.freeGift || 0)));
   const expiredAt = new Date();
   expiredAt.setDate(expiredAt.getDate() + settings.expireDays);
 
@@ -157,9 +157,12 @@ async function giftNewUserPoints(userId: string, tx?: any, referralCode?: string
       amount: giftPoints,
       balanceAfter: giftPoints,
       source: 'system',
+      sourceId: 'register',
       remark: '新用户注册赠送',
     },
   });
+
+  await grantPartnerNewUserExtraGift(db, userId, referralCode);
 }
 
 // 脱敏用户信息

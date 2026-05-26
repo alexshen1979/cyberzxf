@@ -56,6 +56,16 @@
       </view>
     </scroll-view>
 
+    <view class="university-level-filter" v-if="activeLibrary === 'universities'">
+      <text
+        class="level-filter-chip"
+        :class="{ active: activeUniversityLevel === item.value }"
+        v-for="item in universityLevelOptions"
+        :key="item.value || 'all-levels'"
+        @click="switchUniversityLevel(item.value)"
+      >{{ item.label }}</text>
+    </view>
+
     <view class="entry-list">
       <view
         class="entry-card"
@@ -84,7 +94,7 @@
       </view>
     </view>
 
-    <view class="load-more" v-if="hasMore && entries.length" @click="loadMore">加载更多</view>
+    <view class="load-more" v-if="loading && entries.length">加载中...</view>
     <view class="empty" v-if="!loading && entries.length === 0">暂无资料</view>
     <view class="no-more" v-if="!hasMore && entries.length">—— 没有更多了 ——</view>
   </view>
@@ -92,7 +102,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { onLoad, onPullDownRefresh, onShareAppMessage, onShareTimeline, onShow } from '@dcloudio/uni-app';
+import { onLoad, onPullDownRefresh, onReachBottom, onShareAppMessage, onShareTimeline, onShow } from '@dcloudio/uni-app';
 import { api } from '@/api';
 import { recordShare, withShareRef } from '@/utils/share';
 
@@ -117,8 +127,14 @@ const universityProvinces = ref<string[]>([]);
 const majorCategories = ref<string[]>([]);
 const knowledgeCategories = ref<string[]>([]);
 const activeUniversityProvince = ref('');
+const activeUniversityLevel = ref('');
 const activeMajorCategory = ref('');
 const activeKnowledgeCategory = ref('');
+const universityLevelOptions = [
+  { label: '全部层次', value: '' },
+  { label: '本科', value: '本科' },
+  { label: '专科', value: '专科' },
+];
 
 const activeLibraryMeta = computed(() => libraries.find(item => item.key === activeLibrary.value) || libraries[0]);
 const activeTotal = computed(() => totals[activeLibrary.value]);
@@ -150,6 +166,12 @@ function switchFilter(value: string) {
   if (activeLibrary.value === 'universities') activeUniversityProvince.value = value;
   else if (activeLibrary.value === 'majors') activeMajorCategory.value = value;
   else activeKnowledgeCategory.value = value;
+  doSearch();
+}
+
+function switchUniversityLevel(value: string) {
+  if (activeUniversityLevel.value === value) return;
+  activeUniversityLevel.value = value;
   doSearch();
 }
 
@@ -186,6 +208,7 @@ async function loadEntries() {
       res = await api.universities.list(page.value, pageSize, {
         keyword: keyword.value || undefined,
         province: activeUniversityProvince.value || undefined,
+        level: activeUniversityLevel.value || undefined,
       });
     } else if (activeLibrary.value === 'majors') {
       res = await api.majors.list(
@@ -216,6 +239,10 @@ function loadMore() {
   page.value++;
   loadEntries();
 }
+
+onReachBottom(() => {
+  loadMore();
+});
 
 async function refreshEntries() {
   page.value = 1;
@@ -262,11 +289,12 @@ function entryTags(entry: any) {
       entry.is211 ? '211' : '',
       entry.isDoubleFirst ? '双一流' : '',
       ...(Array.isArray(entry.featureTags) ? entry.featureTags : []),
+      entry.level,
       entry.type,
       entry.properties,
-    ].filter(Boolean).slice(0, 5);
+    ].filter(Boolean);
   }
-  return (Array.isArray(entry.tags) ? entry.tags : []).slice(0, 5);
+  return (Array.isArray(entry.tags) ? entry.tags : []);
 }
 
 function entrySummary(entry: any) {
@@ -579,6 +607,30 @@ onMounted(() => {
   color: #fff;
   border-color: #0f172a;
   font-weight: 800;
+}
+
+.university-level-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin: -4rpx 0 18rpx;
+}
+
+.level-filter-chip {
+  padding: 10rpx 20rpx;
+  border-radius: $radius-full;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1rpx solid rgba(15, 23, 42, 0.08);
+  color: $text-secondary;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.level-filter-chip.active {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #047857;
+  font-weight: 900;
 }
 
 .entry-card {

@@ -146,6 +146,20 @@ model DistributionSetting {
   referralReward       Int      @default(20) @map("referral_reward")
   minWithdrawalAmount  Int      @default(1000) @map("min_withdrawal_amount")
   withdrawalFreezeDays Int      @default(7) @map("withdrawal_freeze_days")
+  transferSceneId      String   @default("1005") @map("transfer_scene_id")
+  transferSceneName    String   @default("佣金报酬") @map("transfer_scene_name")
+  transferDailyLimit   Int      @default(5000000) @map("transfer_daily_limit")
+  transferSingleMin    Int      @default(10) @map("transfer_single_min")
+  transferSingleMax    Int      @default(20000) @map("transfer_single_max")
+  transferUserDailyLimit Int    @default(200000) @map("transfer_user_daily_limit")
+  transferNotifyUrl    String?  @map("transfer_notify_url")
+  transferUserConfirm  Boolean  @default(true) @map("transfer_user_confirm")
+  transferReportJobType String   @default("推广服务") @map("transfer_report_job_type")
+  transferReportRewardDesc String @default("涨识推荐合作佣金报酬") @map("transfer_report_reward_desc")
+  recurringCommissionEnabled Boolean @default(false) @map("recurring_commission_enabled")
+  recurringLevel1Rate  Int      @default(1000) @map("recurring_level1_rate")
+  recurringLevel2Rate  Int      @default(500) @map("recurring_level2_rate")
+  recurringCommissionDays Int   @default(180) @map("recurring_commission_days")
   updatedAt            DateTime @updatedAt @map("updated_at")
   createdAt            DateTime @default(now()) @map("created_at")
 
@@ -232,6 +246,15 @@ model DistributionWithdrawal {
   remark        String?
   adminRemark   String?     @map("admin_remark")
   transferNo    String?     @map("transfer_no")
+  outBillNo      String?     @unique @map("out_bill_no")
+  wechatTransferBillNo String? @map("wechat_transfer_bill_no")
+  transferState  String?    @map("transfer_state")
+  transferPackageInfo String? @map("transfer_package_info")
+  transferSceneId String?   @map("transfer_scene_id")
+  transferFailReason String? @map("transfer_fail_reason")
+  transferRemark String?    @map("transfer_remark")
+  transferRequestedAt DateTime? @map("transfer_requested_at")
+  transferConfirmedAt DateTime? @map("transfer_confirmed_at")
   requestedAt   DateTime    @default(now()) @map("requested_at")
   reviewedAt    DateTime?   @map("reviewed_at")
   paidAt        DateTime?   @map("paid_at")
@@ -242,6 +265,8 @@ model DistributionWithdrawal {
   @@index([distributorId, createdAt])
   @@index([status, createdAt])
   @@index([userId])
+  @@index([outBillNo])
+  @@index([wechatTransferBillNo])
   @@map("distribution_withdrawals")
 }
 
@@ -291,6 +316,7 @@ model Article {
 
 model AiConfig {
   id             String   @id @default(uuid())
+  provider       String   @default("deepseek")
   model          String   @default("deepseek-chat")
   temperature    Float    @default(0.7)
   maxTokens      Int      @default(2000) @map("max_tokens")
@@ -303,6 +329,13 @@ model AiConfig {
   freeAskLimit   Int      @default(2) @map("free_ask_limit")
   apiKey         String?  @map("api_key")
   apiBaseUrl     String?  @map("api_base_url")
+  bailianModel   String?  @default("qwen3.7-max") @map("bailian_model")
+  bailianApiKey  String?  @map("bailian_api_key")
+  bailianBaseUrl String?  @map("bailian_base_url")
+  normalModel    String?  @default("global") @map("normal_model")
+  deepModel      String?  @default("global") @map("deep_model")
+  normalMaxTokens Int?    @default(700) @map("normal_max_tokens")
+  deepMaxTokens  Int?     @default(2600) @map("deep_max_tokens")
   timeout        Int      @default(30000)
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -319,6 +352,7 @@ model WechatPayConfig {
   privateKeyPath        String?  @map("private_key_path")
   platformPublicKeyPath String?  @map("platform_public_key_path")
   notifyUrl             String?  @map("notify_url")
+  transferNotifyUrl     String?  @map("transfer_notify_url")
   updatedAt             DateTime @updatedAt @map("updated_at")
   createdAt             DateTime @default(now()) @map("created_at")
 
@@ -364,7 +398,7 @@ model Skill {
   name         String
   description  String?
   systemPrompt String   @map("system_prompt")
-  model        String   @default("deepseek-chat")
+  model        String   @default("global")
   temperature  Float?
   maxTokens    Int?     @map("max_tokens")
   topP         Float?   @map("top_p")
@@ -657,6 +691,7 @@ model VolunteerReport {
   province       String
   year           Int
   subjectType    String   @map("subject_type")
+  title          String?
   score          Int
   rank           Int?
   input          String

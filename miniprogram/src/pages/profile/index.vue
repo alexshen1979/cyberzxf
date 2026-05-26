@@ -121,6 +121,7 @@ const userStore = useUserStore();
 
 const showEditDialog = ref(false);
 const editForm = reactive({ nickname: '', phone: '', avatar: '' });
+const pendingAvatarPath = ref('');
 const publicFreeGift = ref(100);
 
 const profileSubtitle = computed(() => {
@@ -195,24 +196,71 @@ function openEditDialog() {
   editForm.nickname = info?.nickname || '';
   editForm.phone = info?.phone || '';
   editForm.avatar = info?.avatar || '';
+  pendingAvatarPath.value = '';
   showEditDialog.value = true;
 }
 
 async function saveProfile() {
   try {
-    await userStore.updateProfile({
+    let avatar = editForm.avatar;
+    if (pendingAvatarPath.value) {
+      uni.showLoading({ title: '上传头像...', mask: true });
+      const dataUrl = await readImageAsDataUrl(pendingAvatarPath.value);
+      const uploadRes = await api.auth.uploadAvatar(dataUrl) as any;
+      avatar = uploadRes.data.avatar;
+      editForm.avatar = avatar;
+      pendingAvatarPath.value = '';
+      userStore.userInfo = Object.assign({}, userStore.userInfo, uploadRes.data.user);
+      uni.hideLoading();
+    }
+    const payload: Record<string, any> = {
       nickname: editForm.nickname.trim(),
-      avatar: editForm.avatar,
-    });
+    };
+    if (!isTemporaryAvatar(avatar)) payload.avatar = avatar;
+    await userStore.updateProfile(payload);
     uni.showToast({ title: '保存成功', icon: 'success' });
     showEditDialog.value = false;
   } catch (e: any) {
+    uni.hideLoading();
     uni.showToast({ title: e.message || '保存失败', icon: 'error' });
   }
 }
 
 function onChooseAvatar(event: any) {
-  editForm.avatar = event?.detail?.avatarUrl || editForm.avatar;
+  const avatarUrl = event?.detail?.avatarUrl || '';
+  if (!avatarUrl) return;
+  editForm.avatar = avatarUrl;
+  pendingAvatarPath.value = avatarUrl;
+}
+
+function readImageAsDataUrl(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fs = (uni as any).getFileSystemManager?.();
+    if (!fs) {
+      reject(new Error('当前环境不支持读取头像文件'));
+      return;
+    }
+    fs.readFile({
+      filePath,
+      encoding: 'base64',
+      success: (res: any) => {
+        const mime = avatarMimeFromPath(filePath);
+        resolve(`data:${mime};base64,${res.data}`);
+      },
+      fail: (err: any) => reject(new Error(err?.errMsg || '头像读取失败')),
+    });
+  });
+}
+
+function avatarMimeFromPath(filePath: string) {
+  const lower = String(filePath || '').toLowerCase();
+  if (lower.includes('.webp')) return 'image/webp';
+  if (lower.includes('.png')) return 'image/png';
+  return 'image/jpeg';
+}
+
+function isTemporaryAvatar(value: string) {
+  return /^(wxfile|http:\/\/tmp|https?:\/\/tmp|file):/i.test(String(value || ''));
 }
 
 function maskPhone(phone?: string) {

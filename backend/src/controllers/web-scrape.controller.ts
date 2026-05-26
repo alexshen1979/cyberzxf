@@ -1,8 +1,8 @@
 import { Context } from 'koa';
 import * as cheerio from 'cheerio';
 import { createLogger } from '../utils/logger';
-import { config } from '../config';
 import { prisma } from '../utils/prisma';
+import { chatCompletionsUrl, resolveAiRuntime } from '../services/ai-runtime.service';
 
 const logger = createLogger('web-scrape');
 
@@ -190,7 +190,7 @@ export async function webScrape(ctx: Context) {
   }
 }
 
-// ─── AI 润色（DeepSeek 重写标题和内容） ─────────────────
+// ─── AI 润色（按后台 AI 配置重写标题和内容） ─────────────────
 
 export async function webPolish(ctx: Context) {
   const { title, content, type } = ctx.request.body as { title: string; content: string; type: 'article' | 'knowledge' };
@@ -202,23 +202,18 @@ export async function webPolish(ctx: Context) {
   }
 
   try {
-    // 解析 API 凭证：优先从 DB 读取，留空则回退环境变量
-    let apiKey = config.deepseek.apiKey;
-    let baseUrl = config.deepseek.baseUrl;
+    let runtime = resolveAiRuntime();
 
     try {
       const aiConfig = await prisma.aiConfig.findFirst();
-      if (aiConfig) {
-        if (aiConfig.apiKey && aiConfig.apiKey.trim()) apiKey = aiConfig.apiKey;
-        if (aiConfig.apiBaseUrl && aiConfig.apiBaseUrl.trim()) baseUrl = aiConfig.apiBaseUrl;
-      }
+      runtime = resolveAiRuntime(aiConfig);
     } catch {
       // fallback to env config
     }
 
-    if (!apiKey) {
+    if (!runtime.apiKey) {
       ctx.status = 500;
-      ctx.body = { success: false, message: 'DeepSeek API Key 未配置，请在管理后台 AI 配置中设置' };
+      ctx.body = { success: false, message: `${runtime.providerName} API Key 未配置，请在管理后台 AI 配置中设置` };
       return;
     }
 
@@ -272,14 +267,14 @@ ${content.slice(0, 8000)}
 
     const prompt = isKnowledge ? knowledgePrompt : articlePrompt;
 
-    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+    const response = await fetch(chatCompletionsUrl(runtime.baseUrl), {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${runtime.apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: runtime.model,
         messages: [
           { role: 'system', content: '你是一个专业的内容编辑，擅长润色和整理文章内容。你的输出干净、结构清晰、没有废话。' },
           { role: 'user', content: prompt },
@@ -292,7 +287,7 @@ ${content.slice(0, 8000)}
 
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
-      logger.error('DeepSeek 润色请求失败: %s %s', response.status, errText);
+      logger.error('%s 润色请求失败: %s %s', runtime.providerName, response.status, errText);
       ctx.status = 502;
       ctx.body = { success: false, message: `AI 润色服务暂时不可用 (${response.status})` };
       return;

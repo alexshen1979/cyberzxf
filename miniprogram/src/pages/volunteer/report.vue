@@ -2,8 +2,17 @@
   <view class="report-page">
     <view class="summary-card">
       <text class="eyebrow">AI 志愿分析报告</text>
-      <text class="title">{{ reportTitle }}</text>
+      <view class="title-row">
+        <text class="title">{{ displayReportTitle }}</text>
+        <text class="title-edit" v-if="currentReportId()" @click="editReportTitle">改名</text>
+      </view>
       <text class="summary">{{ data?.summary || result?.summary || '正在加载报告...' }}</text>
+      <view class="summary-actions" v-if="currentReportId()">
+        <view class="favorite-pill" :class="{ active: isFavorited }" @click="toggleFavorite">
+          <image class="favorite-icon" :src="favoriteIcon" mode="aspectFit" />
+          <text>{{ isFavorited ? '已收藏' : '收藏报告' }}</text>
+        </view>
+      </view>
     </view>
 
     <view class="decision-card">
@@ -86,6 +95,9 @@
                 </view>
               </view>
               <text class="reason">{{ displayReason(item) }}</text>
+              <view class="school-actions">
+                <text class="school-ask-btn" @click.stop="askAboutSchool(item)">问问这所学校</text>
+              </view>
             </view>
           </view>
           <view class="more-row" v-if="groupTotal(group) > initialGroupLimit || currentGroupLimit(group.key) > initialGroupLimit">
@@ -134,7 +146,7 @@
           <text class="cover-brand">涨识 · 赛博张老师</text>
           <text class="cover-date">{{ formattedReportDate }}</text>
         </view>
-        <text class="cover-title">{{ reportTitle }}志愿分析</text>
+        <text class="cover-title">{{ displayReportTitle }}志愿分析</text>
         <text class="cover-summary">{{ result?.summary || data?.summary || '报告正在整理中。' }}</text>
         <view class="cover-tags">
           <text class="cover-tag">位次优先</text>
@@ -246,6 +258,7 @@ import { computed, ref } from 'vue';
 import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app';
 import { api } from '@/api';
 import { useUserStore } from '@/store/user';
+import { buildIconSrc } from '@/utils/iconSvgs';
 import { recordShare, withShareRef } from '@/utils/share';
 
 const userStore = useUserStore();
@@ -256,10 +269,12 @@ const groupDisplayLimits = ref<Record<string, number>>({});
 const loadingMoreGroup = ref('');
 const exportingType = ref<'pdf' | 'image' | ''>('');
 const exportCosts = ref({ pdf: 3, image: 5 });
+const isFavorited = ref(false);
 const initialGroupLimit = 12;
 const loadMoreStep = 12;
 const result = computed(() => data.value?.result || data.value);
 const markdownReport = computed(() => data.value?.markdownReport || '');
+const favoriteIcon = computed(() => buildIconSrc('Star', isFavorited.value ? '#ffffff' : '#b45309'));
 const PUBLIC_FIGURE_TERM = ['张', '雪', '峰'].join('');
 const FIXED_NOTICE_TITLE = ['免', '责', '声', '明'].join('');
 
@@ -322,6 +337,8 @@ const reportTitle = computed(() => {
   }
   return `${source.province} ${source.subjectType || ''} ${source.score || ''}分`;
 });
+
+const displayReportTitle = computed(() => data.value?.title || reportTitle.value);
 
 const isArtReport = computed(() => {
   const source = data.value?.input || data.value;
@@ -511,7 +528,7 @@ function buildExportFilename(type: 'pdf' | 'image') {
     '涨识',
     '志愿分析报告',
     userName,
-    reportTitle.value,
+    displayReportTitle.value,
     formattedReportDate.value.replace(/\./g, ''),
     reportId ? reportId.slice(0, 8) : '',
   ].filter(Boolean);
@@ -621,7 +638,10 @@ async function loadReport(id?: string) {
   const latestId = latest?.reportId || latest?.id;
   if (latest && (!id || latestId === id)) {
     data.value = latest;
-    if (latest.input || !id) return;
+    if (latest.input || !id) {
+      await loadFavoriteState();
+      return;
+    }
   }
   if (!id) return;
 
@@ -629,9 +649,44 @@ async function loadReport(id?: string) {
     const res = await api.volunteer.detail(id);
     data.value = res.data;
     uni.setStorageSync('latest_volunteer_report', res.data);
+    await loadFavoriteState();
   } catch (err: any) {
     uni.showToast({ title: err?.message || '报告加载失败', icon: 'none' });
   }
+}
+
+function collapseAllGroups() {
+  collapsedGroups.value = { rush: true, stable: true, safe: true };
+}
+
+async function loadFavoriteState() {
+  const reportId = currentReportId();
+  if (!reportId || !hasLoginToken()) return;
+  try {
+    const res = await api.favorites.check('volunteer_report', reportId);
+    isFavorited.value = Boolean((res.data as any)?.favorited);
+  } catch { /* ignore */ }
+}
+
+async function toggleFavorite() {
+  const reportId = currentReportId();
+  if (!reportId) return;
+  if (!hasLoginToken()) {
+    userStore.loginWithWechatProfile();
+    return;
+  }
+  try {
+    const res = await api.favorites.toggle('volunteer_report', reportId);
+    const result = res.data as any;
+    isFavorited.value = Boolean(result.favorited);
+    uni.showToast({ title: result.favorited ? '已收藏' : '已取消', icon: 'none' });
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '操作失败', icon: 'none' });
+  }
+}
+
+function hasLoginToken() {
+  return userStore.isLogin || Boolean(uni.getStorageSync('token'));
 }
 
 async function loadExportCosts() {
@@ -659,14 +714,90 @@ function askFollowup() {
     .filter(Boolean)
     .join('；');
   const text = `请基于我的高考志愿分析报告继续帮我细化方案。
-报告：${reportTitle.value}
+报告：${displayReportTitle.value}
 结论：${result.value?.summary || ''}
 候选院校：${brief || '暂无足够候选'}
 我想继续比较院校、专业组风险、调剂风险和最终排序。`;
   userStore.consultQuestion = text;
-  userStore.consultType = 'gaokao';
+  userStore.consultType = 'deep';
+  userStore.consultContext = buildReportConsultContext();
+  userStore.forceNewConsult = true;
   userStore.pendingConsult = true;
   uni.switchTab({ url: '/pages/consult/index' });
+}
+
+async function editReportTitle() {
+  const reportId = currentReportId();
+  if (!reportId) return;
+  try {
+    const modal = await uni.showModal({
+      title: '修改报告名称',
+      editable: true,
+      placeholderText: '输入新的报告名称',
+      content: displayReportTitle.value,
+      confirmText: '保存',
+      cancelText: '取消',
+    } as any);
+    if (!modal.confirm) return;
+    const title = String((modal as any).content || '').trim();
+    if (!title) {
+      uni.showToast({ title: '报告名称不能为空', icon: 'none' });
+      return;
+    }
+    const res = await api.volunteer.updateReportTitle(reportId, title);
+    data.value = Object.assign({}, data.value, { title: res.data?.title || title });
+    uni.setStorageSync('latest_volunteer_report', data.value);
+    uni.showToast({ title: '已保存', icon: 'none' });
+  } catch (err: any) {
+    uni.showToast({ title: err?.message || '修改失败', icon: 'none' });
+  }
+}
+
+function askAboutSchool(item: any) {
+  const schoolName = item?.universityName || item?.name;
+  if (!schoolName) return;
+  userStore.consultQuestion = `请基于这份志愿分析报告，帮我分析 ${schoolName}：放在冲稳保哪一档更合适、专业组和调剂风险在哪里、是否符合我的偏好。`;
+  userStore.consultType = 'deep';
+  userStore.consultContext = buildReportConsultContext(item);
+  userStore.forceNewConsult = true;
+  userStore.pendingConsult = true;
+  uni.switchTab({ url: '/pages/consult/index' });
+}
+
+function buildReportConsultContext(school?: any) {
+  const input = reportInput.value || data.value?.input || {};
+  const rec = result.value?.recommendations || {};
+  const brief = ['rush', 'stable', 'safe']
+    .map(key => {
+      const names = ((rec[key] || []) as any[]).slice(0, 5).map(item => item.universityName).filter(Boolean).join('、');
+      const label = key === 'rush' ? '冲刺' : key === 'safe' ? '保底' : '稳妥';
+      return names ? `${label}：${names}` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+  return [
+    currentReportId() ? `志愿报告ID：${currentReportId()}` : '',
+    input.province ? `考生省份：${input.province}` : '',
+    input.subjectType ? `选科/科类：${input.subjectType}` : '',
+    input.score ? `分数：${input.score}` : '',
+    input.rank ? `位次：${input.rank}` : '',
+    input.targetBatch ? `批次：${input.targetBatch}` : '',
+    input.riskPreference ? `风险偏好：${riskPreferenceLabel(input.riskPreference)}` : '',
+    Array.isArray(input.preferredCities) && input.preferredCities.length ? `目标城市或省份：${input.preferredCities.join('、')}` : '',
+    Array.isArray(input.preferredMajors) && input.preferredMajors.length ? `偏好专业：${input.preferredMajors.join('、')}` : '',
+    Array.isArray(input.avoidMajors) && input.avoidMajors.length ? `规避专业：${input.avoidMajors.join('、')}` : '',
+    input.familyExpectation ? `家庭/个人期待：${String(input.familyExpectation).slice(0, 220)}` : '',
+    result.value?.summary ? `报告结论：${result.value.summary}` : '',
+    brief ? `报告候选：\n${brief}` : '',
+    school?.universityName ? `关注院校：${school.universityName}` : '',
+    [school?.province, school?.city].filter(Boolean).length ? `院校城市：${[school?.province, school?.city].filter(Boolean).join(' · ')}` : '',
+    school?.type ? `院校类型：${school.type}` : '',
+    school?.level ? `院校层次：${school.level}` : '',
+    school?.bucket ? `报告分档：${bucketLabel(school.bucket)}` : '',
+    school?.reason ? `报告推荐理由：${school.reason}` : '',
+    school?.warningTags?.length ? `报告风险标签：${school.warningTags.join('、')}` : '',
+    school?.preferenceTags?.length ? `报告偏好命中：${school.preferenceTags.join('、')}` : '',
+  ].filter(Boolean).join('\n');
 }
 
 function openUniversity(item: any) {
@@ -871,6 +1002,7 @@ function displayReason(item: any) {
 }
 
 onLoad((query: any) => {
+  collapseAllGroups();
   loadReport(query?.id);
   loadExportCosts();
 });
@@ -880,7 +1012,7 @@ onShareAppMessage(() => {
   const path = withShareRef(id ? `/pages/volunteer/report?id=${id}` : '/pages/volunteer/index');
   recordShare('friend', path);
   return {
-    title: reportTitle.value || '涨识 志愿分析报告',
+    title: displayReportTitle.value || '涨识 志愿分析报告',
     path,
   };
 });
@@ -890,7 +1022,7 @@ onShareTimeline(() => {
   const path = withShareRef(id ? `/pages/volunteer/report?id=${id}` : '/pages/volunteer/index');
   recordShare('timeline', path);
   return {
-    title: reportTitle.value || '涨识 志愿分析报告',
+    title: displayReportTitle.value || '涨识 志愿分析报告',
     query: path.split('?')[1] || '',
   };
 });
@@ -957,17 +1089,74 @@ onShareTimeline(() => {
 
 .title {
   display: block;
+  flex: 1;
+  min-width: 0;
   color: $text-primary;
   font-size: 40rpx;
   font-weight: 800;
   margin-bottom: $spacing-xs;
   line-height: 1.2;
+  word-break: break-all;
+}
+
+.title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14rpx;
+  margin-bottom: $spacing-xs;
+}
+
+.title-edit {
+  flex-shrink: 0;
+  margin-top: 4rpx;
+  padding: 7rpx 16rpx;
+  border-radius: $radius-full;
+  background: #eef4e8;
+  color: #60723f;
+  border: 1rpx solid rgba(111, 125, 74, 0.22);
+  font-size: 22rpx;
+  font-weight: 800;
 }
 
 .summary {
+  display: block;
   color: $text-secondary;
   font-size: $font-sm;
   line-height: 1.6;
+}
+
+.summary-actions {
+  display: flex;
+  align-items: center;
+  margin-top: 20rpx;
+}
+
+.favorite-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  padding: 13rpx 24rpx;
+  border-radius: $radius-full;
+  background: #fff7ed;
+  color: #b45309;
+  border: 2rpx solid rgba(180, 83, 9, 0.22);
+  font-size: 24rpx;
+  font-weight: 900;
+  box-shadow: 0 8rpx 20rpx rgba(180, 83, 9, 0.10);
+}
+
+.favorite-pill.active {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 10rpx 24rpx rgba(217, 119, 6, 0.24);
+}
+
+.favorite-icon {
+  width: 28rpx;
+  height: 28rpx;
+  flex-shrink: 0;
 }
 
 .tabs {
@@ -1177,6 +1366,22 @@ onShareTimeline(() => {
   margin-top: 6rpx;
   line-height: 1.5;
   word-break: break-all;
+}
+
+.school-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14rpx;
+}
+
+.school-ask-btn {
+  padding: 9rpx 18rpx;
+  border-radius: $radius-full;
+  background: #eef4e8;
+  color: #60723f;
+  border: 1rpx solid rgba(111, 125, 74, 0.20);
+  font-size: 23rpx;
+  font-weight: 800;
 }
 
 .reason {

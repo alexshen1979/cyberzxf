@@ -5,6 +5,7 @@ import {
   listVolunteerReports,
   previewVolunteer,
   getArtAdmissionSupport,
+  updateVolunteerReportTitle,
   VolunteerAnalyzeInput,
 } from '../services/volunteer-analysis.service';
 import {
@@ -48,6 +49,13 @@ export async function reportDetail(ctx: Context) {
   const userId = ctx.state.user.userId;
   const result = await getVolunteerReport(userId, ctx.params.id);
   ctx.body = { success: true, data: result };
+}
+
+export async function updateReportTitle(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  const { title } = ctx.request.body as any;
+  const result = await updateVolunteerReportTitle(userId, ctx.params.id, title);
+  ctx.body = { success: true, data: result, message: '报告名称已更新' };
 }
 
 export async function exportReport(ctx: Context) {

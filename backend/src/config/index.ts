@@ -38,11 +38,16 @@ export const config = {
       privateKeyPath: process.env.WECHAT_PAY_PRIVATE_KEY_PATH!,
       platformPublicKeyPath: process.env.WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH || '',
       notifyUrl: process.env.WECHAT_PAY_NOTIFY_URL || '',
+      transferNotifyUrl: process.env.WECHAT_TRANSFER_NOTIFY_URL || '',
     },
   },
   deepseek: {
     apiKey: process.env.DEEPSEEK_API_KEY || '',
     baseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+  },
+  bailian: {
+    apiKey: process.env.BAILIAN_API_KEY || process.env.DASHSCOPE_API_KEY || '',
+    baseUrl: process.env.BAILIAN_BASE_URL || process.env.DASHSCOPE_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   },
   oss: {
     endpoint: process.env.OSS_ENDPOINT,
@@ -81,6 +86,9 @@ export function validateConfig(): void {
 
   if (!config.deepseek.apiKey) {
     console.warn('⚠️  DEEPSEEK_API_KEY 未设置，请在管理后台 AI 配置中设置或添加环境变量');
+  }
+  if (!config.bailian.apiKey) {
+    console.warn('⚠️  BAILIAN_API_KEY/DASHSCOPE_API_KEY 未设置，如需使用阿里百炼请在管理后台 AI 配置中设置或添加环境变量');
   }
 }
 

@@ -42,10 +42,29 @@
           <el-input v-model="form.systemPrompt" type="textarea" :rows="15" placeholder="AI 人设和回答规则指令（支持 Markdown）" />
         </el-form-item>
         <el-form-item label="模型">
-          <el-radio-group v-model="form.model">
-            <el-radio value="deepseek-chat">DeepSeek V4 Pro</el-radio>
-            <el-radio value="deepseek-flash">DeepSeek Flash</el-radio>
-          </el-radio-group>
+          <el-select v-model="form.model" filterable placeholder="请选择模型">
+            <el-option-group label="通用">
+              <el-option label="跟随全局配置" value="global" />
+            </el-option-group>
+            <el-option-group label="DeepSeek 官方">
+              <el-option label="DeepSeek v4" value="deepseek-chat" />
+              <el-option label="DeepSeek Flash" value="deepseek-flash" />
+            </el-option-group>
+            <el-option-group label="阿里百炼 Token Plan">
+              <el-option
+                v-for="item in bailianTextModels"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              >
+                <div class="model-option">
+                  <span>{{ item.label }}</span>
+                  <small>{{ item.ability }}</small>
+                </div>
+              </el-option>
+            </el-option-group>
+          </el-select>
+          <div class="form-tip">单个 Skill 可覆盖全局模型；百炼模型会走管理后台 AI 配置里的百炼 API Key。</div>
         </el-form-item>
         <el-row :gutter="16">
           <el-col :span="8">
@@ -107,11 +126,25 @@ const dialogVisible = ref(false);
 const editingId = ref('');
 const keywordsStr = ref('');
 
+const bailianTextModels = [
+  { label: 'qwen3.7-max', value: 'qwen3.7-max', ability: '推理模型、文本生成' },
+  { label: 'qwen3.6-plus', value: 'qwen3.6-plus', ability: '推理模型、视觉理解、文本生成' },
+  { label: 'qwen3.6-flash', value: 'qwen3.6-flash', ability: '推理模型、视觉理解、文本生成' },
+  { label: 'deepseek-v4-pro', value: 'deepseek-v4-pro', ability: '推理模型、文本生成' },
+  { label: 'deepseek-v4-flash', value: 'deepseek-v4-flash', ability: '文本生成、推理模型' },
+  { label: 'deepseek-v3.2', value: 'deepseek-v3.2', ability: '推理模型、文本生成' },
+  { label: 'kimi-k2.6', value: 'kimi-k2.6', ability: '推理模型、视觉理解、文本生成' },
+  { label: 'kimi-k2.5', value: 'kimi-k2.5', ability: '推理模型、视觉理解、文本生成' },
+  { label: 'glm-5.1', value: 'glm-5.1', ability: '文本生成' },
+  { label: 'glm-5', value: 'glm-5', ability: '文本生成' },
+  { label: 'MiniMax-M2.5', value: 'MiniMax-M2.5', ability: '推理模型、文本生成' },
+];
+
 const form = reactive({
   name: '',
   description: '',
   systemPrompt: '',
-  model: 'deepseek-chat',
+  model: 'global',
   temperature: null as number | null,
   maxTokens: null as number | null,
   topP: null as number | null,
@@ -152,7 +185,7 @@ function openDialog(row?: any) {
       name: '',
       description: '',
       systemPrompt: '',
-      model: 'deepseek-chat',
+      model: 'global',
       temperature: null,
       maxTokens: null,
       topP: null,
@@ -226,4 +259,23 @@ onMounted(load);
 <style lang="scss" scoped>
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 h2 { margin: 0; }
+
+.form-tip {
+  margin-top: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+
+  small {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+  }
+}
 </style>

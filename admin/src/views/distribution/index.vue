@@ -1,8 +1,8 @@
 <template>
   <div class="distribution-page">
-    <h2>推荐合作</h2>
+    <h2>{{ pageTitle }}</h2>
 
-    <div class="stat-overview">
+    <div v-if="activeSection === 'overview'" class="stat-overview">
       <el-card class="stat-card people-stat-card">
         <div class="stat-card-head">
           <span class="stat-label">合作人员</span>
@@ -33,7 +33,7 @@
       </el-card>
     </div>
 
-    <el-card class="panel-card">
+    <el-card v-if="activeSection === 'overview'" class="panel-card">
       <template #header>
         <div class="card-head">
           <span>推荐奖励规则</span>
@@ -52,6 +52,21 @@
           <el-input-number v-model="settingsForm.level2Percent" :min="0" :max="100" :precision="2" :step="1" />
           <span class="hint">%</span>
         </el-form-item>
+        <el-form-item label="启用复充奖励">
+          <el-switch v-model="settingsForm.recurringCommissionEnabled" />
+        </el-form-item>
+        <el-form-item label="复充特邀总比例">
+          <el-input-number v-model="settingsForm.recurringLevel1Percent" :min="0" :max="100" :precision="2" :step="0.5" />
+          <span class="hint">%</span>
+        </el-form-item>
+        <el-form-item label="复充推荐官比例">
+          <el-input-number v-model="settingsForm.recurringLevel2Percent" :min="0" :max="100" :precision="2" :step="0.5" />
+          <span class="hint">%</span>
+        </el-form-item>
+        <el-form-item label="复充有效期">
+          <el-input-number v-model="settingsForm.recurringCommissionDays" :min="0" :max="730" :precision="0" :step="30" />
+          <span class="hint">天</span>
+        </el-form-item>
         <el-form-item label="每日分享赠点">
           <el-input-number v-model="settingsForm.dailyShareReward" :min="0" :max="100000" :precision="0" :step="1" />
           <span class="hint">点，每人每天最多一次</span>
@@ -68,11 +83,52 @@
           <el-input-number v-model="settingsForm.withdrawalFreezeDays" :min="0" :max="90" :precision="0" :step="1" />
           <span class="hint">天</span>
         </el-form-item>
-        <span class="formula">推荐官成单时：推荐官拿 {{ settingsForm.level2Percent }}%，所属特邀合作伙伴拿 {{ Math.max(0, settingsForm.level1Percent - settingsForm.level2Percent).toFixed(2) }}%</span>
+        <div class="transfer-rule-box">
+          <div class="transfer-rule-head">
+            <span>商家转账规则</span>
+            <span>按微信支付商家转账场景限制提现额度</span>
+          </div>
+          <div class="transfer-rule-form">
+            <el-form-item label="转账场景">
+              <el-input v-model="settingsForm.transferSceneName" style="width: 120px" />
+              <span class="hint">ID</span>
+              <el-input v-model="settingsForm.transferSceneId" style="width: 92px" />
+            </el-form-item>
+            <el-form-item label="单日转账额度">
+              <el-input-number v-model="settingsForm.transferDailyLimitYuan" :min="0.1" :max="50000" :precision="2" :step="1000" />
+              <span class="hint">元</span>
+            </el-form-item>
+            <el-form-item label="单笔转账额度">
+              <el-input-number v-model="settingsForm.transferSingleMinYuan" :min="0.1" :max="200" :precision="2" :step="0.1" />
+              <span class="hint">至</span>
+              <el-input-number v-model="settingsForm.transferSingleMaxYuan" :min="0.1" :max="200" :precision="2" :step="10" />
+              <span class="hint">元</span>
+            </el-form-item>
+            <el-form-item label="单日单用户额度">
+              <el-input-number v-model="settingsForm.transferUserDailyLimitYuan" :min="0.1" :max="2000" :precision="2" :step="100" />
+              <span class="hint">元</span>
+            </el-form-item>
+            <el-form-item label="用户确认收款">
+              <el-switch v-model="settingsForm.transferUserConfirm" />
+              <span class="hint">开启后小程序需调起微信确认收款</span>
+            </el-form-item>
+            <el-form-item label="岗位类型">
+              <el-input v-model="settingsForm.transferReportJobType" style="width: 180px" />
+            </el-form-item>
+            <el-form-item label="报酬说明">
+              <el-input v-model="settingsForm.transferReportRewardDesc" style="width: 260px" />
+            </el-form-item>
+            <el-form-item label="转账回调地址">
+              <el-input v-model="settingsForm.transferNotifyUrl" style="width: 420px" placeholder="留空则使用支付配置里的商家转账回调地址" />
+            </el-form-item>
+          </div>
+          <span class="hint">当前官方规则：佣金报酬(ID=1005)，单笔 ¥0.10 ~ ¥200.00，单日 ¥50,000.00，单日向单用户 ¥2,000.00。</span>
+        </div>
+        <span class="formula">首充：推荐官拿 {{ settingsForm.level2Percent }}%，所属特邀合作伙伴拿 {{ Math.max(0, settingsForm.level1Percent - settingsForm.level2Percent).toFixed(2) }}%。复充：{{ settingsForm.recurringCommissionEnabled ? `推荐官拿 ${settingsForm.recurringLevel2Percent}%，所属特邀合作伙伴拿 ${Math.max(0, settingsForm.recurringLevel1Percent - settingsForm.recurringLevel2Percent).toFixed(2)}%，限 ${settingsForm.recurringCommissionDays} 天内` : '未启用' }}</span>
       </el-form>
     </el-card>
 
-    <el-card class="panel-card">
+    <el-card v-if="activeSection === 'distributors'" class="panel-card">
       <template #header>
         <div class="card-head">
           <span>合作人员</span>
@@ -127,7 +183,7 @@
                   <template #default="{ row: child }">
                     <el-button v-if="child.status === 'pending'" type="success" link @click="reviewDistributor(child, 'active')">通过</el-button>
                     <el-button v-if="child.status === 'pending'" type="danger" link @click="reviewDistributor(child, 'rejected')">驳回</el-button>
-                    <el-button type="primary" link @click="openLedgerDialog(child)">流水</el-button>
+                    <el-button v-if="store.isFullAdmin" type="primary" link @click="openLedgerDialog(child)">流水</el-button>
                     <el-button type="primary" link @click="openDistributorDialog(child)">编辑</el-button>
                   </template>
                 </el-table-column>
@@ -175,7 +231,7 @@
             <template v-if="!row.isGroup">
               <el-button v-if="row.status === 'pending'" type="success" link @click="reviewDistributor(row, 'active')">通过</el-button>
               <el-button v-if="row.status === 'pending'" type="danger" link @click="reviewDistributor(row, 'rejected')">驳回</el-button>
-              <el-button type="primary" link @click="openLedgerDialog(row)">流水</el-button>
+              <el-button v-if="store.isFullAdmin" type="primary" link @click="openLedgerDialog(row)">流水</el-button>
               <el-button type="primary" link @click="openDistributorDialog(row)">编辑</el-button>
             </template>
             <span v-else>--</span>
@@ -192,13 +248,12 @@
       />
     </el-card>
 
-    <el-card class="panel-card">
+    <el-card v-if="activeSection === 'commissions'" class="panel-card">
       <template #header>
         <div class="card-head">
           <span>推荐奖励流水</span>
           <div class="head-actions">
-            <el-button @click="loadCommissions">刷新奖励</el-button>
-            <el-button @click="loadWithdrawals">刷新提现</el-button>
+            <el-button @click="loadCommissions">刷新</el-button>
           </div>
         </div>
       </template>
@@ -245,7 +300,7 @@
       />
     </el-card>
 
-    <el-card class="panel-card">
+    <el-card v-if="activeSection === 'withdrawals'" class="panel-card">
       <template #header>
         <div class="card-head">
           <span>提现申请</span>
@@ -253,6 +308,8 @@
             <el-select v-model="withdrawalStatusFilter" placeholder="状态" clearable style="width: 140px" @change="loadWithdrawals">
               <el-option label="待审核" value="pending" />
               <el-option label="已通过" value="approved" />
+              <el-option label="转账中" value="transferring" />
+              <el-option label="待用户确认" value="wait_user_confirm" />
               <el-option label="已打款" value="paid" />
               <el-option label="已驳回" value="rejected" />
               <el-option label="打款失败" value="failed" />
@@ -282,15 +339,27 @@
           </template>
         </el-table-column>
         <el-table-column prop="adminRemark" label="备注" min-width="160" show-overflow-tooltip />
+        <el-table-column label="微信转账" min-width="210">
+          <template #default="{ row }">
+            <div class="main-cell">
+              <span>{{ row.transferState || '-' }}</span>
+              <span v-if="row.outBillNo">商户单号：{{ row.outBillNo }}</span>
+              <span v-if="row.wechatTransferBillNo">微信单号：{{ row.wechatTransferBillNo }}</span>
+              <span v-if="row.transferFailReason">失败：{{ row.transferFailReason }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="申请时间" width="170">
           <template #default="{ row }">{{ formatTime(row.requestedAt || row.createdAt) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 'pending'" type="success" link @click="reviewWithdrawal(row, 'approved')">通过</el-button>
             <el-button v-if="row.status === 'pending'" type="danger" link @click="reviewWithdrawal(row, 'rejected')">驳回</el-button>
-            <el-button v-if="row.status === 'approved' || row.status === 'pending'" type="primary" link @click="reviewWithdrawal(row, 'paid')">标记已打款</el-button>
-            <el-button v-if="row.status === 'approved'" type="warning" link @click="reviewWithdrawal(row, 'failed')">打款失败</el-button>
+            <el-button v-if="canStartWechatTransfer(row)" type="primary" link @click="startWechatTransfer(row)">微信转账</el-button>
+            <el-button v-if="row.outBillNo" type="info" link @click="queryWechatTransfer(row)">查询</el-button>
+            <el-button v-if="row.status === 'approved' || row.status === 'pending' || row.status === 'failed'" type="primary" link @click="reviewWithdrawal(row, 'paid')">人工已打款</el-button>
+            <el-button v-if="row.status === 'approved' || row.status === 'transferring' || row.status === 'wait_user_confirm'" type="warning" link @click="reviewWithdrawal(row, 'failed')">打款失败</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -323,9 +392,9 @@
             <el-option v-for="item in levelOneOptions" :key="item.id" :label="`${item.name}（${item.code}）`" :value="item.id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="distributorForm.level === 1" label="新用户赠点">
+        <el-form-item v-if="distributorForm.level === 1" label="新用户额外赠点">
           <el-input-number v-model="distributorForm.newUserGiftOverride" :min="0" :max="100000" :precision="0" :step="1" />
-          <span class="hint">留空使用点数管理里的系统默认值；设置后，该特邀伙伴及其推荐官邀请的新用户按此值赠送</span>
+          <span class="hint">留空或 0 表示不额外赠送；设置后，通过该特邀伙伴及其推荐官注册或绑定邀请码的新用户，会在系统默认赠点之外再获得该点数</span>
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="distributorForm.status" style="width: 100%">
@@ -422,19 +491,49 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { QuestionFilled } from '@element-plus/icons-vue';
 import { api } from '@/api';
+import { useAdminStore } from '@/store/admin';
+
+const route = useRoute();
+const store = useAdminStore();
+const validSections = ['overview', 'distributors', 'commissions', 'withdrawals'];
+const activeSection = computed(() => {
+  const section = String(route.meta.distributionSection || route.params.section || 'overview');
+  return validSections.includes(section) ? section : 'overview';
+});
+const pageTitle = computed(() => {
+  if (activeSection.value === 'distributors') return '合作人员';
+  if (activeSection.value === 'commissions') return '奖励流水';
+  if (activeSection.value === 'withdrawals') return '提现管理';
+  return '推荐合作';
+});
 
 const settingsForm = reactive({
   enabled: true,
   level1Percent: 50,
   level2Percent: 20,
+  recurringCommissionEnabled: false,
+  recurringLevel1Percent: 10,
+  recurringLevel2Percent: 5,
+  recurringCommissionDays: 180,
   dailyShareReward: 10,
   referralReward: 20,
   minWithdrawalYuan: 10,
   withdrawalFreezeDays: 7,
+  transferSceneId: '1005',
+  transferSceneName: '佣金报酬',
+  transferDailyLimitYuan: 50000,
+  transferSingleMinYuan: 0.1,
+  transferSingleMaxYuan: 200,
+  transferUserDailyLimitYuan: 2000,
+  transferNotifyUrl: '',
+  transferUserConfirm: true,
+  transferReportJobType: '推广服务',
+  transferReportRewardDesc: '涨识推荐合作佣金报酬',
 });
 const savingSettings = ref(false);
 
@@ -498,16 +597,51 @@ const metricCards = computed(() => [
   { label: '已提现', value: formatMoney(dashboard.value.paidWithdrawalAmount || 0) },
 ]);
 
+async function loadActiveSection(section = activeSection.value) {
+  if (!store.isFullAdmin && section !== 'distributors') return;
+  if (section === 'overview') {
+    await Promise.all([loadSettings(), loadDashboard()]);
+    return;
+  }
+  if (section === 'distributors') {
+    const tasks = [loadLevelOneOptions(), loadDistributors()];
+    if (store.isFullAdmin) tasks.push(loadDashboard());
+    await Promise.all(tasks);
+    return;
+  }
+  if (section === 'commissions') {
+    await loadCommissions();
+    return;
+  }
+  if (section === 'withdrawals') {
+    await Promise.all([loadDashboard(), loadWithdrawals()]);
+  }
+}
+
 async function loadSettings() {
   const res = await api.distribution.settings() as any;
   Object.assign(settingsForm, {
     enabled: res.data.enabled,
     level1Percent: res.data.level1Percent,
     level2Percent: res.data.level2Percent,
+    recurringCommissionEnabled: res.data.recurringCommissionEnabled ?? false,
+    recurringLevel1Percent: res.data.recurringLevel1Percent ?? 10,
+    recurringLevel2Percent: res.data.recurringLevel2Percent ?? 5,
+    recurringCommissionDays: res.data.recurringCommissionDays ?? 180,
     dailyShareReward: res.data.dailyShareReward ?? 10,
     referralReward: res.data.referralReward ?? 20,
     minWithdrawalYuan: res.data.minWithdrawalYuan ?? ((res.data.minWithdrawalAmount || 1000) / 100),
     withdrawalFreezeDays: res.data.withdrawalFreezeDays ?? 7,
+    transferSceneId: res.data.transferSceneId ?? '1005',
+    transferSceneName: res.data.transferSceneName ?? '佣金报酬',
+    transferDailyLimitYuan: toYuan(res.data.transferDailyLimit, 50000),
+    transferSingleMinYuan: toYuan(res.data.transferSingleMin, 0.1),
+    transferSingleMaxYuan: toYuan(res.data.transferSingleMax, 200),
+    transferUserDailyLimitYuan: toYuan(res.data.transferUserDailyLimit, 2000),
+    transferNotifyUrl: res.data.transferNotifyUrl || '',
+    transferUserConfirm: res.data.transferUserConfirm ?? true,
+    transferReportJobType: res.data.transferReportJobType || '推广服务',
+    transferReportRewardDesc: res.data.transferReportRewardDesc || '涨识推荐合作佣金报酬',
   });
 }
 
@@ -516,16 +650,38 @@ async function saveSettings() {
     ElMessage.warning('特邀总比例不能低于推荐官比例');
     return;
   }
+  if (settingsForm.recurringLevel1Percent < settingsForm.recurringLevel2Percent) {
+    ElMessage.warning('复充特邀总比例不能低于复充推荐官比例');
+    return;
+  }
+  if (settingsForm.recurringLevel1Percent > settingsForm.level1Percent || settingsForm.recurringLevel2Percent > settingsForm.level2Percent) {
+    ElMessage.warning('复充比例不能高于首充比例');
+    return;
+  }
   savingSettings.value = true;
   try {
     await api.distribution.updateSettings({
       enabled: settingsForm.enabled,
       level1Rate: Math.round(settingsForm.level1Percent * 100),
       level2Rate: Math.round(settingsForm.level2Percent * 100),
+      recurringCommissionEnabled: settingsForm.recurringCommissionEnabled,
+      recurringLevel1Rate: Math.round(settingsForm.recurringLevel1Percent * 100),
+      recurringLevel2Rate: Math.round(settingsForm.recurringLevel2Percent * 100),
+      recurringCommissionDays: Math.round(settingsForm.recurringCommissionDays),
       dailyShareReward: Math.round(Number(settingsForm.dailyShareReward || 0)),
       referralReward: Math.round(Number(settingsForm.referralReward || 0)),
       minWithdrawalAmount: Math.round(settingsForm.minWithdrawalYuan * 100),
       withdrawalFreezeDays: Math.round(settingsForm.withdrawalFreezeDays),
+      transferSceneId: String(settingsForm.transferSceneId || '').trim(),
+      transferSceneName: String(settingsForm.transferSceneName || '').trim(),
+      transferDailyLimit: Math.round(settingsForm.transferDailyLimitYuan * 100),
+      transferSingleMin: Math.round(settingsForm.transferSingleMinYuan * 100),
+      transferSingleMax: Math.round(settingsForm.transferSingleMaxYuan * 100),
+      transferUserDailyLimit: Math.round(settingsForm.transferUserDailyLimitYuan * 100),
+      transferNotifyUrl: String(settingsForm.transferNotifyUrl || '').trim(),
+      transferUserConfirm: settingsForm.transferUserConfirm,
+      transferReportJobType: String(settingsForm.transferReportJobType || '').trim(),
+      transferReportRewardDesc: String(settingsForm.transferReportRewardDesc || '').trim(),
     });
     ElMessage.success('推荐合作规则已保存');
     await loadSettings();
@@ -677,7 +833,7 @@ async function saveDistributor() {
     }
     dialogVisible.value = false;
     ElMessage.success('合作人员已保存');
-    await Promise.all([loadDashboard(), loadDistributors(), loadLevelOneOptions()]);
+    await reloadDistributorSection();
   } catch (e: any) {
     ElMessage.error(e.response?.data?.message || '保存失败');
   } finally {
@@ -694,7 +850,8 @@ async function reviewDistributor(row: any, status: 'active' | 'rejected') {
       status,
     });
     ElMessage.success(status === 'active' ? '已审核通过' : '已驳回');
-    await Promise.all([loadDashboard(), loadDistributors(), loadLevelOneOptions()]);
+    await reloadDistributorSection();
+    refreshPendingBadges();
   } catch (e: any) {
     ElMessage.error(e.response?.data?.message || '操作失败');
   }
@@ -718,10 +875,55 @@ async function reviewWithdrawal(row: any, status: 'approved' | 'rejected' | 'pai
     await api.distribution.reviewWithdrawal(row.id, { status, adminRemark });
     ElMessage.success(`已${label}`);
     await Promise.all([loadWithdrawals(), loadDashboard()]);
+    refreshPendingBadges();
     if (ledgerDialogVisible.value) await loadLedgerWithdrawals();
   } catch (e: any) {
     ElMessage.error(e.response?.data?.message || '处理失败');
   }
+}
+
+async function startWechatTransfer(row: any) {
+  try {
+    const result = await ElMessageBox.prompt('请填写转账备注，可留空使用默认备注', '发起微信商家转账', {
+      confirmButtonText: '发起转账',
+      cancelButtonText: '取消',
+      inputPlaceholder: '涨识佣金报酬',
+    });
+    await api.distribution.startWechatTransfer(row.id, { remark: result.value || '' });
+    ElMessage.success('已发起微信转账');
+    await Promise.all([loadWithdrawals(), loadDashboard()]);
+    refreshPendingBadges();
+    if (ledgerDialogVisible.value) await loadLedgerWithdrawals();
+  } catch (e: any) {
+    if (e === 'cancel' || e === 'close') return;
+    ElMessage.error(e.response?.data?.message || e.message || '发起转账失败');
+  }
+}
+
+async function queryWechatTransfer(row: any) {
+  try {
+    await api.distribution.queryWechatTransfer(row.id);
+    ElMessage.success('转账状态已同步');
+    await Promise.all([loadWithdrawals(), loadDashboard()]);
+    refreshPendingBadges();
+    if (ledgerDialogVisible.value) await loadLedgerWithdrawals();
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.message || e.message || '查询失败');
+  }
+}
+
+function canStartWechatTransfer(row: any) {
+  return ['approved', 'failed'].includes(row.status) || (row.status === 'transferring' && !row.outBillNo);
+}
+
+function refreshPendingBadges() {
+  window.dispatchEvent(new Event('distribution-pending-refresh'));
+}
+
+async function reloadDistributorSection() {
+  const tasks = [loadDistributors(), loadLevelOneOptions()];
+  if (store.isFullAdmin) tasks.push(loadDashboard());
+  await Promise.all(tasks);
 }
 
 function levelLabel(level: number) {
@@ -746,12 +948,17 @@ function roleLabel(role: string) {
   if (role === 'level1_direct') return '直接推荐奖励';
   if (role === 'level2_direct') return '推荐奖励';
   if (role === 'level1_override') return '合作伙伴奖励';
+  if (role === 'level1_recurring_direct') return '复充直接奖励';
+  if (role === 'level2_recurring_direct') return '复充推荐奖励';
+  if (role === 'level1_recurring_override') return '复充合作伙伴奖励';
   return role;
 }
 
 function withdrawalStatusLabel(status: string) {
   if (status === 'pending') return '待审核';
   if (status === 'approved') return '已通过';
+  if (status === 'transferring') return '转账中';
+  if (status === 'wait_user_confirm') return '待用户确认';
   if (status === 'paid') return '已打款';
   if (status === 'rejected') return '已驳回';
   if (status === 'failed') return '打款失败';
@@ -760,7 +967,7 @@ function withdrawalStatusLabel(status: string) {
 
 function withdrawalTagType(status: string) {
   if (status === 'paid') return 'success';
-  if (status === 'pending' || status === 'approved') return 'warning';
+  if (status === 'pending' || status === 'approved' || status === 'transferring' || status === 'wait_user_confirm') return 'warning';
   if (status === 'rejected' || status === 'failed') return 'danger';
   return 'info';
 }
@@ -769,17 +976,20 @@ function formatMoney(value: number) {
   return `¥${(Number(value || 0) / 100).toFixed(2)}`;
 }
 
+function toYuan(value: number | undefined, fallback: number) {
+  return value === undefined || value === null ? fallback : Number(value || 0) / 100;
+}
+
 function formatTime(value: string) {
   return value ? new Date(value).toLocaleString() : '-';
 }
 
 onMounted(() => {
-  loadSettings();
-  loadDashboard();
-  loadLevelOneOptions();
-  loadDistributors();
-  loadCommissions();
-  loadWithdrawals();
+  loadActiveSection();
+});
+
+watch(activeSection, (section) => {
+  loadActiveSection(section);
 });
 </script>
 
@@ -883,6 +1093,38 @@ h2 {
 
 .panel-card {
   margin-bottom: 18px;
+}
+
+.transfer-rule-box {
+  display: block;
+  flex-basis: 100%;
+  margin-top: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+
+.transfer-rule-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--el-text-color-primary);
+  font-weight: 700;
+
+  span:last-child {
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    font-weight: 400;
+  }
+}
+
+.transfer-rule-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
 }
 
 .card-head,

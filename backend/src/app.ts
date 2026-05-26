@@ -19,9 +19,14 @@ const logger = createLogger('app');
 app.proxy = true;
 
 // Global middleware
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({ credentials: true }));
-app.use(bodyParser({ enableTypes: ['json', 'form', 'text', 'xml'] }));
+app.use(bodyParser({
+  enableTypes: ['json', 'form', 'text', 'xml'],
+  jsonLimit: '5mb',
+  formLimit: '5mb',
+  textLimit: '5mb',
+}));
 app.use(errorHandler);
 app.use(rateLimiter);
 

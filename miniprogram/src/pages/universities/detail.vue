@@ -139,6 +139,7 @@ function askAboutUniversity() {
   userStore.consultQuestion = `请帮我分析 ${item.name}：院校层次、城市资源、适合哪些专业方向，以及放在高考志愿里的风险。`;
   userStore.consultType = 'deep';
   userStore.consultContext = buildUniversityContext(item);
+  userStore.forceNewConsult = true;
   userStore.pendingConsult = true;
   uni.switchTab({ url: '/pages/consult/index' });
 }

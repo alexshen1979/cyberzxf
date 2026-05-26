@@ -28,7 +28,7 @@
           <el-menu-item v-if="store.isFullAdmin" index="/users">
             <template #title>
               <el-icon><User /></el-icon>
-              <span>用户管理</span>
+              <span class="menu-label">用户管理<i v-if="store.newUsers > 0" class="menu-dot"></i></span>
             </template>
           </el-menu-item>
           <el-menu-item v-if="store.isFullAdmin" index="/points">
@@ -40,15 +40,27 @@
           <el-menu-item v-if="store.isFullAdmin" index="/orders">
             <template #title>
               <el-icon><Tickets /></el-icon>
-              <span>订单管理</span>
+              <span class="menu-label">订单管理<i v-if="store.newOrders > 0" class="menu-dot"></i></span>
             </template>
           </el-menu-item>
-          <el-menu-item v-if="store.isFullAdmin" index="/distribution">
+          <el-sub-menu v-if="store.canManageDistributors" index="distribution">
             <template #title>
               <el-icon><Share /></el-icon>
               <span>推荐合作</span>
             </template>
-          </el-menu-item>
+            <el-menu-item v-if="store.isFullAdmin" index="/distribution/overview">
+              <span>总览与规则</span>
+            </el-menu-item>
+            <el-menu-item index="/distribution/distributors">
+              <span class="menu-label">合作人员<i v-if="store.pendingDistributors > 0" class="menu-dot"></i></span>
+            </el-menu-item>
+            <el-menu-item v-if="store.isFullAdmin" index="/distribution/commissions">
+              <span>奖励流水</span>
+            </el-menu-item>
+            <el-menu-item v-if="store.isFullAdmin" index="/distribution/withdrawals">
+              <span class="menu-label">提现管理<i v-if="store.pendingWithdrawals > 0" class="menu-dot"></i></span>
+            </el-menu-item>
+          </el-sub-menu>
           <el-menu-item v-if="store.isFullAdmin" index="/admins">
             <template #title>
               <el-icon><Setting /></el-icon>
@@ -148,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAdminStore } from '@/store/admin';
 import {
@@ -160,9 +172,43 @@ const route = useRoute();
 const router = useRouter();
 const store = useAdminStore();
 
-const activeMenu = computed(() => route.path);
+const activeMenu = computed(() => {
+  if (route.path === '/distribution') return store.isEditor ? '/distribution/distributors' : '/distribution/overview';
+  return route.path;
+});
 const currentTitle = computed(() => route.meta.title || '管理后台');
 const roleLabel = computed(() => (store.isEditor ? '编辑' : '管理员'));
+let pendingTimer: number | undefined;
+
+onMounted(() => {
+  store.fetchMenuBadges();
+  pendingTimer = window.setInterval(() => {
+    store.fetchMenuBadges();
+  }, 60000);
+  window.addEventListener('distribution-pending-refresh', store.fetchMenuBadges);
+});
+
+onBeforeUnmount(() => {
+  if (pendingTimer) window.clearInterval(pendingTimer);
+  window.removeEventListener('distribution-pending-refresh', store.fetchMenuBadges);
+});
+
+watch(
+  () => route.path,
+  (path) => {
+    if (path === '/users') store.markUsersSeen();
+    if (path === '/orders') store.markOrdersSeen();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => store.isFullAdmin,
+  (isFullAdmin) => {
+    if (isFullAdmin) store.fetchMenuBadges();
+  },
+  { immediate: true },
+);
 
 function handleLogout() {
   store.logout();
@@ -290,6 +336,20 @@ function handleLogout() {
     color: var(--el-text-color-primary) !important;
     font-weight: 500;
   }
+}
+
+.menu-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.menu-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-color-danger);
+  box-shadow: 0 0 0 3px rgba(245, 108, 108, 0.14);
 }
 
 // ─── Topbar ─────────────────────────────────────

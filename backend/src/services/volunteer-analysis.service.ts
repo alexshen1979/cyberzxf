@@ -1,11 +1,15 @@
 import axios from 'axios';
 import { prisma } from '../utils/prisma';
-import { config } from '../config';
 import { AppError } from '../middleware/errorHandler';
 import { deductPoints } from './points.service';
 import { createLogger } from '../utils/logger';
 import { getPointSettings } from './point-config.service';
 import { sanitizeAiOutput } from './ai.service';
+import {
+  chatCompletionsUrl,
+  DEFAULT_DEEPSEEK_MODEL,
+  resolveAiRuntime,
+} from './ai-runtime.service';
 
 const logger = createLogger('volunteer');
 const RECOMMENDATION_DISPLAY_LIMIT = 12;
@@ -277,11 +281,13 @@ export async function listVolunteerReports(userId: string, page = 1, pageSize = 
       take: pageSize,
       select: {
         id: true,
+        title: true,
         province: true,
         year: true,
         subjectType: true,
         score: true,
         rank: true,
+        input: true,
         pointsCost: true,
         createdAt: true,
       },
@@ -289,7 +295,15 @@ export async function listVolunteerReports(userId: string, page = 1, pageSize = 
     prisma.volunteerReport.count({ where: { userId } }),
   ]);
 
-  return { list: items, total, page, pageSize };
+  return {
+    list: items.map(item => ({
+      ...item,
+      input: safeJson(item.input, {}),
+    })),
+    total,
+    page,
+    pageSize,
+  };
 }
 
 export async function getVolunteerReport(userId: string, id: string) {
@@ -304,6 +318,28 @@ export async function getVolunteerReport(userId: string, id: string) {
     result: safeJson(report.result, {}),
     markdownReport: sanitizeAiOutput(report.markdownReport || ''),
   };
+}
+
+export async function updateVolunteerReportTitle(userId: string, id: string, rawTitle: string) {
+  const title = String(rawTitle || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+  if (!title) {
+    throw new AppError(422, '报告名称不能为空', 'VOLUNTEER_REPORT_TITLE_REQUIRED');
+  }
+
+  const report = await prisma.volunteerReport.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!report) {
+    throw new AppError(404, '志愿分析报告不存在', 'VOLUNTEER_REPORT_NOT_FOUND');
+  }
+
+  return prisma.volunteerReport.update({
+    where: { id },
+    data: { title },
+    select: { id: true, title: true },
+  });
 }
 
 function validateInput(input: VolunteerAnalyzeInput) {
@@ -1661,10 +1697,9 @@ function strategyLabel(riskPreference?: string) {
 
 async function generateMarkdownReport(input: VolunteerAnalyzeInput, result: VolunteerResult, retrieval: any) {
   const aiConfig = await getAiConfig();
-  const apiKey = (aiConfig.apiKey && aiConfig.apiKey.trim()) ? aiConfig.apiKey : config.deepseek.apiKey;
-  const baseUrl = (aiConfig.apiBaseUrl && aiConfig.apiBaseUrl.trim()) ? aiConfig.apiBaseUrl : config.deepseek.baseUrl;
+  const runtime = resolveAiRuntime(aiConfig);
 
-  if (!apiKey) {
+  if (!runtime.apiKey) {
     return fallbackMarkdown(result);
   }
 
@@ -1687,9 +1722,9 @@ ${retrieval.knowledge.map((k: any) => `- ${k.title}: ${k.content.slice(0, 260)}`
 
   try {
     const response = await axios.post(
-      `${baseUrl}/v1/chat/completions`,
+      chatCompletionsUrl(runtime.baseUrl),
       {
-        model: aiConfig.model || 'deepseek-chat',
+        model: runtime.model,
         messages: [
           { role: 'system', content: '你负责生成高考志愿分析报告，必须严谨、可追溯、避免编造录取结论。' },
           { role: 'user', content: prompt },
@@ -1700,7 +1735,7 @@ ${retrieval.knowledge.map((k: any) => `- ${k.title}: ${k.content.slice(0, 260)}`
       },
       {
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${runtime.apiKey}`,
           'Content-Type': 'application/json',
         },
         timeout: Math.min(aiConfig.timeout || VOLUNTEER_REPORT_AI_TIMEOUT_MS, VOLUNTEER_REPORT_AI_TIMEOUT_MS),
@@ -1719,7 +1754,8 @@ async function getAiConfig() {
     const pointSettings = await getPointSettings();
     aiConfig = await prisma.aiConfig.create({
       data: {
-        model: 'deepseek-chat',
+        model: DEFAULT_DEEPSEEK_MODEL,
+        provider: 'deepseek',
         temperature: 0.7,
         maxTokens: 2200,
         topP: 0.9,

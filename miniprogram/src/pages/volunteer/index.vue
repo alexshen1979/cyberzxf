@@ -335,50 +335,90 @@
           <view class="sheet-section">
             <text class="sheet-label">城市和专业</text>
             <view class="suggest-field">
-              <input
-                class="sheet-input"
-                v-model="preferredCitiesText"
-                placeholder="目标城市或省份"
-              />
+              <text class="field-title">省份城市</text>
+              <view class="tag-input-box" @click="focusPreferenceInput('city')">
+                <text
+                  v-for="item in selectedPreferenceItems('city')"
+                  :key="`city-${item}`"
+                  class="selected-chip"
+                  @click.stop="removeSelected('city', item)"
+                >{{ item }} ×</text>
+                <input
+                  class="tag-input"
+                  v-model="cityKeyword"
+                  :focus="focusedPreferenceInput === 'city'"
+                  :placeholder="selectedPreferenceItems('city').length ? '' : '输入省份或城市关键字'"
+                  @focus="focusedPreferenceInput = 'city'"
+                  @input="scheduleRecommendationPreview"
+                  @confirm="commitKeyword('city')"
+                />
+              </view>
               <view class="suggest-row" v-if="citySuggestions.length">
                 <text
                   v-for="item in citySuggestions"
                   :key="item"
                   class="suggest-chip"
+                  :class="{ active: isPreferenceSelected('city', item) }"
                   @click="chooseSuggestion('city', item)"
                 >{{ item }}</text>
               </view>
             </view>
 
             <view class="suggest-field">
-              <input
-                class="sheet-input"
-                v-model="preferredMajorsText"
-                placeholder="偏好专业，如 计算机,电子信息"
-                @input="handleMajorInput('preferred')"
-              />
+              <text class="field-title">偏好专业</text>
+              <view class="tag-input-box" @click="focusPreferenceInput('preferredMajor')">
+                <text
+                  v-for="item in selectedPreferenceItems('preferredMajor')"
+                  :key="`preferred-${item}`"
+                  class="selected-chip"
+                  @click.stop="removeSelected('preferredMajor', item)"
+                >{{ item }} ×</text>
+                <input
+                  class="tag-input"
+                  v-model="preferredMajorKeyword"
+                  :focus="focusedPreferenceInput === 'preferredMajor'"
+                  :placeholder="selectedPreferenceItems('preferredMajor').length ? '' : '输入专业关键字'"
+                  @focus="focusedPreferenceInput = 'preferredMajor'"
+                  @input="handleMajorInput('preferred')"
+                  @confirm="commitKeyword('preferredMajor')"
+                />
+              </view>
               <view class="suggest-row" v-if="preferredMajorSuggestions.length">
                 <text
                   v-for="item in preferredMajorSuggestions"
                   :key="item.name"
                   class="suggest-chip"
+                  :class="{ active: isPreferenceSelected('preferredMajor', item.name) }"
                   @click="chooseSuggestion('preferredMajor', item.name)"
                 >{{ item.name }}</text>
               </view>
             </view>
 
             <view class="suggest-field">
-              <input
-                class="sheet-input"
-                v-model="avoidMajorsText"
-                placeholder="规避专业，如 土木,护理"
-                @input="handleMajorInput('avoid')"
-              />
+              <text class="field-title">避坑专业</text>
+              <view class="tag-input-box" @click="focusPreferenceInput('avoidMajor')">
+                <text
+                  v-for="item in selectedPreferenceItems('avoidMajor')"
+                  :key="`avoid-${item}`"
+                  class="selected-chip danger"
+                  @click.stop="removeSelected('avoidMajor', item)"
+                >{{ item }} ×</text>
+                <input
+                  class="tag-input"
+                  v-model="avoidMajorKeyword"
+                  :focus="focusedPreferenceInput === 'avoidMajor'"
+                  :placeholder="selectedPreferenceItems('avoidMajor').length ? '' : '输入避坑专业关键字'"
+                  @focus="focusedPreferenceInput = 'avoidMajor'"
+                  @input="handleMajorInput('avoid')"
+                  @confirm="commitKeyword('avoidMajor')"
+                />
+              </view>
               <view class="suggest-row" v-if="avoidMajorSuggestions.length">
                 <text
                   v-for="item in avoidMajorSuggestions"
                   :key="item.name"
                   class="suggest-chip danger"
+                  :class="{ active: isPreferenceSelected('avoidMajor', item.name) }"
                   @click="chooseSuggestion('avoidMajor', item.name)"
                 >{{ item.name }}</text>
               </view>
@@ -417,8 +457,9 @@
       <view v-if="reportsLoading" class="history-state">正在加载近期方案...</view>
       <view v-else-if="reports.length">
         <view class="report-item" v-for="item in reports" :key="item.id" @click="openReport(item.id)">
-          <text class="report-main">{{ item.province }} {{ item.subjectType }} {{ item.score }}分</text>
+          <text class="report-main">{{ item.title || `${item.province} ${item.subjectType} ${item.score}分` }}</text>
           <text class="report-sub">{{ item.rank ? `位次 ${item.rank}` : '未填位次' }} · {{ formatDate(item.createdAt) }}</text>
+          <text class="report-pref" v-if="reportPreferenceText(item)">偏好与风险：{{ reportPreferenceText(item) }}</text>
         </view>
       </view>
       <view v-else class="history-state">暂无近期方案，生成后会自动保存在这里</view>
@@ -450,7 +491,7 @@
 
 <script setup lang="ts">
 import { onShow, onPullDownRefresh, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { api } from '@/api';
 import { useUserStore } from '@/store/user';
 import { recordShare, withShareRef } from '@/utils/share';
@@ -515,6 +556,10 @@ const form = reactive({
 const preferredCitiesText = ref('');
 const preferredMajorsText = ref('');
 const avoidMajorsText = ref('');
+const cityKeyword = ref('');
+const preferredMajorKeyword = ref('');
+const avoidMajorKeyword = ref('');
+const focusedPreferenceInput = ref<'city' | 'preferredMajor' | 'avoidMajor' | ''>('');
 const preferredMajorSuggestions = ref<Array<{ id: string; name: string; category?: string | null }>>([]);
 const avoidMajorSuggestions = ref<Array<{ id: string; name: string; category?: string | null }>>([]);
 const examCategory = ref<ExamCategory>('normal');
@@ -613,7 +658,7 @@ const allCityOptions = computed(() => {
 });
 
 const citySuggestions = computed(() => {
-  const keyword = getCurrentToken(preferredCitiesText.value);
+  const keyword = cityKeyword.value.trim();
   if (!keyword) return [];
   return allCityOptions.value
     .filter(name => name.includes(keyword))
@@ -811,32 +856,54 @@ function splitList(text: string) {
   return text.split(/[,，、\s]+/).map(item => item.trim()).filter(Boolean);
 }
 
-function getCurrentToken(text: string) {
-  const parts = String(text || '').split(/[,，、\s]+/);
-  return (parts[parts.length - 1] || '').trim();
+function normalizeReportInput(item: any) {
+  const input = item?.input || item?.inputSnapshot || {};
+  if (typeof input === 'string') {
+    try { return JSON.parse(input); } catch { return {}; }
+  }
+  return input || {};
 }
 
-function replaceCurrentToken(text: string, value: string) {
-  const raw = String(text || '');
-  const match = raw.match(/^(.*?)([^,，、\s]*)$/);
-  const prefix = match?.[1] || '';
-  const current = (match?.[2] || '').trim();
-  const existing = splitList(prefix);
-  if (!current && existing.includes(value)) return raw;
-  if (existing.includes(value)) return prefix.trimEnd();
-  return `${prefix}${value}，`;
+function reportPreferenceText(item: any) {
+  const input = normalizeReportInput(item);
+  const parts = [
+    input.riskPreference ? riskPreferenceLabel(input.riskPreference) : '',
+    formatReportList('城市', input.preferredCities),
+    formatReportList('专业', input.preferredMajors),
+    formatReportList('规避', input.avoidMajors),
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+function formatReportList(label: string, value: unknown) {
+  if (!Array.isArray(value) || !value.length) return '';
+  const text = value.filter(Boolean).slice(0, 2).join('、');
+  if (!text) return '';
+  return `${label} ${text}${value.length > 2 ? '等' : ''}`;
+}
+
+function riskPreferenceLabel(value?: string) {
+  if (value === 'conservative') return '稳妥优先';
+  if (value === 'aggressive') return '适度进攻';
+  return '稳中带冲';
+}
+
+function focusPreferenceInput(type: 'city' | 'preferredMajor' | 'avoidMajor') {
+  focusedPreferenceInput.value = '';
+  nextTick(() => {
+    focusedPreferenceInput.value = type;
+  });
 }
 
 function chooseSuggestion(type: 'city' | 'preferredMajor' | 'avoidMajor', value: string) {
   if (type === 'city') {
-    preferredCitiesText.value = replaceCurrentToken(preferredCitiesText.value, value);
+    preferredCitiesText.value = toggleListValue(preferredCitiesText.value, value);
   } else if (type === 'preferredMajor') {
-    preferredMajorsText.value = replaceCurrentToken(preferredMajorsText.value, value);
-    preferredMajorSuggestions.value = [];
+    preferredMajorsText.value = toggleListValue(preferredMajorsText.value, value);
   } else {
-    avoidMajorsText.value = replaceCurrentToken(avoidMajorsText.value, value);
-    avoidMajorSuggestions.value = [];
+    avoidMajorsText.value = toggleListValue(avoidMajorsText.value, value);
   }
+  focusPreferenceInput(type);
   scheduleRecommendationPreview();
 }
 
@@ -857,7 +924,7 @@ function scheduleMajorSuggestions(kind: 'preferred' | 'avoid') {
 }
 
 async function loadMajorSuggestions(kind: 'preferred' | 'avoid') {
-  const keyword = getCurrentToken(kind === 'preferred' ? preferredMajorsText.value : avoidMajorsText.value);
+  const keyword = getMajorKeyword(kind);
   if (!keyword) {
     if (kind === 'preferred') preferredMajorSuggestions.value = [];
     else avoidMajorSuggestions.value = [];
@@ -879,10 +946,79 @@ async function loadMajorSuggestions(kind: 'preferred' | 'avoid') {
 }
 
 function updateLocalMajorSuggestions(kind: 'preferred' | 'avoid') {
-  const keyword = getCurrentToken(kind === 'preferred' ? preferredMajorsText.value : avoidMajorsText.value);
+  const keyword = getMajorKeyword(kind);
   const suggestions = keyword ? mergeMajorSuggestions(keyword, []) : [];
   if (kind === 'preferred') preferredMajorSuggestions.value = suggestions;
   else avoidMajorSuggestions.value = suggestions;
+}
+
+function getMajorKeyword(kind: 'preferred' | 'avoid') {
+  return (kind === 'preferred' ? preferredMajorKeyword.value : avoidMajorKeyword.value).trim();
+}
+
+function selectedPreferenceItems(type: 'city' | 'preferredMajor' | 'avoidMajor') {
+  if (type === 'city') return splitList(preferredCitiesText.value);
+  if (type === 'preferredMajor') return splitList(preferredMajorsText.value);
+  return splitList(avoidMajorsText.value);
+}
+
+function isPreferenceSelected(type: 'city' | 'preferredMajor' | 'avoidMajor', value: string) {
+  return selectedPreferenceItems(type).includes(value);
+}
+
+function removeSelected(type: 'city' | 'preferredMajor' | 'avoidMajor', value: string) {
+  if (type === 'city') {
+    preferredCitiesText.value = removeListValue(preferredCitiesText.value, value);
+  } else if (type === 'preferredMajor') {
+    preferredMajorsText.value = removeListValue(preferredMajorsText.value, value);
+  } else {
+    avoidMajorsText.value = removeListValue(avoidMajorsText.value, value);
+  }
+  focusPreferenceInput(type);
+  scheduleRecommendationPreview();
+}
+
+function commitKeyword(type: 'city' | 'preferredMajor' | 'avoidMajor') {
+  const keyword = type === 'city'
+    ? cityKeyword.value.trim()
+    : type === 'preferredMajor'
+      ? preferredMajorKeyword.value.trim()
+      : avoidMajorKeyword.value.trim();
+  if (!keyword) return;
+  if (type === 'city') {
+    preferredCitiesText.value = addListValue(preferredCitiesText.value, keyword);
+    cityKeyword.value = '';
+  } else if (type === 'preferredMajor') {
+    preferredMajorsText.value = addListValue(preferredMajorsText.value, keyword);
+    preferredMajorKeyword.value = '';
+    preferredMajorSuggestions.value = [];
+  } else {
+    avoidMajorsText.value = addListValue(avoidMajorsText.value, keyword);
+    avoidMajorKeyword.value = '';
+    avoidMajorSuggestions.value = [];
+  }
+  focusPreferenceInput(type);
+  scheduleRecommendationPreview();
+}
+
+function toggleListValue(text: string, value: string) {
+  const items = splitList(text);
+  return items.includes(value)
+    ? listToText(items.filter(item => item !== value))
+    : listToText([...items, value]);
+}
+
+function addListValue(text: string, value: string) {
+  const items = splitList(text);
+  return items.includes(value) ? listToText(items) : listToText([...items, value]);
+}
+
+function removeListValue(text: string, value: string) {
+  return listToText(splitList(text).filter(item => item !== value));
+}
+
+function listToText(items: string[]) {
+  return [...new Set(items.map(item => item.trim()).filter(Boolean))].join('，');
 }
 
 function mergeMajorSuggestions(keyword: string, remoteItems: Array<{ id: string; name: string; category?: string | null }>) {
@@ -2278,8 +2414,70 @@ watch(
   margin-top: $spacing-sm;
 }
 
+.field-title {
+  display: block;
+  margin: 0 0 10rpx;
+  color: $text-primary;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
 .suggest-field .sheet-input {
   margin-top: 0;
+}
+
+.tag-input-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10rpx;
+  min-height: 76rpx;
+  padding: 10rpx 12rpx;
+  box-sizing: border-box;
+  border-radius: 18rpx;
+  background: #fff;
+  border: 1rpx solid rgba(148, 163, 184, 0.24);
+}
+
+.tag-input {
+  flex: 1 1 180rpx;
+  min-width: 160rpx;
+  height: 48rpx;
+  line-height: 48rpx;
+  padding: 0 4rpx;
+  color: $text-primary;
+  font-size: $font-sm;
+}
+
+.selected-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-bottom: 12rpx;
+  padding: 12rpx;
+  border-radius: 16rpx;
+  background: #f8fafc;
+  border: 1rpx solid rgba(148, 163, 184, 0.18);
+}
+
+.selected-chip {
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 9rpx 16rpx;
+  border-radius: $radius-full;
+  background: #eef4e8;
+  border: 1rpx solid rgba(111, 125, 74, 0.24);
+  color: #60723f;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 1.25;
+  word-break: break-all;
+}
+
+.selected-chip.danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
 }
 
 .suggest-row {
@@ -2294,6 +2492,8 @@ watch(
 }
 
 .suggest-chip {
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 9rpx 16rpx;
   border-radius: $radius-full;
   background: #fff;
@@ -2301,6 +2501,14 @@ watch(
   color: #0369a1;
   font-size: 22rpx;
   font-weight: 700;
+  line-height: 1.25;
+  word-break: break-all;
+}
+
+.suggest-chip.active {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #047857;
 }
 
 .suggest-chip.danger {
@@ -2376,6 +2584,13 @@ watch(
 .report-sub {
   color: $text-tertiary;
   font-size: $font-xs;
+}
+
+.report-pref {
+  color: #60723f;
+  font-size: $font-xs;
+  line-height: 1.45;
+  word-break: break-all;
 }
 
 .analysis-overlay {

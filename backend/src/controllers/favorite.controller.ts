@@ -1,9 +1,23 @@
 import { Context } from 'koa';
 import { prisma } from '../utils/prisma';
 
-const FAVORITE_TARGET_TYPES = ['article', 'consultation', 'knowledge', 'university', 'major'];
+const FAVORITE_TARGET_TYPES = ['article', 'consultation', 'knowledge', 'university', 'major', 'volunteer_report'];
 
-async function assertFavoriteTargetExists(targetType: string, targetId: string) {
+function safeJson(raw?: string | null, fallback: any = {}) {
+  try { return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
+}
+
+function listText(value: unknown) {
+  return Array.isArray(value) ? value.filter(Boolean).slice(0, 3).join('、') : '';
+}
+
+function riskPreferenceLabel(value?: string) {
+  if (value === 'conservative') return '稳妥优先';
+  if (value === 'aggressive') return '适度进攻';
+  return '稳中带冲';
+}
+
+async function assertFavoriteTargetExists(targetType: string, targetId: string, userId?: string) {
   if (targetType === 'article') {
     return prisma.article.findUnique({ where: { id: targetId }, select: { id: true } });
   }
@@ -18,6 +32,12 @@ async function assertFavoriteTargetExists(targetType: string, targetId: string) 
   }
   if (targetType === 'major') {
     return prisma.major.findUnique({ where: { id: targetId }, select: { id: true } });
+  }
+  if (targetType === 'volunteer_report') {
+    return prisma.volunteerReport.findFirst({
+      where: { id: targetId, ...(userId ? { userId } : {}) },
+      select: { id: true },
+    });
   }
   return null;
 }
@@ -45,6 +65,21 @@ async function buildFavoriteDisplay(fav: { targetType: string; targetId: string 
     const major = await prisma.major.findUnique({ where: { id: fav.targetId } });
     title = major?.name || '已删除';
     summary = major?.employment || major?.description || [major?.category, major?.degreeType, major?.riskLevel].filter(Boolean).join(' · ');
+  } else if (fav.targetType === 'volunteer_report') {
+    const report = await prisma.volunteerReport.findUnique({ where: { id: fav.targetId } });
+    const input = safeJson(report?.input, {});
+    title = report?.title || (report
+      ? `${report.province} ${report.subjectType} ${report.score}分志愿分析报告`
+      : '已删除');
+    summary = report
+      ? [
+        report.rank ? `位次 ${report.rank}` : '',
+        input.riskPreference ? riskPreferenceLabel(input.riskPreference) : '',
+        listText(input.preferredCities) ? `城市 ${listText(input.preferredCities)}` : '',
+        listText(input.preferredMajors) ? `专业 ${listText(input.preferredMajors)}` : '',
+        listText(input.avoidMajors) ? `规避 ${listText(input.avoidMajors)}` : '',
+      ].filter(Boolean).join(' · ')
+      : '';
   }
   return { title, summary };
 }
@@ -62,7 +97,7 @@ export async function toggle(ctx: Context) {
 
   if (!FAVORITE_TARGET_TYPES.includes(targetType)) {
     ctx.status = 422;
-    ctx.body = { success: false, message: 'targetType 只能为 article、consultation、knowledge、university 或 major' };
+    ctx.body = { success: false, message: 'targetType 只能为 article、consultation、knowledge、university、major 或 volunteer_report' };
     return;
   }
 
@@ -78,7 +113,7 @@ export async function toggle(ctx: Context) {
     return;
   }
 
-  const target = await assertFavoriteTargetExists(targetType, targetId);
+  const target = await assertFavoriteTargetExists(targetType, targetId, userId);
   if (!target) {
     ctx.status = 404;
     ctx.body = { success: false, message: '收藏目标不存在' };

@@ -31,6 +31,7 @@ interface ResolvedWechatPayConfig {
   privateKeyPath: string;
   platformPublicKeyPath: string;
   notifyUrl: string;
+  transferNotifyUrl: string;
 }
 
 export async function getProductList() {
@@ -81,6 +82,7 @@ export async function getWechatPayConfigForAdmin() {
     privateKeyPath: dbConfig?.privateKeyPath || cfg.privateKeyPath,
     platformPublicKeyPath: dbConfig?.platformPublicKeyPath || cfg.platformPublicKeyPath,
     notifyUrl: dbConfig?.notifyUrl || cfg.notifyUrl,
+    transferNotifyUrl: dbConfig?.transferNotifyUrl || cfg.transferNotifyUrl,
     source: dbConfig ? 'database' : 'env',
     status,
   };
@@ -105,6 +107,7 @@ export async function updateWechatPayConfig(input: Record<string, any>) {
     privateKeyPath: normalizeConfigValue(input.privateKeyPath),
     platformPublicKeyPath: normalizeConfigValue(input.platformPublicKeyPath),
     notifyUrl: normalizeConfigValue(input.notifyUrl),
+    transferNotifyUrl: normalizeConfigValue(input.transferNotifyUrl),
   };
 
   if (current) {
@@ -188,7 +191,7 @@ export async function handlePaymentCallback(orderNo: string, transactionId: stri
   // 充值到账
   await chargePoints(order.userId, order.points, order.bonusPoints, order.id);
 
-  // 首单分销佣金结算。只对该用户第一笔已支付订单生效，服务内做幂等保护。
+  // 分销佣金结算。首充和复充按后台规则生效，服务内做幂等保护。
   await settleDistributionCommissionForOrder(order.id);
 
   logger.info('支付成功: orderNo=%s, userId=%s, points=%d(+%d)',
@@ -284,6 +287,7 @@ async function resolveWechatPayConfig(): Promise<ResolvedWechatPayConfig> {
     privateKeyPath: dbConfig?.privateKeyPath || config.wechat.pay.privateKeyPath || '',
     platformPublicKeyPath: dbConfig?.platformPublicKeyPath || config.wechat.pay.platformPublicKeyPath || '',
     notifyUrl: dbConfig?.notifyUrl || config.wechat.pay.notifyUrl || '',
+    transferNotifyUrl: dbConfig?.transferNotifyUrl || config.wechat.pay.transferNotifyUrl || '',
   };
 }
 
@@ -407,6 +411,7 @@ function buildWechatPayAuthorization(payConfig: ResolvedWechatPayConfig, method:
     `serial_no="${payConfig.serialNo}"`,
   ].join(',')}`;
 }
+
 
 function buildMiniProgramPayParams(payConfig: ResolvedWechatPayConfig, prepayId: string): WechatPayParams {
   const timeStamp = Math.floor(Date.now() / 1000).toString();

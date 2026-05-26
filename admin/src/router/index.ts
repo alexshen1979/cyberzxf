@@ -18,7 +18,11 @@ const routes = [
       { path: 'users/:id', name: 'UserDetail', component: () => import('@/views/users/detail.vue'), meta: { title: '用户详情', hidden: true } },
       { path: 'points', name: 'Points', component: () => import('@/views/points/index.vue'), meta: { title: '点数管理' } },
       { path: 'orders', name: 'Orders', component: () => import('@/views/orders/index.vue'), meta: { title: '订单管理' } },
-      { path: 'distribution', name: 'Distribution', component: () => import('@/views/distribution/index.vue'), meta: { title: '推荐合作' } },
+      { path: 'distribution', redirect: '/distribution/overview' },
+      { path: 'distribution/overview', name: 'DistributionOverview', component: () => import('@/views/distribution/index.vue'), meta: { title: '推荐合作', distributionSection: 'overview' } },
+      { path: 'distribution/distributors', name: 'DistributionDistributors', component: () => import('@/views/distribution/index.vue'), meta: { title: '合作人员', distributionSection: 'distributors', editorAllowed: true } },
+      { path: 'distribution/commissions', name: 'DistributionCommissions', component: () => import('@/views/distribution/index.vue'), meta: { title: '奖励流水', distributionSection: 'commissions' } },
+      { path: 'distribution/withdrawals', name: 'DistributionWithdrawals', component: () => import('@/views/distribution/index.vue'), meta: { title: '提现管理', distributionSection: 'withdrawals' } },
       { path: 'admins', name: 'Admins', component: () => import('@/views/admins/index.vue'), meta: { title: '管理员账号' } },
       { path: 'content/articles', name: 'Articles', component: () => import('@/views/content/articles.vue'), meta: { title: '干货文库' } },
       { path: 'content/quick-questions', name: 'QuickQuestions', component: () => import('@/views/content/quick-questions.vue'), meta: { title: '快捷提问', editorAllowed: true } },
@@ -52,6 +56,8 @@ router.beforeEach((to, _from, next) => {
     next();
   } else if (!store.token) {
     next('/login');
+  } else if (to.path === '/distribution' && store.isEditor) {
+    next('/distribution/distributors');
   } else if (store.isEditor && !to.meta.editorAllowed) {
     next('/content/quick-questions');
   } else {

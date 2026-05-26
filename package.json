@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "md-editor-v3": "^6.5.0",
+    "pptxgenjs": "^4.0.1",
     "puppeteer": "^24.42.0"
   }
 }

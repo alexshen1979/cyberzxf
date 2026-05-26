@@ -60,6 +60,8 @@ function goDetail(item: any) {
   } else if (item.targetType === 'consultation') {
     userStore.loadSessionId = item.targetId;
     uni.switchTab({ url: '/pages/consult/index' });
+  } else if (item.targetType === 'volunteer_report') {
+    uni.navigateTo({ url: `/pages/volunteer/report?id=${item.targetId}` });
   }
 }
 
@@ -68,6 +70,7 @@ function typeLabel(type: string) {
   if (type === 'knowledge') return '知识';
   if (type === 'university') return '院校';
   if (type === 'major') return '专业';
+  if (type === 'volunteer_report') return '志愿报告';
   return '咨询';
 }
 
@@ -88,6 +91,7 @@ onMounted(load);
 .fav-type.knowledge { background: rgba(15,118,110,0.10); color: #0f766e; }
 .fav-type.university { background: rgba(37,99,235,0.10); color: #2563eb; }
 .fav-type.major { background: rgba(217,119,6,0.12); color: #b45309; }
+.fav-type.volunteer_report { background: rgba(5,150,105,0.12); color: #047857; }
 .fav-date { font-size: $font-xs; color: $text-dim; }
 .fav-title { font-size: $font-md; font-weight: 600; display: block; margin-bottom: 4rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fav-summary { font-size: $font-xs; color: $text-secondary; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

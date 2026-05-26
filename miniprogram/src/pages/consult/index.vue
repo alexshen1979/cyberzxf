@@ -111,12 +111,12 @@
         <view class="message-item msg-ai" v-if="loading && showTypingIndicator">
           <view class="msg-avatar"><text>🤖</text></view>
           <view class="msg-bubble bubble-ai typing-indicator">
-            <text class="typing-text">对方正在输入</text>
-            <view class="typing-dots">
-              <text></text>
-              <text></text>
-              <text></text>
+            <view class="thinking-orbit">
+              <view class="thinking-core"></view>
+              <view class="thinking-spark spark-one"></view>
+              <view class="thinking-spark spark-two"></view>
             </view>
+            <text class="typing-text">{{ activeSkillName }}正在努力思考中</text>
           </view>
         </view>
 
@@ -439,6 +439,7 @@ const messages = ref<Message[]>([]);
 const inputText = ref('');
 const loading = ref(false);
 const activeAiMessageId = ref('');
+const activeSkillName = ref('赛博张老师');
 const showTypingIndicator = computed(() => {
   if (!loading.value || !activeAiMessageId.value) return false;
   const msg = messages.value.find(item => item.id === activeAiMessageId.value);
@@ -498,8 +499,13 @@ function handleStoreNavigation() {
   }
   if (userStore.pendingConsult) {
     userStore.pendingConsult = false;
+    if (userStore.forceNewConsult) {
+      userStore.forceNewConsult = false;
+      resetConversation({ keepContext: false, hydrateLatestReport: false });
+    }
     if (userStore.consultQuestion) {
       inputText.value = userStore.consultQuestion;
+      userStore.consultQuestion = '';
     }
     if (userStore.consultContext) {
       userContext.value = userStore.consultContext;
@@ -520,8 +526,11 @@ function handleStoreNavigation() {
 const pageLoaded = ref(false);
 
 async function initPage() {
-  await loadCategories();
-  fetchConfig();
+  await Promise.all([
+    loadCategories(),
+    fetchConfig(),
+    loadActiveSkillName(),
+  ]);
   loadQuickQuestions(activeCategory.value);
   hydrateContextFromLatestReport();
 }
@@ -561,6 +570,7 @@ onPullDownRefresh(async () => {
     await Promise.all([
       loadCategories(),
       loadQuickQuestions(activeCategory.value),
+      loadActiveSkillName(),
       userStore.fetchBalance(),
     ]);
     if (userStore.isLogin) {
@@ -594,6 +604,15 @@ async function loadQuickQuestions(category?: string) {
   }
 }
 
+async function loadActiveSkillName() {
+  try {
+    const res = await api.ai.getActiveSkill() as any;
+    activeSkillName.value = res.data?.name || '赛博张老师';
+  } catch {
+    activeSkillName.value = '赛博张老师';
+  }
+}
+
 // 分类切换时自动刷新快捷提问
 watch(activeCategory, (cat) => {
   if (cat) loadQuickQuestions(cat);
@@ -624,6 +643,10 @@ function openHistory() {
 }
 
 function newConsultation() {
+  resetConversation({ keepContext: false, hydrateLatestReport: true });
+}
+
+function resetConversation(options: { keepContext?: boolean; hydrateLatestReport?: boolean } = {}) {
   stopAllRevealTimers();
   stopReading();
   activeAiMessageId.value = '';
@@ -631,7 +654,12 @@ function newConsultation() {
   messages.value = [];
   sessionId.value = '';
   inputText.value = '';
-  hydrateContextFromLatestReport();
+  if (!options.keepContext) {
+    userContext.value = '';
+  }
+  if (options.hydrateLatestReport) {
+    hydrateContextFromLatestReport();
+  }
   scrollToBottom();
 }
 
@@ -1794,36 +1822,67 @@ function historyPreview(answer = '') {
   }
 }
 
-.typing-dots {
-  display: flex;
-  align-items: center;
-  gap: 7rpx;
+.thinking-orbit {
+  position: relative;
+  width: 42rpx;
+  height: 42rpx;
+  flex: 0 0 42rpx;
+  border-radius: 50%;
+  border: 2rpx solid rgba(15, 118, 110, 0.16);
+  animation: thinking-spin 1.8s linear infinite;
 }
 
-.typing-dots text {
-  width: 10rpx;
-  height: 10rpx;
+.thinking-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16rpx;
+  height: 16rpx;
   border-radius: 50%;
   background: #0f766e;
-  animation: typing-bounce 1.2s infinite ease-in-out;
+  transform: translate(-50%, -50%);
+  animation: thinking-pulse 1.4s ease-in-out infinite;
 }
 
-.typing-dots text:nth-child(2) {
-  animation-delay: 0.16s;
+.thinking-spark {
+  position: absolute;
+  width: 8rpx;
+  height: 8rpx;
+  border-radius: 50%;
+  background: #14b8a6;
+  box-shadow: 0 0 12rpx rgba(20, 184, 166, 0.45);
 }
 
-.typing-dots text:nth-child(3) {
-  animation-delay: 0.32s;
+.spark-one {
+  right: -3rpx;
+  top: 8rpx;
 }
 
-@keyframes typing-bounce {
-  0%, 80%, 100% {
-    transform: translateY(0);
-    opacity: 0.35;
+.spark-two {
+  left: 3rpx;
+  bottom: 2rpx;
+  width: 6rpx;
+  height: 6rpx;
+  background: #38bdf8;
+}
+
+@keyframes thinking-spin {
+  from {
+    transform: rotate(0deg);
   }
-  40% {
-    transform: translateY(-8rpx);
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes thinking-pulse {
+  0%, 100% {
+    opacity: 0.55;
+    transform: translate(-50%, -50%) scale(0.82);
+  }
+  50% {
     opacity: 1;
+    transform: translate(-50%, -50%) scale(1.08);
   }
 }
 

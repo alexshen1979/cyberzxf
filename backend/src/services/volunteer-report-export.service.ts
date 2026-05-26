@@ -19,7 +19,7 @@ const BRAND_LOGO_PATHS = [
 ];
 const SCREENSHOT_WIDTH = 1125;
 const SCREENSHOT_HEIGHT = 1600;
-const EXPORT_TEMPLATE_VERSION = 'v5';
+const EXPORT_TEMPLATE_VERSION = 'v6';
 const EXPORT_PREVIEW_RECOMMENDATION_LIMIT = 120;
 const EXPORT_RECOMMENDATION_LIMITS = {
   rush: 15,
@@ -171,8 +171,6 @@ async function renderVolunteerReport(report: any, type: VolunteerReportExportTyp
       const doc = (globalThis as any).document;
       const layer = doc.querySelector('.watermark-layer') as any;
       if (layer) layer.style.height = `${height}px`;
-      const printLayer = doc.querySelector('.watermark-print') as any;
-      if (printLayer) printLayer.style.height = `${height}px`;
     }, pageHeight);
 
     if (type === 'pdf') {
@@ -331,7 +329,7 @@ async function buildReportHtml(report: any, type: VolunteerReportExportType) {
     .watermark-stamp { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #435238; font-weight: 900; }
     .watermark-logo { width: 132px; height: 132px; background-position: center; background-repeat: no-repeat; background-size: contain; ${watermarkLogoCss} }
     .watermark-text { font-size: 28px; line-height: 1; letter-spacing: 0; }
-    .page > *:not(.watermark-layer) { position: relative; z-index: 1; }
+    .page > *:not(.watermark-layer):not(.watermark-print) { position: relative; z-index: 1; }
     @page { size: A4; margin: 0; }
     @media print {
       .page { width: 210mm; padding: 12mm; }
@@ -351,7 +349,7 @@ async function buildReportHtml(report: any, type: VolunteerReportExportType) {
       .school-meta, .option-meta { text-align: left; }
       .option-line, .reason { font-size: 3.9mm; }
       .watermark-layer { display: none; }
-      .watermark-print { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: grid; grid-template-columns: repeat(2, 1fr); grid-auto-rows: 58mm; align-content: start; overflow: hidden; opacity: 0.078; }
+      .watermark-print { position: fixed; left: 0; top: 0; width: 210mm; height: 297mm; z-index: 10; pointer-events: none; display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 58mm); align-content: start; overflow: hidden; opacity: 0.078; }
       .watermark-logo { width: 30mm; height: 30mm; }
       .watermark-text { font-size: 6mm; }
     }
@@ -362,7 +360,7 @@ async function buildReportHtml(report: any, type: VolunteerReportExportType) {
     ${watermarkHtml()}
     <section class="cover">
       <div class="brand">涨识 · 赛博张老师</div>
-      <h1 class="title">${escapeHtml(report.province)} ${escapeHtml(report.subjectType)} ${escapeHtml(String(report.score))}分志愿分析报告</h1>
+      <h1 class="title">${escapeHtml(report.title || `${report.province} ${report.subjectType} ${report.score}分志愿分析报告`)}</h1>
       <div class="subtitle">${escapeHtml(result.summary || '基于你的分数、位次、偏好与风险设定，整理出一份可执行的志愿填报参考。')}</div>
       <div class="cover-meta">
         <span class="cover-pill">生成时间 ${escapeHtml(generatedAt)}</span>
@@ -777,7 +775,10 @@ function watermarkHtml() {
   const items = Array.from({ length: 360 }, () => {
     return `<div class="watermark-item" aria-hidden="true"><div class="watermark-stamp"><div class="watermark-logo"></div><div class="watermark-text">涨识</div></div></div>`;
   });
-  return `<div class="watermark-layer">${items.join('')}</div><div class="watermark-print">${items.join('')}</div>`;
+  const printItems = Array.from({ length: 8 }, () => {
+    return `<div class="watermark-item" aria-hidden="true"><div class="watermark-stamp"><div class="watermark-logo"></div><div class="watermark-text">涨识</div></div></div>`;
+  });
+  return `<div class="watermark-layer">${items.join('')}</div><div class="watermark-print">${printItems.join('')}</div>`;
 }
 
 function escapeHtml(value: unknown) {

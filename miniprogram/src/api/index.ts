@@ -85,6 +85,8 @@ export const api = {
       request<{ token: string; user: any }>({ url: '/auth/miniprogram-login', method: 'POST', data: { code, userInfo, referralCode } }),
     getProfile: () =>
       request<{ id: string; nickname: string; avatar: string; phone: string }>({ url: '/auth/profile' }),
+    uploadAvatar: (image: string) =>
+      request<{ avatar: string; user: any }>({ url: '/auth/avatar', method: 'POST', data: { image }, timeout: 30000 }),
     updateProfile: (data: any) =>
       request({ url: '/auth/profile', method: 'PUT', data }),
   },
@@ -107,6 +109,8 @@ export const api = {
       if (category) url += `?category=${encodeURIComponent(category)}`;
       return request({ url });
     },
+    getActiveSkill: () =>
+      request<{ name: string }>({ url: '/ai/active-skill' }),
   },
 
   // 点数
@@ -251,6 +255,10 @@ export const api = {
       request({ url: `/distribution/withdrawals?page=${page}&pageSize=${pageSize}` }),
     applyWithdrawal: (amount: number, remark?: string) =>
       request({ url: '/distribution/withdrawals', method: 'POST', data: { amount, remark } }),
+    transferPackage: (id: string) =>
+      request({ url: `/distribution/withdrawals/${id}/transfer-package` }),
+    syncTransfer: (id: string) =>
+      request({ url: `/distribution/withdrawals/${id}/sync-transfer`, method: 'POST' }),
   },
 
   // AI 高考志愿分析
@@ -335,6 +343,8 @@ export const api = {
       request({ url: `/volunteer/reports?page=${page}&pageSize=${pageSize}` }),
     detail: (id: string) =>
       request({ url: `/volunteer/reports/${id}` }),
+    updateReportTitle: (id: string, title: string) =>
+      request<{ id: string; title: string }>({ url: `/volunteer/reports/${id}/title`, method: 'PUT', data: { title } }),
     exportCosts: () =>
       request<{ pdf: number; image: number }>({ url: '/volunteer/report-export-costs' }),
     exportUrl: (id: string, type: 'pdf' | 'image' = 'pdf') =>
