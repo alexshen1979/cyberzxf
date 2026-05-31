@@ -22,6 +22,7 @@ const routes = [
       { path: 'distribution/overview', name: 'DistributionOverview', component: () => import('@/views/distribution/index.vue'), meta: { title: '推荐合作', distributionSection: 'overview' } },
       { path: 'distribution/distributors', name: 'DistributionDistributors', component: () => import('@/views/distribution/index.vue'), meta: { title: '合作人员', distributionSection: 'distributors', editorAllowed: true } },
       { path: 'distribution/commissions', name: 'DistributionCommissions', component: () => import('@/views/distribution/index.vue'), meta: { title: '奖励流水', distributionSection: 'commissions' } },
+      { path: 'distribution/general-agent-commissions', name: 'DistributionGeneralAgentCommissions', component: () => import('@/views/distribution/index.vue'), meta: { title: '总代佣金', distributionSection: 'generalAgentCommissions' } },
       { path: 'distribution/withdrawals', name: 'DistributionWithdrawals', component: () => import('@/views/distribution/index.vue'), meta: { title: '提现管理', distributionSection: 'withdrawals' } },
       { path: 'admins', name: 'Admins', component: () => import('@/views/admins/index.vue'), meta: { title: '管理员账号' } },
       { path: 'content/articles', name: 'Articles', component: () => import('@/views/content/articles.vue'), meta: { title: '干货文库' } },

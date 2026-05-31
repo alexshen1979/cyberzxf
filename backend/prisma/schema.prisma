@@ -25,6 +25,7 @@ model User {
   pointsAccount         PointsAccount?
   pointsTransactions    PointsTransaction[]
   orders                Order[]
+  rechargeEvents        RechargeAnalyticsEvent[]
   consultationRecords   ConsultationRecord[]
   favorites             Favorite[]
   volunteerReports      VolunteerReport[]
@@ -131,10 +132,33 @@ model Order {
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
   distributionCommissions DistributionCommission[]
+  generalAgentCommissions GeneralAgentCommission[]
+  rechargeEvents          RechargeAnalyticsEvent[]
 
   @@index([userId])
   @@index([commissionSettled])
   @@map("orders")
+}
+
+model RechargeAnalyticsEvent {
+  id        String   @id @default(uuid())
+  eventType String   @map("event_type")
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  sessionId String?  @map("session_id")
+  productId String?  @map("product_id")
+  orderId   String?  @map("order_id")
+  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  amount    Int?
+  channel   String?
+  source    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([eventType, createdAt])
+  @@index([userId, createdAt])
+  @@index([sessionId])
+  @@index([orderId])
+  @@map("recharge_analytics_events")
 }
 
 model DistributionSetting {
@@ -176,6 +200,12 @@ model Distributor {
   parentId   String?       @map("parent_id")
   parent     Distributor?  @relation("DistributorTree", fields: [parentId], references: [id], onDelete: SetNull)
   children   Distributor[] @relation("DistributorTree")
+  generalAgentParentId String?       @map("general_agent_parent_id")
+  generalAgentParent   Distributor?  @relation("GeneralAgentTree", fields: [generalAgentParentId], references: [id], onDelete: SetNull)
+  generalAgentChildren Distributor[] @relation("GeneralAgentTree")
+  generalAgentParentAssignedAt DateTime? @map("general_agent_parent_assigned_at")
+  isGeneralAgent       Boolean       @default(false) @map("is_general_agent")
+  generalAgentRate     Int           @default(2000) @map("general_agent_rate")
   status     String        @default("active")
   newUserGiftOverride Int?  @map("new_user_gift_override")
   appliedAt  DateTime      @default(now()) @map("applied_at")
@@ -187,10 +217,15 @@ model Distributor {
   referrals           DistributionReferral[]   @relation("DirectDistributorReferrals")
   firstLevelReferrals DistributionReferral[]   @relation("FirstLevelDistributorReferrals")
   commissions         DistributionCommission[]
+  generalAgentCommissions GeneralAgentCommission[] @relation("GeneralAgentCommissionOwner")
+  generatedGeneralAgentCommissions GeneralAgentCommission[] @relation("GeneralAgentCommissionSource")
+  personalGeneralAgentCommissions GeneralAgentCommission[] @relation("GeneralAgentCommissionDirectDistributor")
   withdrawals         DistributionWithdrawal[]
 
   @@index([level, status])
   @@index([parentId])
+  @@index([generalAgentParentId])
+  @@index([isGeneralAgent, status])
   @@map("distributors")
 }
 
@@ -230,6 +265,34 @@ model DistributionCommission {
   @@index([distributorId, createdAt])
   @@index([referralUserId])
   @@map("distribution_commissions")
+}
+
+model GeneralAgentCommission {
+  id                  String      @id @default(uuid())
+  orderId             String      @map("order_id")
+  order               Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  generalAgentId      String      @map("general_agent_id")
+  generalAgent        Distributor @relation("GeneralAgentCommissionOwner", fields: [generalAgentId], references: [id], onDelete: Cascade)
+  sourceDistributorId String      @map("source_distributor_id")
+  sourceDistributor   Distributor @relation("GeneralAgentCommissionSource", fields: [sourceDistributorId], references: [id], onDelete: Cascade)
+  referralUserId      String      @map("referral_user_id")
+  directDistributorId String?     @map("direct_distributor_id")
+  directDistributor   Distributor? @relation("GeneralAgentCommissionDirectDistributor", fields: [directDistributorId], references: [id], onDelete: SetNull)
+  rateBps             Int         @map("rate_bps")
+  amount              Int
+  status              String      @default("pending")
+  settledAt           DateTime?   @map("settled_at")
+  adminRemark         String?     @map("admin_remark")
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  @@unique([orderId, generalAgentId])
+  @@index([generalAgentId, createdAt])
+  @@index([sourceDistributorId, createdAt])
+  @@index([directDistributorId])
+  @@index([referralUserId])
+  @@index([status, createdAt])
+  @@map("general_agent_commissions")
 }
 
 model DistributionWithdrawal {

@@ -43,6 +43,7 @@ router.get('/points/transactions', auth, pointsCtrl.getTransactions);// 点数�
 
 // ─── 支付 & 订单 ────────────────────────────────────
 router.get('/payments/products', optionalAuth, paymentCtrl.getProducts);   // 套餐列表
+router.post('/payments/analytics', optionalAuth, paymentCtrl.recordRechargeAnalytics); // 充值页统计
 router.post('/payments/order', auth, paymentCtrl.createOrder);             // 创建订单
 router.post('/payments/callback', paymentCtrl.paymentCallback);            // 支付回调
 router.get('/payments/orders/:orderNo', auth, paymentCtrl.getOrderDetail); // 单个订单状态
@@ -137,6 +138,7 @@ admin.delete('/recharge-products/:id', adminAuth, adminCtrl.deleteRechargeProduc
 
 // 订单管理
 admin.get('/orders/menu-stats', adminAuth, adminCtrl.getOrderMenuStats);
+admin.get('/orders/recharge-analytics', adminAuth, paymentCtrl.adminRechargeAnalytics);
 admin.get('/orders', adminAuth, adminCtrl.getAllOrders);
 admin.get('/orders/:id', adminAuth, adminCtrl.getOrderDetail);
 admin.get('/payment-config/status', adminAuth, paymentCtrl.getConfigStatus);
@@ -151,9 +153,13 @@ admin.get('/distribution/pending-counts', adminDistributionAuth, distributionCtr
 admin.get('/distribution/distributors', adminAuth, distributionCtrl.adminDistributors);
 admin.get('/distribution/distributor-tree', adminDistributionAuth, distributionCtrl.adminDistributorTree);
 admin.get('/distribution/level-one', adminDistributionAuth, distributionCtrl.adminLevelOneDistributors);
+admin.get('/distribution/general-agents', adminAuth, distributionCtrl.adminGeneralAgents);
 admin.post('/distribution/distributors', adminDistributionAuth, distributionCtrl.adminCreateDistributor);
 admin.put('/distribution/distributors/:id', adminDistributionAuth, distributionCtrl.adminUpdateDistributor);
 admin.get('/distribution/commissions', adminAuth, distributionCtrl.adminCommissions);
+admin.get('/distribution/general-agent-commissions', adminAuth, distributionCtrl.adminGeneralAgentCommissions);
+admin.get('/distribution/general-agents/:id/stats', adminAuth, distributionCtrl.adminGeneralAgentStats);
+admin.put('/distribution/general-agent-commissions/:id', adminAuth, distributionCtrl.adminMarkGeneralAgentCommission);
 admin.get('/distribution/withdrawals', adminAuth, distributionCtrl.adminWithdrawals);
 admin.put('/distribution/withdrawals/:id', adminAuth, distributionCtrl.adminReviewWithdrawal);
 admin.post('/distribution/withdrawals/:id/wechat-transfer', adminAuth, distributionCtrl.adminStartWechatTransfer);

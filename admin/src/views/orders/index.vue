@@ -23,6 +23,34 @@
         <el-button type="primary" @click="openPaymentConfig">配置参数</el-button>
       </div>
     </el-card>
+    <el-card class="analytics-card" shadow="never" v-loading="analyticsLoading">
+      <div class="analytics-head">
+        <div>
+          <div class="analytics-title">充值页面数据</div>
+          <div class="analytics-subtitle">记录小程序充值页浏览、点击支付、下单与支付转化</div>
+        </div>
+        <div class="analytics-actions">
+          <el-date-picker
+            v-model="analyticsRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            format="YYYY-MM-DD"
+            @change="loadAnalytics"
+          />
+          <el-button @click="loadAnalytics">刷新</el-button>
+        </div>
+      </div>
+      <div class="analytics-grid">
+        <div class="analytics-item" v-for="item in analyticsCards" :key="item.label">
+          <span>{{ item.label }}</span>
+          <strong>{{ item.value }}</strong>
+          <em>{{ item.tip }}</em>
+        </div>
+      </div>
+    </el-card>
     <el-radio-group v-model="statusFilter" @change="load" style="margin-bottom: 16px">
       <el-radio-button value="">全部</el-radio-button>
       <el-radio-button value="pending">待支付</el-radio-button>
@@ -110,13 +138,16 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue';
+import { computed, reactive, ref, onMounted } from 'vue';
 import { api } from '@/api';
 import { ElMessage } from 'element-plus';
 
 const orders = ref([]);
 const loading = ref(false);
 const statusFilter = ref('');
+const analyticsLoading = ref(false);
+const analytics = ref<any>({});
+const analyticsRange = ref<[string, string]>(defaultAnalyticsRange());
 const paymentConfig = ref<{ ready: boolean; missing: string[] } | null>(null);
 const paymentConfigDialogVisible = ref(false);
 const savingPaymentConfig = ref(false);
@@ -130,6 +161,18 @@ const paymentConfigForm = reactive({
   platformPublicKeyPath: '',
   notifyUrl: '',
   transferNotifyUrl: '',
+});
+
+const analyticsCards = computed(() => {
+  const data = analytics.value || {};
+  return [
+    { label: '充值页浏览', value: formatNumber(data.views), tip: `去重用户 ${formatNumber(data.uniqueViewUsers)}` },
+    { label: '点击支付', value: formatNumber(data.payClicks), tip: `点击率 ${formatPercent(data.clickRate)}` },
+    { label: '创建订单', value: formatNumber(data.createdOrders), tip: `浏览到下单 ${formatPercent(data.orderRate)}` },
+    { label: '支付成功', value: formatNumber(data.paidOrders), tip: `浏览到支付 ${formatPercent(data.payConversionRate)}` },
+    { label: '点击到支付', value: formatPercent(data.clickPayRate), tip: '点击支付后的成功率' },
+    { label: '充值收入', value: formatMoney(data.revenue), tip: `客单价 ${formatMoney(data.avgOrderValue)}` },
+  ];
 });
 
 function statusType(s: string) {
@@ -171,12 +214,45 @@ function formatMoney(value: number) {
   return `¥${(Number(value || 0) / 100).toFixed(2)}`;
 }
 
+function formatNumber(value: any) {
+  return Number(value || 0).toLocaleString('zh-CN');
+}
+
+function formatPercent(value: any) {
+  return `${(Number(value || 0) * 100).toFixed(1)}%`;
+}
+
+function defaultAnalyticsRange(): [string, string] {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 6);
+  return [toDateInput(start), toDateInput(end)];
+}
+
+function toDateInput(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 async function load() {
   loading.value = true;
   try {
     const res = await api.orders.list({ status: statusFilter.value }) as any;
     orders.value = res.data.list;
   } finally { loading.value = false; }
+}
+
+async function loadAnalytics() {
+  analyticsLoading.value = true;
+  try {
+    const [startDate, endDate] = analyticsRange.value || defaultAnalyticsRange();
+    const res = await api.orders.rechargeAnalytics({ startDate, endDate }) as any;
+    analytics.value = res.data || {};
+  } finally {
+    analyticsLoading.value = false;
+  }
 }
 
 async function loadPaymentConfig() {
@@ -216,13 +292,15 @@ async function savePaymentConfig() {
 
 onMounted(() => {
   load();
+  loadAnalytics();
   loadPaymentConfig();
 });
 </script>
 
 <style lang="scss" scoped>
 h2 { margin-bottom: 20px; }
-.payment-config-card { margin-bottom: 16px; }
+.payment-config-card,
+.analytics-card { margin-bottom: 16px; }
 .payment-config-head {
   display: flex;
   align-items: center;
@@ -231,6 +309,61 @@ h2 { margin-bottom: 20px; }
 }
 .payment-config-title { font-weight: 600; color: #1f2937; }
 .payment-config-subtitle { margin-top: 4px; font-size: 13px; color: #6b7280; }
+.analytics-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.analytics-title {
+  font-weight: 600;
+  color: #1f2937;
+}
+.analytics-subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #6b7280;
+}
+.analytics-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+.analytics-item {
+  min-height: 96px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+
+  span,
+  em {
+    display: block;
+    color: #6b7280;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  strong {
+    display: block;
+    margin: 8px 0 6px;
+    color: #111827;
+    font-size: 24px;
+    line-height: 1.1;
+  }
+
+  em {
+    font-style: normal;
+  }
+}
 .user-cell {
   display: flex;
   flex-direction: column;
@@ -283,5 +416,10 @@ h2 { margin-bottom: 20px; }
 }
 .muted {
   color: #9ca3af;
+}
+@media (max-width: 1280px) {
+  .analytics-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 </style>

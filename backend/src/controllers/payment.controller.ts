@@ -5,10 +5,12 @@ import {
   getWechatPayConfigForAdmin,
   updateWechatPayConfig,
   createOrder as svcCreateOrder,
+  getRechargeAnalyticsForAdmin,
   handlePaymentCallback,
   handleWechatPayNotify,
   getUserOrders,
   getUserOrderDetail,
+  recordRechargeEvent,
 } from '../services/payment.service';
 import { config } from '../config';
 
@@ -32,7 +34,7 @@ export async function updateAdminPaymentConfig(ctx: Context) {
 
 export async function createOrder(ctx: Context) {
   const userId = ctx.state.user.userId;
-  const { productId } = ctx.request.body as Record<string, any>;
+  const { productId, sessionId, channel, source } = ctx.request.body as Record<string, any>;
 
   if (!productId) {
     ctx.status = 422;
@@ -40,8 +42,19 @@ export async function createOrder(ctx: Context) {
     return;
   }
 
-  const order = await svcCreateOrder(userId, productId);
+  const order = await svcCreateOrder(userId, productId, { sessionId, channel, source });
   ctx.body = { success: true, data: order };
+}
+
+export async function recordRechargeAnalytics(ctx: Context) {
+  const userId = ctx.state.user?.userId || null;
+  const { eventType, productId, orderId, amount, sessionId, channel, source } = ctx.request.body as Record<string, any>;
+  await recordRechargeEvent(userId, eventType, { productId, orderId, amount, sessionId, channel, source });
+  ctx.body = { success: true, data: { recorded: true } };
+}
+
+export async function adminRechargeAnalytics(ctx: Context) {
+  ctx.body = { success: true, data: await getRechargeAnalyticsForAdmin(ctx.query as Record<string, any>) };
 }
 
 export async function paymentCallback(ctx: Context) {

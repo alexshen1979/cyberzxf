@@ -11,12 +11,16 @@ import {
   getMyDistributionCommissions,
   getMyDistributionQrCode,
   getMyDistributionWithdrawals,
+  getGeneralAgentStatsForAdmin,
   getWithdrawalTransferPackage,
   handleWechatTransferCallbackForDistribution,
   listCommissionsForAdmin,
   listDistributorsForAdmin,
   listDistributorTreeForAdmin,
+  listGeneralAgentCommissionsForAdmin,
+  listGeneralAgentsForAdmin,
   listLevelOneDistributorsForAdmin,
+  markGeneralAgentCommissionForAdmin,
   listWithdrawalsForAdmin,
   recordUserShare,
   reviewWithdrawalForAdmin,
@@ -110,16 +114,32 @@ export async function adminLevelOneDistributors(ctx: Context) {
   ctx.body = { success: true, data: await listLevelOneDistributorsForAdmin() };
 }
 
+export async function adminGeneralAgents(ctx: Context) {
+  ctx.body = { success: true, data: await listGeneralAgentsForAdmin() };
+}
+
 export async function adminCreateDistributor(ctx: Context) {
-  ctx.body = { success: true, data: await createDistributorForAdmin(ctx.request.body as Record<string, any>) };
+  ctx.body = { success: true, data: await createDistributorForAdmin(sanitizeDistributorAdminInput(ctx, ctx.request.body as Record<string, any>)) };
 }
 
 export async function adminUpdateDistributor(ctx: Context) {
-  ctx.body = { success: true, data: await updateDistributorForAdmin(ctx.params.id, ctx.request.body as Record<string, any>) };
+  ctx.body = { success: true, data: await updateDistributorForAdmin(ctx.params.id, sanitizeDistributorAdminInput(ctx, ctx.request.body as Record<string, any>)) };
 }
 
 export async function adminCommissions(ctx: Context) {
   ctx.body = { success: true, data: await listCommissionsForAdmin(ctx.query as Record<string, any>) };
+}
+
+export async function adminGeneralAgentCommissions(ctx: Context) {
+  ctx.body = { success: true, data: await listGeneralAgentCommissionsForAdmin(ctx.query as Record<string, any>) };
+}
+
+export async function adminGeneralAgentStats(ctx: Context) {
+  ctx.body = { success: true, data: await getGeneralAgentStatsForAdmin(ctx.params.id) };
+}
+
+export async function adminMarkGeneralAgentCommission(ctx: Context) {
+  ctx.body = { success: true, data: await markGeneralAgentCommissionForAdmin(ctx.params.id, ctx.request.body as Record<string, any>) };
 }
 
 export async function adminWithdrawals(ctx: Context) {
@@ -141,4 +161,15 @@ export async function adminQueryWechatTransfer(ctx: Context) {
 export async function transferCallback(ctx: Context) {
   await handleWechatTransferCallbackForDistribution(ctx.request.body as Record<string, any>, ctx.headers, (ctx.request as any).rawBody);
   ctx.body = { code: 'SUCCESS', message: 'OK' };
+}
+
+function sanitizeDistributorAdminInput(ctx: Context, input: Record<string, any>) {
+  const role = ctx.state.user?.role;
+  if (role === 'admin' || role === 'super_admin') return input;
+
+  const data = { ...input };
+  delete data.isGeneralAgent;
+  delete data.generalAgentRate;
+  delete data.generalAgentParentId;
+  return data;
 }

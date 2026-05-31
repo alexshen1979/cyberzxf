@@ -78,8 +78,10 @@ const products = ref<Product[]>([]);
 
 const selectedProduct = ref<Product | null>(null);
 const paying = ref(false);
+const analyticsSessionId = `recharge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 onMounted(async () => {
+  recordRechargeAnalytics('page_view');
   const res = await api.payment.getProducts();
   products.value = res.data;
   if (products.value.length > 0) {
@@ -91,6 +93,7 @@ async function handlePay() {
   if (!selectedProduct.value || paying.value) return;
 
   paying.value = true;
+  recordRechargeAnalytics('pay_click', selectedProduct.value);
 
   try {
     if (!userStore.isLogin) {
@@ -98,7 +101,11 @@ async function handlePay() {
       return;
     }
 
-    const orderRes = await api.payment.createOrder(selectedProduct.value.id);
+    const orderRes = await api.payment.createOrder(selectedProduct.value.id, {
+      sessionId: analyticsSessionId,
+      channel: 'mini_program',
+      source: 'recharge_page',
+    });
     const payParams = orderRes.data.payParams;
     if (!payParams) {
       uni.showToast({ title: '支付参数生成失败', icon: 'none' });
@@ -123,6 +130,19 @@ async function handlePay() {
   } finally {
     paying.value = false;
   }
+}
+
+function recordRechargeAnalytics(eventType: 'page_view' | 'pay_click', product?: Product | null) {
+  api.payment.recordAnalytics({
+    eventType,
+    productId: product?.id,
+    amount: product ? Math.round(Number(product.price || 0) * 100) : undefined,
+    sessionId: analyticsSessionId,
+    channel: 'mini_program',
+    source: 'recharge_page',
+  }).catch((err: any) => {
+    console.warn('[recharge] analytics failed', err?.message || err);
+  });
 }
 
 function requestWechatPayment(payParams: {

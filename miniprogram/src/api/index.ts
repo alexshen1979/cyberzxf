@@ -135,7 +135,9 @@ export const api = {
         isDefault?: boolean;
         badgeType?: 'hot' | 'best_value' | null;
       }>>({ url: '/payments/products' }),
-    createOrder: (productId: string) =>
+    recordAnalytics: (data: { eventType: string; productId?: string; amount?: number; sessionId?: string; channel?: string; source?: string }) =>
+      request<{ recorded: boolean }>({ url: '/payments/analytics', method: 'POST', data }),
+    createOrder: (productId: string, meta?: { sessionId?: string; channel?: string; source?: string }) =>
       request<{
         orderNo: string;
         amount: number;
@@ -147,7 +149,7 @@ export const api = {
           signType: 'RSA';
           paySign: string;
         };
-      }>({ url: '/payments/order', method: 'POST', data: { productId } }),
+      }>({ url: '/payments/order', method: 'POST', data: { productId, ...(meta || {}) } }),
     getOrder: (orderNo: string) =>
       request<{ orderNo: string; status: string; paidAt?: string; transactionId?: string }>({ url: `/payments/orders/${orderNo}` }),
     getOrders: (page = 1, pageSize = 20) =>

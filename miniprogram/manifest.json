@@ -3,8 +3,8 @@
   "appid": "__UNI__XXXXXXX",
   "vueVersion": "3",
   "description": "涨识",
-  "versionName": "1.0.0",
-  "versionCode": "100",
+  "versionName": "1.1.2",
+  "versionCode": "112",
   "transformPx": false,
   "uniStatistics": {
     "enable": false

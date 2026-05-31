@@ -13,6 +13,7 @@ import {
 import { settleDistributionCommissionForOrder } from './distribution.service';
 
 const logger = createLogger('payment');
+const RECHARGE_EVENT_TYPES = ['page_view', 'pay_click', 'order_created', 'payment_success'];
 
 interface WechatPayParams {
   timeStamp: string;
@@ -120,7 +121,7 @@ export async function updateWechatPayConfig(input: Record<string, any>) {
 }
 
 // 创建预支付订单
-export async function createOrder(userId: string, productId: string) {
+export async function createOrder(userId: string, productId: string, input: Record<string, any> = {}) {
   const product = await getRechargeProductById(productId);
   if (!product) {
     throw new AppError(404, '充值套餐不存在', 'PRODUCT_NOT_FOUND');
@@ -137,17 +138,28 @@ export async function createOrder(userId: string, productId: string) {
   }
 
   const orderNo = generateOrderNo();
-  const order = await prisma.order.create({
-    data: {
-      orderNo,
-      userId,
+  const order = await prisma.$transaction(async (tx) => {
+    const created = await tx.order.create({
+      data: {
+        orderNo,
+        userId,
+        productId: product.id,
+        productName: product.name,
+        amount: product.price,
+        points: product.points,
+        bonusPoints: product.bonus,
+        status: 'pending',
+      },
+    });
+    await safeCreateRechargeAnalyticsEvent(tx, 'order_created', userId, {
       productId: product.id,
-      productName: product.name,
+      orderId: created.id,
       amount: product.price,
-      points: product.points,
-      bonusPoints: product.bonus,
-      status: 'pending',
-    },
+      sessionId: input.sessionId,
+      channel: input.channel,
+      source: input.source,
+    });
+    return created;
   });
 
   const payParams = await createWechatJsapiPrepay(payConfig, {
@@ -186,6 +198,11 @@ export async function handlePaymentCallback(orderNo: string, transactionId: stri
   await prisma.order.update({
     where: { orderNo },
     data: { status: 'paid', transactionId, paidAt: new Date() },
+  });
+  await safeCreateRechargeAnalyticsEvent(prisma, 'payment_success', order.userId, {
+    productId: order.productId,
+    orderId: order.id,
+    amount: order.amount,
   });
 
   // 充值到账
@@ -267,6 +284,142 @@ export async function getRevenueStats(startDate: Date, endDate: Date) {
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
   return { totalRevenue, totalOrders, avgOrderValue };
+}
+
+export async function recordRechargeEvent(userId: string | null, eventType: string, input: Record<string, any> = {}) {
+  const type = normalizeRechargeEventType(eventType);
+  return createRechargeAnalyticsEvent(prisma, type, userId, input);
+}
+
+export async function getRechargeAnalyticsForAdmin(params: Record<string, any> = {}) {
+  const range = resolveAnalyticsDateRange(params);
+  const where = { createdAt: { gte: range.startDate, lte: range.endDate } };
+  const orderWhere = { createdAt: { gte: range.startDate, lte: range.endDate } };
+  const paidOrderWhere = { status: 'paid', paidAt: { gte: range.startDate, lte: range.endDate } };
+  const [
+    views,
+    payClicks,
+    orderCreatedEvents,
+    paymentSuccessEvents,
+    createdOrders,
+    paidOrders,
+    revenue,
+    uniqueViewUsers,
+    uniquePaidUsers,
+    recentEvents,
+  ] = await Promise.all([
+    prisma.rechargeAnalyticsEvent.count({ where: { ...where, eventType: 'page_view' } }),
+    prisma.rechargeAnalyticsEvent.count({ where: { ...where, eventType: 'pay_click' } }),
+    prisma.rechargeAnalyticsEvent.count({ where: { ...where, eventType: 'order_created' } }),
+    prisma.rechargeAnalyticsEvent.count({ where: { ...where, eventType: 'payment_success' } }),
+    prisma.order.count({ where: orderWhere }),
+    prisma.order.count({ where: paidOrderWhere }),
+    prisma.order.aggregate({ where: paidOrderWhere, _sum: { amount: true } }),
+    prisma.rechargeAnalyticsEvent.findMany({
+      where: { ...where, eventType: 'page_view', userId: { not: null } },
+      distinct: ['userId'],
+      select: { userId: true },
+    }),
+    prisma.order.findMany({
+      where: paidOrderWhere,
+      distinct: ['userId'],
+      select: { userId: true },
+    }),
+    prisma.rechargeAnalyticsEvent.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+      include: {
+        user: { select: { id: true, nickname: true, phone: true, shareCode: true } },
+        order: { select: { id: true, orderNo: true, status: true, productName: true, amount: true } },
+      },
+    }),
+  ]);
+
+  const paidOrderCount = Math.max(paidOrders, paymentSuccessEvents);
+  const createdOrderCount = Math.max(createdOrders, orderCreatedEvents);
+  return {
+    startDate: range.startDate,
+    endDate: range.endDate,
+    views,
+    payClicks,
+    createdOrders: createdOrderCount,
+    paidOrders: paidOrderCount,
+    revenue: revenue._sum.amount || 0,
+    uniqueViewUsers: uniqueViewUsers.length,
+    uniquePaidUsers: uniquePaidUsers.length,
+    clickRate: ratio(payClicks, views),
+    orderRate: ratio(createdOrderCount, views),
+    payConversionRate: ratio(paidOrderCount, views),
+    clickPayRate: ratio(paidOrderCount, payClicks),
+    avgOrderValue: paidOrderCount > 0 ? Math.round((revenue._sum.amount || 0) / paidOrderCount) : 0,
+    recentEvents,
+  };
+}
+
+async function createRechargeAnalyticsEvent(db: any, eventType: string, userId: string | null, input: Record<string, any> = {}) {
+  return db.rechargeAnalyticsEvent.create({
+    data: {
+      eventType: normalizeRechargeEventType(eventType),
+      userId: userId || null,
+      sessionId: normalizeShortText(input.sessionId, 64),
+      productId: normalizeShortText(input.productId, 80),
+      orderId: normalizeShortText(input.orderId, 80),
+      amount: input.amount === undefined || input.amount === null ? null : Math.max(0, Math.round(Number(input.amount) || 0)),
+      channel: normalizeShortText(input.channel, 40),
+      source: normalizeShortText(input.source, 80),
+    },
+  });
+}
+
+async function safeCreateRechargeAnalyticsEvent(db: any, eventType: string, userId: string | null, input: Record<string, any> = {}) {
+  try {
+    return await createRechargeAnalyticsEvent(db, eventType, userId, input);
+  } catch (err: any) {
+    logger.warn('充值统计写入失败: eventType=%s userId=%s message=%s', eventType, userId || '-', err?.message || err);
+    return null;
+  }
+}
+
+function normalizeRechargeEventType(value: any) {
+  const type = String(value || '').trim();
+  if (RECHARGE_EVENT_TYPES.includes(type)) return type;
+  throw new AppError(422, '充值统计事件类型不正确', 'RECHARGE_EVENT_TYPE_INVALID');
+}
+
+function normalizeShortText(value: any, max: number) {
+  const text = String(value || '').trim();
+  return text ? text.slice(0, max) : null;
+}
+
+function resolveAnalyticsDateRange(params: Record<string, any>) {
+  const endDate = parseDateParam(params.endDate, endOfDay(new Date()));
+  const defaultStart = new Date(endDate);
+  defaultStart.setDate(defaultStart.getDate() - 6);
+  const startDate = parseDateParam(params.startDate, startOfDay(defaultStart));
+  return { startDate: startOfDay(startDate), endDate: endOfDay(endDate) };
+}
+
+function parseDateParam(value: any, fallback: Date) {
+  if (!value) return fallback;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? fallback : date;
+}
+
+function startOfDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function endOfDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(23, 59, 59, 999);
+  return next;
+}
+
+function ratio(numerator: number, denominator: number) {
+  return denominator > 0 ? Number((numerator / denominator).toFixed(4)) : 0;
 }
 
 function generateOrderNo(): string {

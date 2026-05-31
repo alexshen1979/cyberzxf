@@ -57,6 +57,9 @@
             <el-menu-item v-if="store.isFullAdmin" index="/distribution/commissions">
               <span>奖励流水</span>
             </el-menu-item>
+            <el-menu-item v-if="store.isFullAdmin" index="/distribution/general-agent-commissions">
+              <span>总代佣金</span>
+            </el-menu-item>
             <el-menu-item v-if="store.isFullAdmin" index="/distribution/withdrawals">
               <span class="menu-label">提现管理<i v-if="store.pendingWithdrawals > 0" class="menu-dot"></i></span>
             </el-menu-item>

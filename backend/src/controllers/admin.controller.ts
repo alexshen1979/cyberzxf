@@ -488,6 +488,10 @@ export async function updateUser(ctx: Context) {
     const normalizedShareCode = normalizeAdminShareCode(shareCode);
     validateAdminShareCode(normalizedShareCode);
 
+    const ownDistributor = await prisma.distributor.findUnique({
+      where: { userId: ctx.params.id },
+      select: { id: true },
+    });
     const [duplicateUser, duplicateDistributor] = await Promise.all([
       prisma.user.findFirst({
         where: {
@@ -498,10 +502,10 @@ export async function updateUser(ctx: Context) {
       }),
       prisma.distributor.findUnique({
         where: { code: normalizedShareCode },
-        select: { id: true },
+        select: { id: true, userId: true },
       }),
     ]);
-    if (duplicateUser || duplicateDistributor) {
+    if (duplicateUser || (duplicateDistributor && duplicateDistributor.id !== ownDistributor?.id)) {
       throw new AppError(409, '邀请码已被占用，请换一个', 'SHARE_CODE_TAKEN');
     }
     data.shareCode = normalizedShareCode;
@@ -514,9 +518,27 @@ export async function updateUser(ctx: Context) {
   }
 
   try {
-    const user = await prisma.user.update({
-      where: { id: ctx.params.id },
-      data,
+    const user = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: ctx.params.id },
+        data,
+      });
+
+      const distributorData: any = {};
+      if (Object.prototype.hasOwnProperty.call(data, 'nickname')) {
+        distributorData.name = updated.nickname || updated.phone || `分销员${updated.id.slice(0, 6)}`;
+      }
+      if (Object.prototype.hasOwnProperty.call(data, 'shareCode')) {
+        distributorData.code = updated.shareCode;
+      }
+      if (Object.keys(distributorData).length) {
+        await tx.distributor.updateMany({
+          where: { userId: updated.id },
+          data: distributorData,
+        });
+      }
+
+      return updated;
     });
     ctx.body = { success: true, data: user };
   } catch (err: any) {

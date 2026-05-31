@@ -73,7 +73,7 @@
     </view>
 
     <view class="version-text">
-      <text>涨识 v1.0.0</text>
+      <text>涨识 v{{ appVersion }}</text>
     </view>
 
     <!-- 编辑资料弹窗 -->
@@ -123,6 +123,7 @@ const showEditDialog = ref(false);
 const editForm = reactive({ nickname: '', phone: '', avatar: '' });
 const pendingAvatarPath = ref('');
 const publicFreeGift = ref(100);
+const appVersion = '1.1.2';
 
 const profileSubtitle = computed(() => {
   if (!userStore.isLogin) return `登录领取 ${publicFreeGift.value} 点体验额度`;

@@ -33,6 +33,7 @@ const DEFAULT_RECURRING_COMMISSION_ENABLED = false;
 const DEFAULT_RECURRING_LEVEL1_RATE = 1000;
 const DEFAULT_RECURRING_LEVEL2_RATE = 500;
 const DEFAULT_RECURRING_COMMISSION_DAYS = 180;
+const DEFAULT_GENERAL_AGENT_RATE = 2000;
 const DEFAULT_DAILY_SHARE_REWARD_POINTS = 10;
 const DAILY_SHARE_REWARD_SOURCE = 'daily_share_reward';
 const DEFAULT_SHARE_REFERRAL_REWARD_POINTS = 20;
@@ -79,12 +80,14 @@ export async function ensureDistributionDefaults(db: any = prisma) {
     }),
     db.distributor.upsert({
       where: { code: SYSTEM_DISTRIBUTOR_CODE },
-      update: { level: 1, parentId: null, status: 'active' },
+      update: { level: 1, parentId: null, generalAgentParentId: null, generalAgentParentAssignedAt: null, isGeneralAgent: false, status: 'active' },
       create: {
         id: SYSTEM_DISTRIBUTOR_ID,
         name: '系统',
         code: SYSTEM_DISTRIBUTOR_CODE,
         level: 1,
+        isGeneralAgent: false,
+        generalAgentRate: DEFAULT_GENERAL_AGENT_RATE,
         status: 'active',
         approvedAt: new Date(),
       },
@@ -417,12 +420,12 @@ export async function applyDistributor(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new AppError(404, '用户不存在', 'USER_NOT_FOUND');
 
-  const code = await generateDistributorCode(userId);
+  const userWithShareCode = await ensureUserShareCode(userId);
   await prisma.distributor.create({
     data: {
       userId,
       name: user.nickname || user.phone || `分销员${userId.slice(0, 6)}`,
-      code,
+      code: userWithShareCode.shareCode || await generateDistributorCode(userId),
       level: 2,
       parentId: system.id,
       status: 'pending',
@@ -485,7 +488,7 @@ export async function getMyDistribution(userId: string) {
   ]);
 
   return {
-    distributor,
+    distributor: formatDistributorForMini(distributor),
     setting: formatDistributionSetting(setting),
     stats: {
       directReferralCount,
@@ -825,6 +828,7 @@ async function settleDistributionCommissionForOrderInTx(tx: any, orderId: string
   const order = await tx.order.findUnique({ where: { id: orderId } });
   if (!order || order.status !== 'paid') return null;
   if (order.commissionSettled && !options.retrySettled) return null;
+  const generalAgentRows: any[] = [];
 
   let referral = await ensureDistributionReferralForOrder(tx, order) || await tx.distributionReferral.findUnique({
     where: { userId: order.userId },
@@ -832,15 +836,23 @@ async function settleDistributionCommissionForOrderInTx(tx: any, orderId: string
   });
 
   if (!referral) {
+    generalAgentRows.push(...await buildEligibleGeneralAgentCommissionRowsForPersonalOrder(tx, order));
+    for (const row of generalAgentRows) {
+      await tx.generalAgentCommission.create({ data: row });
+    }
     if (!order.commissionSettled) {
       await tx.order.update({ where: { id: order.id }, data: { commissionSettled: true } });
     }
-    return null;
+    return generalAgentRows.length ? generalAgentRows : null;
   }
 
   referral = await syncReferralForCommission(tx, referral);
   if (!referral || !isOrderAfterDistributorApproval(order, referral.distributor)) {
-    return null;
+    generalAgentRows.push(...await buildEligibleGeneralAgentCommissionRowsForPersonalOrder(tx, order));
+    for (const row of generalAgentRows) {
+      await tx.generalAgentCommission.create({ data: row });
+    }
+    return generalAgentRows.length ? generalAgentRows : null;
   }
 
   const setting = await tx.distributionSetting.findUnique({ where: { id: 'default' } });
@@ -852,13 +864,23 @@ async function settleDistributionCommissionForOrderInTx(tx: any, orderId: string
         data: { firstOrderId: order.id, commissionSettledAt: new Date() },
       });
     }
+    appendUniqueGeneralAgentRows(generalAgentRows, await buildEligibleGeneralAgentCommissionRows(tx, order, referral));
+    appendUniqueGeneralAgentRows(generalAgentRows, await buildEligibleGeneralAgentCommissionRowsForPersonalOrder(tx, order));
+    for (const row of generalAgentRows) {
+      await tx.generalAgentCommission.create({ data: row });
+    }
     await tx.order.update({ where: { id: order.id }, data: { commissionSettled: true } });
-    return null;
+    return generalAgentRows.length ? generalAgentRows : null;
   }
 
   const rows = await buildEligibleCommissionRows(tx, order, referral, setting);
   for (const row of rows) {
     await tx.distributionCommission.create({ data: row });
+  }
+  appendUniqueGeneralAgentRows(generalAgentRows, await buildEligibleGeneralAgentCommissionRows(tx, order, referral));
+  appendUniqueGeneralAgentRows(generalAgentRows, await buildEligibleGeneralAgentCommissionRowsForPersonalOrder(tx, order));
+  for (const row of generalAgentRows) {
+    await tx.generalAgentCommission.create({ data: row });
   }
 
   if (rows.some((row) => row.role === 'level1_direct' || row.role === 'level2_direct')) {
@@ -869,10 +891,17 @@ async function settleDistributionCommissionForOrderInTx(tx: any, orderId: string
   }
   await tx.order.update({ where: { id: order.id }, data: { commissionSettled: true } });
 
-  if (rows.length) {
-    logger.info('分销佣金已结算: orderId=%s rows=%d amount=%d', order.id, rows.length, rows.reduce((sum, row) => sum + row.amount, 0));
+  if (rows.length || generalAgentRows.length) {
+    logger.info(
+      '分销佣金已结算: orderId=%s rows=%d amount=%d generalAgentRows=%d generalAgentAmount=%d',
+      order.id,
+      rows.length,
+      rows.reduce((sum, row) => sum + row.amount, 0),
+      generalAgentRows.length,
+      generalAgentRows.reduce((sum, row) => sum + row.amount, 0),
+    );
   }
-  return rows;
+  return [...rows, ...generalAgentRows];
 }
 
 function isOrderAfterDistributorApproval(order: any, distributor: any) {
@@ -915,6 +944,14 @@ function isOrderInRecurringWindow(order: any, after: Date | string | null | unde
   if (!window) return false;
   const paidAt = order.paidAt ? new Date(order.paidAt) : new Date();
   return paidAt >= window.start && paidAt <= window.end;
+}
+
+function appendUniqueGeneralAgentRows(target: any[], rows: any[]) {
+  for (const row of rows) {
+    if (!target.some((item) => item.orderId === row.orderId && item.generalAgentId === row.generalAgentId)) {
+      target.push(row);
+    }
+  }
 }
 
 async function backfillMissingCommissionsForDistributor(distributorId: string) {
@@ -1260,6 +1297,11 @@ export async function getDistributionDashboardForAdmin() {
     settledCommissionTotal,
     withdrawalTotal,
     withdrawalPendingTotal,
+    generalAgentCount,
+    generalAgentCommissionCount,
+    generalAgentCommissionTotal,
+    generalAgentPendingTotal,
+    generalAgentPaidTotal,
   ] = await Promise.all([
     prisma.distributor.count({ where: { code: { not: SYSTEM_DISTRIBUTOR_CODE } } }),
     prisma.distributor.count({ where: { level: 1, code: { not: SYSTEM_DISTRIBUTOR_CODE } } }),
@@ -1276,6 +1318,11 @@ export async function getDistributionDashboardForAdmin() {
     }),
     prisma.distributionWithdrawal.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
     prisma.distributionWithdrawal.aggregate({ where: { status: { in: LOCKED_WITHDRAWAL_STATUSES } }, _sum: { amount: true } }),
+    prisma.distributor.count({ where: { level: 1, isGeneralAgent: true, code: { not: SYSTEM_DISTRIBUTOR_CODE } } }),
+    prisma.generalAgentCommission.count(),
+    prisma.generalAgentCommission.aggregate({ _sum: { amount: true } }),
+    prisma.generalAgentCommission.aggregate({ where: { status: 'pending' }, _sum: { amount: true } }),
+    prisma.generalAgentCommission.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
   ]);
   const commissionAmount = commissionTotal._sum.amount || 0;
   const settledCommissionAmount = settledCommissionTotal._sum.amount || 0;
@@ -1291,6 +1338,11 @@ export async function getDistributionDashboardForAdmin() {
     frozenCommissionAmount: Math.max(0, commissionAmount - settledCommissionAmount),
     paidWithdrawalAmount: withdrawalTotal._sum.amount || 0,
     pendingWithdrawalAmount: withdrawalPendingTotal._sum.amount || 0,
+    generalAgentCount,
+    generalAgentCommissionCount,
+    generalAgentCommissionAmount: generalAgentCommissionTotal._sum.amount || 0,
+    generalAgentPendingAmount: generalAgentPendingTotal._sum.amount || 0,
+    generalAgentPaidAmount: generalAgentPaidTotal._sum.amount || 0,
     withdrawalFreezeDays: freezeDays,
   };
 }
@@ -1345,6 +1397,7 @@ export async function listDistributorsForAdmin(params: Record<string, any>) {
       include: {
         user: { select: { id: true, nickname: true, phone: true, createdAt: true } },
         parent: { select: { id: true, name: true, code: true } },
+        generalAgentParent: { select: { id: true, name: true, code: true, generalAgentRate: true } },
         _count: { select: { children: true, referrals: true, commissions: true } },
       },
     }),
@@ -1361,6 +1414,7 @@ export async function listDistributorTreeForAdmin(params: Record<string, any>) {
   const keyword = String(params.keyword || '').trim();
   const level = params.level ? Number(params.level) : undefined;
   const status = String(params.status || '').trim();
+  const generalAgent = String(params.generalAgent || '').trim();
 
   const distributors = await prisma.distributor.findMany({
     where: { code: { not: SYSTEM_DISTRIBUTOR_CODE } },
@@ -1368,6 +1422,19 @@ export async function listDistributorTreeForAdmin(params: Record<string, any>) {
     include: {
       user: { select: { id: true, nickname: true, phone: true, createdAt: true, shareCode: true } },
       parent: { select: { id: true, name: true, code: true } },
+      generalAgentParent: { select: { id: true, name: true, code: true, generalAgentRate: true } },
+      generalAgentChildren: {
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          level: true,
+          status: true,
+          userId: true,
+          user: { select: { id: true, nickname: true, phone: true, createdAt: true, shareCode: true } },
+          _count: { select: { children: true, referrals: true, commissions: true } },
+        },
+      },
       _count: { select: { children: true, referrals: true, commissions: true } },
     },
   });
@@ -1415,13 +1482,17 @@ export async function listDistributorTreeForAdmin(params: Record<string, any>) {
 
   const filtered = roots
     .map((root) => {
-      const rootMatches = distributorMatchesTreeFilter(root, { keyword, level, status });
-      const children = (root.children || []).filter((child: any) => distributorMatchesTreeFilter(child, { keyword, level, status }));
-      const shouldInclude = rootMatches || children.length > 0 || (!keyword && !status && !level);
+      const filter = { keyword, level, status, generalAgent };
+      const rootMatches = distributorMatchesTreeFilter(root, filter);
+      const children = (root.children || []).filter((child: any) => distributorMatchesTreeFilter(child, filter));
+      const agentChildren = (root.generalAgentChildren || []).filter((child: any) => child.level === 1 && child.id !== root.id);
+      const hasFilter = Boolean(keyword || status || level || generalAgent);
+      const shouldInclude = rootMatches || children.length > 0 || !hasFilter;
       if (!shouldInclude) return null;
       return {
         ...root,
-        children: rootMatches && level !== 2 && !status && !keyword ? root.children : children,
+        children: rootMatches && level !== 2 && !status && !keyword && !generalAgent ? root.children : children,
+        generalAgentChildren: agentChildren,
         childCount: root.children?.length || 0,
       };
     })
@@ -1437,7 +1508,16 @@ export async function listLevelOneDistributorsForAdmin() {
   return prisma.distributor.findMany({
     where: { level: 1, status: 'active', code: { not: SYSTEM_DISTRIBUTOR_CODE } },
     orderBy: [{ code: 'asc' }],
-    select: { id: true, name: true, code: true, userId: true, newUserGiftOverride: true },
+    select: { id: true, name: true, code: true, userId: true, newUserGiftOverride: true, isGeneralAgent: true, generalAgentRate: true },
+  });
+}
+
+export async function listGeneralAgentsForAdmin() {
+  await ensureDistributionDefaults();
+  return prisma.distributor.findMany({
+    where: { level: 1, status: 'active', isGeneralAgent: true, code: { not: SYSTEM_DISTRIBUTOR_CODE } },
+    orderBy: [{ code: 'asc' }],
+    select: { id: true, name: true, code: true, userId: true, generalAgentRate: true },
   });
 }
 
@@ -1457,21 +1537,34 @@ export async function createDistributorForAdmin(input: Record<string, any>) {
   const invitedParentId = level === 2 && status === 'active'
     ? await resolveDistributorParentFromShareReferral(prisma, userId)
     : null;
+  const userWithShareCode = await ensureUserShareCode(userId);
   const parentId = level === 2 ? await resolveLevel2ParentId(input.parentId || invitedParentId) : null;
   const newUserGiftOverride = level === 1 ? normalizeOptionalPointAmount(input.newUserGiftOverride, '特邀合作伙伴新用户额外赠点') : null;
+  const isGeneralAgent = level === 1 && input.isGeneralAgent === true;
+  const generalAgentRate = level === 1 ? normalizeRateBps(input.generalAgentRate ?? DEFAULT_GENERAL_AGENT_RATE) : DEFAULT_GENERAL_AGENT_RATE;
+  const generalAgentParentId = level === 1 && !isGeneralAgent ? await resolveGeneralAgentParentId(input.generalAgentParentId, userId) : null;
   const distributor = await prisma.distributor.create({
     data: {
       userId,
       name: String(input.name || user.nickname || user.phone || `分销员${userId.slice(0, 6)}`).trim(),
-      code: await generateDistributorCode(userId),
+      code: userWithShareCode.shareCode || await generateDistributorCode(userId),
       level,
       parentId,
+      generalAgentParentId,
+      generalAgentParentAssignedAt: generalAgentParentId ? new Date() : null,
+      isGeneralAgent,
+      generalAgentRate,
       status,
       newUserGiftOverride,
       approvedAt: status === 'active' ? new Date() : null,
     },
   });
-  return status === 'active' ? syncDistributorParentFromInvitation(prisma, distributor) : distributor;
+  if (status !== 'active') return distributor;
+
+  const synced = await syncDistributorParentFromInvitation(prisma, distributor);
+  await backfillDistributionReferralsForDistributor(prisma, synced);
+  if (synced.level === 1) await backfillGeneralAgentCommissionsForSource(prisma, synced);
+  return synced;
 }
 
 export async function updateDistributorForAdmin(id: string, input: Record<string, any>) {
@@ -1500,6 +1593,26 @@ export async function updateDistributorForAdmin(id: string, input: Record<string
   data.level = nextLevel;
   if (nextLevel === 1) {
     data.parentId = null;
+    const generalAgentInputTouched = Object.prototype.hasOwnProperty.call(input, 'isGeneralAgent')
+      || Object.prototype.hasOwnProperty.call(input, 'generalAgentRate')
+      || Object.prototype.hasOwnProperty.call(input, 'generalAgentParentId');
+    const nextIsGeneralAgent = input.isGeneralAgent !== undefined ? input.isGeneralAgent === true : distributor.isGeneralAgent;
+    data.isGeneralAgent = nextIsGeneralAgent;
+    data.generalAgentRate = nextIsGeneralAgent
+      ? normalizeRateBps(input.generalAgentRate ?? distributor.generalAgentRate ?? DEFAULT_GENERAL_AGENT_RATE)
+      : DEFAULT_GENERAL_AGENT_RATE;
+    if (nextIsGeneralAgent) {
+      data.generalAgentParentId = null;
+      data.generalAgentParentAssignedAt = null;
+    } else if (generalAgentInputTouched) {
+      const nextGeneralAgentParentId = await resolveGeneralAgentParentId(input.generalAgentParentId, distributor.userId, distributor.id);
+      data.generalAgentParentId = nextGeneralAgentParentId;
+      data.generalAgentParentAssignedAt = nextGeneralAgentParentId
+        ? (nextGeneralAgentParentId === distributor.generalAgentParentId
+          ? (distributor.generalAgentParentAssignedAt || new Date())
+          : new Date())
+        : null;
+    }
     if (input.newUserGiftOverride !== undefined) {
       data.newUserGiftOverride = normalizeOptionalPointAmount(input.newUserGiftOverride, '特邀合作伙伴新用户额外赠点');
     }
@@ -1509,6 +1622,10 @@ export async function updateDistributorForAdmin(id: string, input: Record<string
       : null;
     data.parentId = await resolveLevel2ParentId(input.parentId || invitedParentId || distributor.parentId);
     data.newUserGiftOverride = null;
+    data.isGeneralAgent = false;
+    data.generalAgentRate = DEFAULT_GENERAL_AGENT_RATE;
+    data.generalAgentParentId = null;
+    data.generalAgentParentAssignedAt = null;
   }
 
   return prisma.$transaction(async (tx) => {
@@ -1519,9 +1636,18 @@ export async function updateDistributorForAdmin(id: string, input: Record<string
         data: { parentId: system.id },
       });
     }
+    if ((distributor.level === 1 && nextLevel !== 1) || (distributor.isGeneralAgent && data.isGeneralAgent === false)) {
+      await tx.distributor.updateMany({
+        where: { generalAgentParentId: distributor.id },
+        data: { generalAgentParentId: null, generalAgentParentAssignedAt: null },
+      });
+    }
     const updated = await tx.distributor.update({ where: { id }, data });
     if (updated.status === 'active') {
       await backfillDistributionReferralsForDistributor(tx, updated);
+    }
+    if (updated.status === 'active' && updated.level === 1) {
+      await backfillGeneralAgentCommissionsForSource(tx, updated);
     }
     return updated;
   });
@@ -1533,6 +1659,104 @@ export async function listCommissionsForAdmin(params: Record<string, any>) {
   const where: any = realDistributorCommissionWhere();
   if (params.distributorId) where.distributorId = String(params.distributorId);
   return listCommissionsByWhere(where, page, pageSize);
+}
+
+export async function listGeneralAgentCommissionsForAdmin(params: Record<string, any>) {
+  const page = Math.max(1, parseInt(params.page || '1', 10));
+  const pageSize = Math.min(100, Math.max(1, parseInt(params.pageSize || '20', 10)));
+  const where: any = {};
+  if (params.generalAgentId) where.generalAgentId = String(params.generalAgentId);
+  if (params.sourceDistributorId) where.sourceDistributorId = String(params.sourceDistributorId);
+  if (params.status) where.status = String(params.status);
+
+  const [list, total] = await Promise.all([
+    prisma.generalAgentCommission.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: {
+        generalAgent: { select: { id: true, name: true, code: true, generalAgentRate: true } },
+        sourceDistributor: { select: { id: true, name: true, code: true, level: true } },
+        directDistributor: { select: { id: true, name: true, code: true, level: true } },
+        order: { select: { id: true, orderNo: true, amount: true, productName: true, paidAt: true } },
+      },
+    }),
+    prisma.generalAgentCommission.count({ where }),
+  ]);
+
+  const userIds = [...new Set(list.map(item => item.referralUserId).filter(Boolean))];
+  const users = userIds.length
+    ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, nickname: true, phone: true } })
+    : [];
+  const userMap = new Map(users.map(user => [user.id, user]));
+  return {
+    list: list.map(item => ({ ...item, referralUser: userMap.get(item.referralUserId) || null })),
+    total,
+    page,
+    pageSize,
+  };
+}
+
+export async function getGeneralAgentStatsForAdmin(id: string) {
+  const agent = await prisma.distributor.findUnique({
+    where: { id },
+    include: {
+      generalAgentChildren: {
+        where: { level: 1 },
+        select: { id: true, name: true, code: true, status: true, _count: { select: { children: true, referrals: true } } },
+      },
+    },
+  });
+  if (!agent || agent.level !== 1 || !agent.isGeneralAgent) {
+    throw new AppError(404, '总代不存在', 'GENERAL_AGENT_NOT_FOUND');
+  }
+  const sourceIds = agent.generalAgentChildren.map(child => child.id);
+  const [
+    totalCommission,
+    pendingCommission,
+    paidCommission,
+    commissionCount,
+    orderCount,
+  ] = await Promise.all([
+    prisma.generalAgentCommission.aggregate({ where: { generalAgentId: id }, _sum: { amount: true } }),
+    prisma.generalAgentCommission.aggregate({ where: { generalAgentId: id, status: 'pending' }, _sum: { amount: true } }),
+    prisma.generalAgentCommission.aggregate({ where: { generalAgentId: id, status: 'paid' }, _sum: { amount: true } }),
+    prisma.generalAgentCommission.count({ where: { generalAgentId: id } }),
+    prisma.generalAgentCommission.count({ where: { generalAgentId: id } }),
+  ]);
+  return {
+    agent,
+    childPartnerCount: sourceIds.length,
+    childReferralOfficerCount: agent.generalAgentChildren.reduce((sum, child) => sum + (child._count?.children || 0), 0),
+    childDirectReferralCount: agent.generalAgentChildren.reduce((sum, child) => sum + (child._count?.referrals || 0), 0),
+    commissionCount,
+    orderCount,
+    commissionAmount: totalCommission._sum.amount || 0,
+    pendingAmount: pendingCommission._sum.amount || 0,
+    paidAmount: paidCommission._sum.amount || 0,
+  };
+}
+
+export async function markGeneralAgentCommissionForAdmin(id: string, input: Record<string, any>) {
+  const status = normalizeGeneralAgentCommissionStatus(input.status);
+  const commission = await prisma.generalAgentCommission.findUnique({ where: { id } });
+  if (!commission) throw new AppError(404, '总代佣金不存在', 'GENERAL_AGENT_COMMISSION_NOT_FOUND');
+  const now = new Date();
+  return prisma.generalAgentCommission.update({
+    where: { id },
+    data: {
+      status,
+      settledAt: status === 'paid' ? now : null,
+      adminRemark: String(input.adminRemark || '').trim().slice(0, 200) || null,
+    },
+    include: {
+      generalAgent: { select: { id: true, name: true, code: true, generalAgentRate: true } },
+      sourceDistributor: { select: { id: true, name: true, code: true, level: true } },
+      directDistributor: { select: { id: true, name: true, code: true, level: true } },
+      order: { select: { id: true, orderNo: true, amount: true, productName: true, paidAt: true } },
+    },
+  });
 }
 
 export async function listWithdrawalsForAdmin(params: Record<string, any>) {
@@ -1695,11 +1919,29 @@ function realDistributorCommissionWhere() {
   return { distributor: { code: { not: SYSTEM_DISTRIBUTOR_CODE } } };
 }
 
-function distributorMatchesTreeFilter(distributor: any, filter: { keyword: string; level?: number; status: string }) {
+async function resolveGeneralAgentParentId(value: any, userId?: string | null, selfId?: string) {
+  const id = String(value || '').trim();
+  if (!id) return null;
+  if (id === selfId) {
+    throw new AppError(422, '合伙人不能归属于自己作为总代', 'GENERAL_AGENT_SELF_PARENT_INVALID');
+  }
+  const parent = await prisma.distributor.findUnique({ where: { id } });
+  if (!parent || parent.level !== 1 || parent.status !== 'active' || !parent.isGeneralAgent) {
+    throw new AppError(422, '所属总代必须是已启用的总代合伙人', 'GENERAL_AGENT_PARENT_INVALID');
+  }
+  if (parent.userId && userId && parent.userId === userId) {
+    throw new AppError(422, '合伙人不能归属于自己作为总代', 'GENERAL_AGENT_SELF_PARENT_INVALID');
+  }
+  return parent.id;
+}
+
+function distributorMatchesTreeFilter(distributor: any, filter: { keyword: string; level?: number; status: string; generalAgent?: string }) {
   if (filter.level === 1 || filter.level === 2) {
     if (distributor.level !== filter.level) return false;
   }
   if (filter.status && distributor.status !== filter.status) return false;
+  if (filter.generalAgent === 'agent' && !distributor.isGeneralAgent) return false;
+  if (filter.generalAgent === 'child' && !distributor.generalAgentParentId) return false;
   if (!filter.keyword) return true;
   const text = [
     distributor.name,
@@ -1710,8 +1952,164 @@ function distributorMatchesTreeFilter(distributor: any, filter: { keyword: strin
     distributor.user?.shareCode,
     distributor.parent?.name,
     distributor.parent?.code,
+    distributor.generalAgentParent?.name,
+    distributor.generalAgentParent?.code,
   ].filter(Boolean).join(' ').toLowerCase();
   return text.includes(filter.keyword.toLowerCase());
+}
+
+async function buildEligibleGeneralAgentCommissionRows(db: any, order: any, referral: any) {
+  const rows: any[] = [];
+  const source = await resolveGeneralAgentSourceDistributor(db, referral);
+  if (!source?.generalAgentParentId) return rows;
+  if (!isOrderAfterDate(order, maxDate(source.approvedAt, source.generalAgentParentAssignedAt))) return rows;
+
+  const agent = await db.distributor.findUnique({ where: { id: source.generalAgentParentId } });
+  if (!agent || agent.level !== 1 || !agent.isGeneralAgent || agent.status !== 'active') return rows;
+  if (!isOrderAfterDate(order, agent.approvedAt)) return rows;
+  if (await hasGeneralAgentCommissionForOrder(db, order.id, agent.id)) return rows;
+
+  const rateBps = normalizeRateBps(agent.generalAgentRate ?? DEFAULT_GENERAL_AGENT_RATE);
+  const amount = calculateCommission(order.amount, rateBps);
+  if (amount > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      orderId: order.id,
+      generalAgentId: agent.id,
+      sourceDistributorId: source.id,
+      referralUserId: referral.userId,
+      directDistributorId: referral.distributorId || referral.distributor?.id || null,
+      rateBps,
+      amount,
+      status: 'pending',
+    });
+  }
+  return rows;
+}
+
+async function buildEligibleGeneralAgentCommissionRowsForPersonalOrder(db: any, order: any) {
+  const rows: any[] = [];
+  const direct = await db.distributor.findUnique({
+    where: { userId: order.userId },
+    include: { parent: true },
+  });
+  if (!direct || direct.status !== 'active') return rows;
+
+  const source = direct.level === 1
+    ? direct
+    : direct.parentId && direct.parentId !== SYSTEM_DISTRIBUTOR_ID
+      ? (direct.parent || await db.distributor.findUnique({ where: { id: direct.parentId } }))
+      : null;
+  if (!source || source.level !== 1 || source.status !== 'active' || !source.generalAgentParentId) return rows;
+  if (!isOrderAfterDate(order, maxDate(source.approvedAt, source.generalAgentParentAssignedAt, direct.approvedAt))) return rows;
+
+  const agent = await db.distributor.findUnique({ where: { id: source.generalAgentParentId } });
+  if (!agent || agent.level !== 1 || !agent.isGeneralAgent || agent.status !== 'active') return rows;
+  if (!isOrderAfterDate(order, agent.approvedAt)) return rows;
+  if (await hasGeneralAgentCommissionForOrder(db, order.id, agent.id)) return rows;
+
+  const rateBps = normalizeRateBps(agent.generalAgentRate ?? DEFAULT_GENERAL_AGENT_RATE);
+  const amount = calculateCommission(order.amount, rateBps);
+  if (amount > 0) {
+    rows.push({
+      id: crypto.randomUUID(),
+      orderId: order.id,
+      generalAgentId: agent.id,
+      sourceDistributorId: source.id,
+      referralUserId: order.userId,
+      directDistributorId: direct.id,
+      rateBps,
+      amount,
+      status: 'pending',
+    });
+  }
+  return rows;
+}
+
+async function backfillGeneralAgentCommissionsForSource(db: any, sourceDistributor: any) {
+  if (!sourceDistributor?.id || sourceDistributor.level !== 1 || sourceDistributor.status !== 'active') return 0;
+  const source = sourceDistributor.generalAgentParentId !== undefined
+    ? sourceDistributor
+    : await db.distributor.findUnique({ where: { id: sourceDistributor.id } });
+  if (!source?.generalAgentParentId) return 0;
+
+  const agent = await db.distributor.findUnique({ where: { id: source.generalAgentParentId } });
+  if (!agent || agent.level !== 1 || !agent.isGeneralAgent || agent.status !== 'active') return 0;
+
+  const referrals = await db.distributionReferral.findMany({
+    where: { firstLevelDistributorId: source.id },
+    include: { distributor: { include: { parent: true } } },
+  });
+  let created = 0;
+  const personalUserIds = new Set<string>();
+  if (source.userId) personalUserIds.add(source.userId);
+  const children = await db.distributor.findMany({
+    where: { parentId: source.id, status: 'active', userId: { not: null } },
+    select: { userId: true },
+  });
+  for (const child of children) {
+    if (child.userId) personalUserIds.add(child.userId);
+  }
+
+  for (const userId of personalUserIds) {
+    const after = maxDate(source.approvedAt, source.generalAgentParentAssignedAt, agent.approvedAt);
+    const orders = await db.order.findMany({
+      where: {
+        userId,
+        status: 'paid',
+        paidAt: after ? { gte: after } : { not: null },
+      },
+      orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
+      take: 200,
+    });
+    for (const order of orders) {
+      const rows = await buildEligibleGeneralAgentCommissionRowsForPersonalOrder(db, order);
+      for (const row of rows) {
+        await db.generalAgentCommission.create({ data: row });
+        created += 1;
+      }
+    }
+  }
+
+  for (const referral of referrals) {
+    const after = maxDate(referral.createdAt, source.approvedAt, source.generalAgentParentAssignedAt, agent.approvedAt);
+    const orders = await db.order.findMany({
+      where: {
+        userId: referral.userId,
+        status: 'paid',
+        paidAt: after ? { gte: after } : { not: null },
+      },
+      orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
+      take: 200,
+    });
+
+    for (const order of orders) {
+      const rows = await buildEligibleGeneralAgentCommissionRows(db, order, referral);
+      for (const row of rows) {
+        await db.generalAgentCommission.create({ data: row });
+        created += 1;
+      }
+    }
+  }
+  return created;
+}
+
+async function resolveGeneralAgentSourceDistributor(db: any, referral: any) {
+  if (!referral?.distributor) return null;
+  const direct = referral.distributor;
+  if (direct.level === 1) {
+    return direct.generalAgentParentId !== undefined
+      ? direct
+      : db.distributor.findUnique({ where: { id: direct.id } });
+  }
+  const parentId = referral.firstLevelDistributorId || direct.parentId;
+  if (!parentId || parentId === SYSTEM_DISTRIBUTOR_ID) return null;
+  return db.distributor.findUnique({ where: { id: parentId } });
+}
+
+async function hasGeneralAgentCommissionForOrder(db: any, orderId: string, generalAgentId: string) {
+  const count = await db.generalAgentCommission.count({ where: { orderId, generalAgentId } });
+  return count > 0;
 }
 
 async function buildEligibleCommissionRows(db: any, order: any, referral: any, setting: any) {
@@ -2342,6 +2740,12 @@ function normalizeWithdrawalStatus(value: any) {
   throw new AppError(422, '提现状态不正确', 'WITHDRAWAL_STATUS_INVALID');
 }
 
+function normalizeGeneralAgentCommissionStatus(value: any) {
+  const status = String(value || '').trim();
+  if (['pending', 'paid'].includes(status)) return status;
+  throw new AppError(422, '总代佣金状态不正确', 'GENERAL_AGENT_COMMISSION_STATUS_INVALID');
+}
+
 function formatDistributionSetting(setting: any) {
   const transferRule = formatTransferRule(setting);
   return {
@@ -2440,6 +2844,21 @@ async function buildShareOnlyDistribution(userId: string, user: any, setting: an
     referralRewardPoints: getReferralRewardPoints(setting),
     canApply,
   };
+}
+
+function formatDistributorForMini(distributor: any) {
+  if (!distributor) return null;
+  const {
+    generalAgentParentId,
+    generalAgentParent,
+    generalAgentChildren,
+    isGeneralAgent,
+    generalAgentRate,
+    generalAgentCommissions,
+    generatedGeneralAgentCommissions,
+    ...safeDistributor
+  } = distributor;
+  return safeDistributor;
 }
 
 function getUserShareReferral(userId: string) {

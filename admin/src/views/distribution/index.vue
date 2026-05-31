@@ -20,6 +20,17 @@
             <strong>{{ dashboard.level2Count || 0 }}</strong>
           </div>
         </div>
+        <div class="people-breakdown compact">
+          <div>
+            <span>总代</span>
+            <strong>{{ dashboard.generalAgentCount || 0 }}</strong>
+          </div>
+          <span class="people-plus">/</span>
+          <div>
+            <span>总代佣金</span>
+            <strong>{{ formatMoney(dashboard.generalAgentCommissionAmount || 0) }}</strong>
+          </div>
+        </div>
       </el-card>
       <el-card v-for="item in metricCards" :key="item.label" class="stat-card">
         <div class="stat-card-head">
@@ -147,12 +158,46 @@
           <el-option label="已驳回" value="rejected" />
           <el-option label="禁用" value="disabled" />
         </el-select>
+        <el-select v-if="store.isFullAdmin" v-model="filters.generalAgent" placeholder="总代关系" clearable style="width: 130px" @change="loadDistributors">
+          <el-option label="总代" value="agent" />
+          <el-option label="归属总代" value="child" />
+        </el-select>
         <el-button @click="loadDistributors">刷新</el-button>
       </div>
 
       <el-table :data="distributors" v-loading="loadingDistributors" row-key="id" style="width: 100%">
         <el-table-column type="expand" width="48">
           <template #default="{ row }">
+            <div v-if="store.isFullAdmin && row.isGeneralAgent" class="child-table-wrap">
+              <div class="child-title">{{ row.name }} 招募的合伙人</div>
+              <el-table :data="row.generalAgentChildren || []" size="small" empty-text="暂无下级合伙人">
+                <el-table-column label="合伙人" min-width="180">
+                  <template #default="{ row: child }">
+                    <div class="main-cell">
+                      <strong>{{ child.name }}</strong>
+                      <span>{{ child.user?.nickname || child.user?.phone || child.userId || '-' }}</span>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="code" label="邀请码" width="130" />
+                <el-table-column label="推荐官" width="100">
+                  <template #default="{ row: child }">{{ child._count?.children || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="合作推荐用户" width="120">
+                  <template #default="{ row: child }">{{ child._count?.referrals || 0 }}</template>
+                </el-table-column>
+                <el-table-column label="状态" width="90">
+                  <template #default="{ row: child }">
+                    <el-tag :type="statusTagType(child.status)" size="small">{{ statusLabel(child.status) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="130" fixed="right">
+                  <template #default="{ row: child }">
+                    <el-button type="primary" link @click="openDistributorDialog(child)">编辑</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
             <div class="child-table-wrap">
               <div class="child-title">{{ row.name }} 的推荐官</div>
               <el-table :data="row.children || []" size="small" empty-text="暂无推荐官">
@@ -202,11 +247,20 @@
         <el-table-column prop="code" label="邀请码" width="130" />
         <el-table-column label="身份类型" width="140">
           <template #default="{ row }">
-            <el-tag :type="row.isGroup ? 'warning' : 'success'" size="small">{{ row.isGroup ? '分组' : levelLabel(row.level) }}</el-tag>
+            <div class="tag-stack">
+              <el-tag :type="row.isGroup ? 'warning' : 'success'" size="small">{{ row.isGroup ? '分组' : levelLabel(row.level) }}</el-tag>
+              <el-tag v-if="store.isFullAdmin && row.isGeneralAgent" type="danger" size="small">总代 {{ percentLabel(row.generalAgentRate) }}</el-tag>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="所属特邀伙伴" min-width="150">
-          <template #default>--</template>
+        <el-table-column label="所属关系" min-width="180">
+          <template #default="{ row }">
+            <div class="main-cell">
+              <span v-if="row.parent">{{ row.parent.name }}（合伙人）</span>
+              <span v-if="store.isFullAdmin && row.generalAgentParent">{{ row.generalAgentParent.name }}（总代）</span>
+              <span v-if="!row.parent && (!store.isFullAdmin || !row.generalAgentParent)">--</span>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="合作推荐用户" width="120">
           <template #default="{ row }">{{ row._count?.referrals || 0 }}</template>
@@ -244,6 +298,84 @@
         :page-size="pageSize"
         layout="prev, pager, next"
         @current-change="loadDistributors"
+        class="pager"
+      />
+    </el-card>
+
+    <el-card v-if="activeSection === 'generalAgentCommissions'" class="panel-card">
+      <template #header>
+        <div class="card-head">
+          <span>总代佣金</span>
+          <div class="head-actions">
+            <el-select v-model="generalAgentFilter" placeholder="总代" clearable filterable style="width: 220px" @change="loadGeneralAgentCommissions">
+              <el-option v-for="item in generalAgentOptions" :key="item.id" :label="`${item.name}（${item.code}）`" :value="item.id" />
+            </el-select>
+            <el-select v-model="generalAgentStatusFilter" placeholder="状态" clearable style="width: 130px" @change="loadGeneralAgentCommissions">
+              <el-option label="待线下结算" value="pending" />
+              <el-option label="已线下结算" value="paid" />
+            </el-select>
+            <el-button @click="loadGeneralAgentCommissions">刷新</el-button>
+          </div>
+        </div>
+      </template>
+      <div class="agent-summary" v-if="generalAgentSummary">
+        <div><span>下级合伙人</span><strong>{{ generalAgentSummary.childPartnerCount || 0 }}</strong></div>
+        <div><span>下级推荐官</span><strong>{{ generalAgentSummary.childReferralOfficerCount || 0 }}</strong></div>
+        <div><span>佣金总额</span><strong>{{ formatMoney(generalAgentSummary.commissionAmount || 0) }}</strong></div>
+        <div><span>待线下结算</span><strong>{{ formatMoney(generalAgentSummary.pendingAmount || 0) }}</strong></div>
+        <div><span>已线下结算</span><strong>{{ formatMoney(generalAgentSummary.paidAmount || 0) }}</strong></div>
+      </div>
+      <el-table :data="generalAgentCommissions" v-loading="loadingGeneralAgentCommissions" style="width: 100%" empty-text="暂无总代佣金">
+        <el-table-column label="总代" min-width="150">
+          <template #default="{ row }">{{ row.generalAgent?.name || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="来源合伙人" min-width="150">
+          <template #default="{ row }">{{ row.sourceDistributor?.name || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="直接来源" min-width="150">
+          <template #default="{ row }">{{ row.directDistributor?.name || row.sourceDistributor?.name || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="充值用户" min-width="150">
+          <template #default="{ row }">{{ row.referralUser?.nickname || row.referralUser?.phone || row.referralUserId }}</template>
+        </el-table-column>
+        <el-table-column label="订单" min-width="210">
+          <template #default="{ row }">
+            <div class="main-cell">
+              <strong>{{ row.order?.productName || '-' }}</strong>
+              <span>{{ row.order?.orderNo || row.orderId }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="订单金额" width="110">
+          <template #default="{ row }">{{ formatMoney(row.order?.amount || 0) }}</template>
+        </el-table-column>
+        <el-table-column label="比例" width="90">
+          <template #default="{ row }">{{ percentLabel(row.rateBps) }}</template>
+        </el-table-column>
+        <el-table-column label="总代佣金" width="110">
+          <template #default="{ row }"><strong>{{ formatMoney(row.amount) }}</strong></template>
+        </el-table-column>
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'paid' ? 'success' : 'warning'" size="small">{{ row.status === 'paid' ? '已线下结算' : '待线下结算' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="时间" width="170">
+          <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="row.status !== 'paid'" type="success" link @click="markGeneralAgentCommission(row, 'paid')">标记已结算</el-button>
+            <el-button v-else type="warning" link @click="markGeneralAgentCommission(row, 'pending')">撤回结算</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-pagination
+        v-model:current-page="generalAgentCommissionPage"
+        :total="generalAgentCommissionTotal"
+        :page-size="generalAgentCommissionPageSize"
+        layout="prev, pager, next"
+        @current-change="loadGeneralAgentCommissions"
         class="pager"
       />
     </el-card>
@@ -396,6 +528,21 @@
           <el-input-number v-model="distributorForm.newUserGiftOverride" :min="0" :max="100000" :precision="0" :step="1" />
           <span class="hint">留空或 0 表示不额外赠送；设置后，通过该特邀伙伴及其推荐官注册或绑定邀请码的新用户，会在系统默认赠点之外再获得该点数</span>
         </el-form-item>
+        <template v-if="distributorForm.level === 1 && store.isFullAdmin">
+          <el-form-item label="总代">
+            <el-switch v-model="distributorForm.isGeneralAgent" />
+            <span class="hint">只有合伙人可设为总代；小程序端不会展示总代概念</span>
+          </el-form-item>
+          <el-form-item v-if="distributorForm.isGeneralAgent" label="总代提成比例">
+            <el-input-number v-model="distributorForm.generalAgentPercent" :min="0" :max="100" :precision="2" :step="1" />
+            <span class="hint">%，默认 20%，按下级相关订单总额额外计算</span>
+          </el-form-item>
+          <el-form-item v-if="!distributorForm.isGeneralAgent" label="所属总代">
+            <el-select v-model="distributorForm.generalAgentParentId" placeholder="不归属总代" clearable filterable style="width: 100%">
+              <el-option v-for="item in generalAgentOptions" :key="item.id" :label="`${item.name}（${item.code}，${percentLabel(item.generalAgentRate)}）`" :value="item.id" />
+            </el-select>
+          </el-form-item>
+        </template>
         <el-form-item label="状态">
           <el-select v-model="distributorForm.status" style="width: 100%">
             <el-option label="待审核" value="pending" />
@@ -485,6 +632,40 @@
             </el-table-column>
           </el-table>
         </el-tab-pane>
+        <el-tab-pane v-if="ledgerDistributor?.isGeneralAgent" label="总代佣金" name="generalAgent">
+          <div class="agent-summary" v-if="ledgerGeneralAgentSummary">
+            <div><span>下级合伙人</span><strong>{{ ledgerGeneralAgentSummary.childPartnerCount || 0 }}</strong></div>
+            <div><span>佣金总额</span><strong>{{ formatMoney(ledgerGeneralAgentSummary.commissionAmount || 0) }}</strong></div>
+            <div><span>待线下结算</span><strong>{{ formatMoney(ledgerGeneralAgentSummary.pendingAmount || 0) }}</strong></div>
+            <div><span>已线下结算</span><strong>{{ formatMoney(ledgerGeneralAgentSummary.paidAmount || 0) }}</strong></div>
+          </div>
+          <el-table :data="ledgerGeneralAgentCommissions" v-loading="loadingLedgerGeneralAgentCommissions" style="width: 100%" empty-text="暂无总代佣金">
+            <el-table-column label="来源合伙人" min-width="150">
+              <template #default="{ row }">{{ row.sourceDistributor?.name || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="直接来源" min-width="150">
+              <template #default="{ row }">{{ row.directDistributor?.name || row.sourceDistributor?.name || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="充值用户" min-width="150">
+              <template #default="{ row }">{{ row.referralUser?.nickname || row.referralUser?.phone || row.referralUserId }}</template>
+            </el-table-column>
+            <el-table-column label="订单金额" width="110">
+              <template #default="{ row }">{{ formatMoney(row.order?.amount || 0) }}</template>
+            </el-table-column>
+            <el-table-column label="比例" width="90">
+              <template #default="{ row }">{{ percentLabel(row.rateBps) }}</template>
+            </el-table-column>
+            <el-table-column label="佣金" width="110">
+              <template #default="{ row }"><strong>{{ formatMoney(row.amount) }}</strong></template>
+            </el-table-column>
+            <el-table-column label="状态" width="120">
+              <template #default="{ row }">{{ row.status === 'paid' ? '已线下结算' : '待线下结算' }}</template>
+            </el-table-column>
+            <el-table-column label="时间" width="170">
+              <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
       </el-tabs>
     </el-dialog>
   </div>
@@ -500,7 +681,7 @@ import { useAdminStore } from '@/store/admin';
 
 const route = useRoute();
 const store = useAdminStore();
-const validSections = ['overview', 'distributors', 'commissions', 'withdrawals'];
+const validSections = ['overview', 'distributors', 'commissions', 'generalAgentCommissions', 'withdrawals'];
 const activeSection = computed(() => {
   const section = String(route.meta.distributionSection || route.params.section || 'overview');
   return validSections.includes(section) ? section : 'overview';
@@ -508,6 +689,7 @@ const activeSection = computed(() => {
 const pageTitle = computed(() => {
   if (activeSection.value === 'distributors') return '合作人员';
   if (activeSection.value === 'commissions') return '奖励流水';
+  if (activeSection.value === 'generalAgentCommissions') return '总代佣金';
   if (activeSection.value === 'withdrawals') return '提现管理';
   return '推荐合作';
 });
@@ -538,9 +720,10 @@ const settingsForm = reactive({
 const savingSettings = ref(false);
 
 const dashboard = ref<any>({});
-const filters = reactive({ keyword: '', level: undefined as number | undefined, status: '' });
+const filters = reactive({ keyword: '', level: undefined as number | undefined, status: '', generalAgent: '' });
 const distributors = ref<any[]>([]);
 const levelOneOptions = ref<any[]>([]);
+const generalAgentOptions = ref<any[]>([]);
 const loadingDistributors = ref(false);
 const page = ref(1);
 const pageSize = 20;
@@ -557,6 +740,14 @@ const withdrawalPage = ref(1);
 const withdrawalPageSize = 20;
 const withdrawalTotal = ref(0);
 const withdrawalStatusFilter = ref('');
+const generalAgentCommissions = ref<any[]>([]);
+const loadingGeneralAgentCommissions = ref(false);
+const generalAgentCommissionPage = ref(1);
+const generalAgentCommissionPageSize = 20;
+const generalAgentCommissionTotal = ref(0);
+const generalAgentFilter = ref('');
+const generalAgentStatusFilter = ref('');
+const generalAgentSummary = ref<any>(null);
 
 const ledgerDialogVisible = ref(false);
 const ledgerDistributor = ref<any>(null);
@@ -568,6 +759,9 @@ const ledgerCommissionPageSize = 10;
 const ledgerCommissionTotal = ref(0);
 const ledgerWithdrawals = ref<any[]>([]);
 const loadingLedgerWithdrawals = ref(false);
+const ledgerGeneralAgentCommissions = ref<any[]>([]);
+const loadingLedgerGeneralAgentCommissions = ref(false);
+const ledgerGeneralAgentSummary = ref<any>(null);
 
 const dialogVisible = ref(false);
 const savingDistributor = ref(false);
@@ -579,6 +773,9 @@ const distributorForm = reactive({
   parentId: '',
   status: 'active',
   newUserGiftOverride: null as number | null,
+  isGeneralAgent: false,
+  generalAgentPercent: 20,
+  generalAgentParentId: '',
 });
 
 const metricCards = computed(() => [
@@ -595,6 +792,8 @@ const metricCards = computed(() => [
   },
   { label: '提现中', value: formatMoney(dashboard.value.pendingWithdrawalAmount || 0) },
   { label: '已提现', value: formatMoney(dashboard.value.paidWithdrawalAmount || 0) },
+  { label: '总代待结算', value: formatMoney(dashboard.value.generalAgentPendingAmount || 0) },
+  { label: '总代已结算', value: formatMoney(dashboard.value.generalAgentPaidAmount || 0) },
 ]);
 
 async function loadActiveSection(section = activeSection.value) {
@@ -604,13 +803,18 @@ async function loadActiveSection(section = activeSection.value) {
     return;
   }
   if (section === 'distributors') {
-    const tasks = [loadLevelOneOptions(), loadDistributors()];
+    const tasks = [loadLevelOneOptions(), loadGeneralAgentOptions(), loadDistributors()];
     if (store.isFullAdmin) tasks.push(loadDashboard());
     await Promise.all(tasks);
     return;
   }
   if (section === 'commissions') {
     await loadCommissions();
+    return;
+  }
+  if (section === 'generalAgentCommissions') {
+    await Promise.all([loadDashboard(), loadGeneralAgentOptions()]);
+    await loadGeneralAgentCommissions();
     return;
   }
   if (section === 'withdrawals') {
@@ -706,6 +910,7 @@ async function loadDistributors() {
       keyword: filters.keyword,
       level: filters.level,
       status: filters.status,
+      generalAgent: filters.generalAgent,
     }) as any;
     distributors.value = res.data.list;
     total.value = res.data.total;
@@ -719,6 +924,15 @@ async function loadLevelOneOptions() {
   levelOneOptions.value = res.data;
 }
 
+async function loadGeneralAgentOptions() {
+  if (!store.isFullAdmin) {
+    generalAgentOptions.value = [];
+    return;
+  }
+  const res = await api.distribution.generalAgents() as any;
+  generalAgentOptions.value = res.data;
+}
+
 async function loadCommissions() {
   loadingCommissions.value = true;
   try {
@@ -730,6 +944,34 @@ async function loadCommissions() {
     commissionTotal.value = res.data.total;
   } finally {
     loadingCommissions.value = false;
+  }
+}
+
+async function loadGeneralAgentCommissions() {
+  loadingGeneralAgentCommissions.value = true;
+  try {
+    const res = await api.distribution.generalAgentCommissions({
+      page: generalAgentCommissionPage.value,
+      pageSize: generalAgentCommissionPageSize,
+      generalAgentId: generalAgentFilter.value,
+      status: generalAgentStatusFilter.value,
+    }) as any;
+    generalAgentCommissions.value = res.data.list;
+    generalAgentCommissionTotal.value = res.data.total;
+    if (generalAgentFilter.value) {
+      const statsRes = await api.distribution.generalAgentStats(generalAgentFilter.value) as any;
+      generalAgentSummary.value = statsRes.data;
+    } else {
+      generalAgentSummary.value = {
+        childPartnerCount: null,
+        childReferralOfficerCount: null,
+        commissionAmount: dashboard.value.generalAgentCommissionAmount || 0,
+        pendingAmount: dashboard.value.generalAgentPendingAmount || 0,
+        paidAmount: dashboard.value.generalAgentPaidAmount || 0,
+      };
+    }
+  } finally {
+    loadingGeneralAgentCommissions.value = false;
   }
 }
 
@@ -755,8 +997,15 @@ async function openLedgerDialog(row: any) {
   ledgerCommissions.value = [];
   ledgerCommissionTotal.value = 0;
   ledgerWithdrawals.value = [];
+  ledgerGeneralAgentCommissions.value = [];
+  ledgerGeneralAgentSummary.value = null;
   ledgerDialogVisible.value = true;
-  await Promise.all([loadLedgerCommissions(), loadLedgerWithdrawals()]);
+  await Promise.all([
+    loadLedgerCommissions(),
+    loadLedgerWithdrawals(),
+    row.isGeneralAgent ? loadLedgerGeneralAgentCommissions() : Promise.resolve(),
+    row.isGeneralAgent ? loadLedgerGeneralAgentSummary() : Promise.resolve(),
+  ]);
 }
 
 async function loadLedgerCommissions() {
@@ -790,6 +1039,27 @@ async function loadLedgerWithdrawals() {
   }
 }
 
+async function loadLedgerGeneralAgentCommissions() {
+  if (!ledgerDistributor.value?.id) return;
+  loadingLedgerGeneralAgentCommissions.value = true;
+  try {
+    const res = await api.distribution.generalAgentCommissions({
+      page: 1,
+      pageSize: 50,
+      generalAgentId: ledgerDistributor.value.id,
+    }) as any;
+    ledgerGeneralAgentCommissions.value = res.data.list;
+  } finally {
+    loadingLedgerGeneralAgentCommissions.value = false;
+  }
+}
+
+async function loadLedgerGeneralAgentSummary() {
+  if (!ledgerDistributor.value?.id) return;
+  const res = await api.distribution.generalAgentStats(ledgerDistributor.value.id) as any;
+  ledgerGeneralAgentSummary.value = res.data;
+}
+
 function openDistributorDialog(row?: any) {
   Object.assign(distributorForm, row ? {
     id: row.id,
@@ -799,6 +1069,9 @@ function openDistributorDialog(row?: any) {
     parentId: row.parentId || '',
     status: row.status || 'active',
     newUserGiftOverride: row.newUserGiftOverride ?? null,
+    isGeneralAgent: row.isGeneralAgent ?? false,
+    generalAgentPercent: Number(row.generalAgentRate ?? 2000) / 100,
+    generalAgentParentId: row.generalAgentParentId || '',
   } : {
     id: '',
     userId: '',
@@ -807,6 +1080,9 @@ function openDistributorDialog(row?: any) {
     parentId: '',
     status: 'active',
     newUserGiftOverride: null,
+    isGeneralAgent: false,
+    generalAgentPercent: 20,
+    generalAgentParentId: '',
   });
   dialogVisible.value = true;
 }
@@ -818,7 +1094,7 @@ async function saveDistributor() {
   }
   savingDistributor.value = true;
   try {
-    const payload = {
+    const payload: any = {
       userId: distributorForm.userId.trim(),
       name: distributorForm.name.trim(),
       level: distributorForm.level,
@@ -826,6 +1102,11 @@ async function saveDistributor() {
       status: distributorForm.status,
       newUserGiftOverride: distributorForm.level === 1 ? (distributorForm.newUserGiftOverride ?? null) : null,
     };
+    if (store.isFullAdmin) {
+      payload.isGeneralAgent = distributorForm.level === 1 ? distributorForm.isGeneralAgent : false;
+      payload.generalAgentRate = distributorForm.level === 1 ? Math.round(Number(distributorForm.generalAgentPercent || 0) * 100) : 2000;
+      payload.generalAgentParentId = distributorForm.level === 1 && !distributorForm.isGeneralAgent ? distributorForm.generalAgentParentId : null;
+    }
     if (distributorForm.id) {
       await api.distribution.updateDistributor(distributorForm.id, payload);
     } else {
@@ -843,15 +1124,45 @@ async function saveDistributor() {
 
 async function reviewDistributor(row: any, status: 'active' | 'rejected') {
   try {
-    await api.distribution.updateDistributor(row.id, {
+    const payload: any = {
       name: row.name,
       level: row.level,
       parentId: row.parentId,
+      newUserGiftOverride: row.newUserGiftOverride,
       status,
-    });
+    };
+    if (store.isFullAdmin) {
+      payload.generalAgentParentId = row.generalAgentParentId;
+      payload.isGeneralAgent = row.isGeneralAgent;
+      payload.generalAgentRate = row.generalAgentRate;
+    }
+    await api.distribution.updateDistributor(row.id, payload);
     ElMessage.success(status === 'active' ? '已审核通过' : '已驳回');
     await reloadDistributorSection();
     refreshPendingBadges();
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.message || '操作失败');
+  }
+}
+
+async function markGeneralAgentCommission(row: any, status: 'pending' | 'paid') {
+  let adminRemark = '';
+  if (status === 'paid') {
+    try {
+      const result = await ElMessageBox.prompt('请填写线下结算备注，可留空', '标记总代佣金已线下结算', {
+        confirmButtonText: '确认',
+        cancelButtonText: '取消',
+        inputPlaceholder: '如：银行转账流水号',
+      });
+      adminRemark = result.value || '';
+    } catch {
+      return;
+    }
+  }
+  try {
+    await api.distribution.updateGeneralAgentCommission(row.id, { status, adminRemark });
+    ElMessage.success(status === 'paid' ? '已标记线下结算' : '已撤回结算状态');
+    await loadGeneralAgentCommissions();
   } catch (e: any) {
     ElMessage.error(e.response?.data?.message || '操作失败');
   }
@@ -921,7 +1232,7 @@ function refreshPendingBadges() {
 }
 
 async function reloadDistributorSection() {
-  const tasks = [loadDistributors(), loadLevelOneOptions()];
+  const tasks = [loadDistributors(), loadLevelOneOptions(), loadGeneralAgentOptions()];
   if (store.isFullAdmin) tasks.push(loadDashboard());
   await Promise.all(tasks);
 }
@@ -952,6 +1263,10 @@ function roleLabel(role: string) {
   if (role === 'level2_recurring_direct') return '复充推荐奖励';
   if (role === 'level1_recurring_override') return '复充合作伙伴奖励';
   return role;
+}
+
+function percentLabel(rateBps: number) {
+  return `${(Number(rateBps || 0) / 100).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}%`;
 }
 
 function withdrawalStatusLabel(status: string) {
@@ -1075,6 +1390,10 @@ h2 {
   color: var(--el-text-color-placeholder);
 }
 
+.compact {
+  margin-top: 10px;
+}
+
 @media (max-width: 1280px) {
   .stat-overview {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1182,8 +1501,48 @@ h2 {
   }
 }
 
+.tag-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+
+  div {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 8px;
+    background: var(--el-fill-color-light);
+  }
+
+  span {
+    display: block;
+    color: var(--el-text-color-secondary);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  strong {
+    display: block;
+    margin-top: 5px;
+    font-size: 18px;
+  }
+}
+
 .pager {
   margin-top: 16px;
   justify-content: center;
+}
+
+@media (max-width: 1200px) {
+  .agent-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 </style>

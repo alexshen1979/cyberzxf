@@ -62,10 +62,21 @@ export async function updateProfile(ctx: Context) {
     data.phone = phone;
   }
 
-  const user = await prisma.user.update({
-    where: { id: userId },
-    data,
-    select: { id: true, nickname: true, avatar: true, phone: true, shareCode: true, createdAt: true },
+  const user = await prisma.$transaction(async (tx) => {
+    const updated = await tx.user.update({
+      where: { id: userId },
+      data,
+      select: { id: true, nickname: true, avatar: true, phone: true, shareCode: true, createdAt: true },
+    });
+
+    if (Object.prototype.hasOwnProperty.call(data, 'nickname')) {
+      await tx.distributor.updateMany({
+        where: { userId },
+        data: { name: updated.nickname || updated.phone || `分销员${userId.slice(0, 6)}` },
+      });
+    }
+
+    return updated;
   });
 
   ctx.body = { success: true, data: user };
