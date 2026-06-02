@@ -24,6 +24,14 @@
       <el-table-column prop="shareCode" label="邀请码" width="130">
         <template #default="{ row }">{{ row.shareCode || '--' }}</template>
       </el-table-column>
+      <el-table-column label="合作身份" width="150">
+        <template #default="{ row }">
+          <el-tag v-if="row.distributorProfile" :type="distributorTagType(row.distributorProfile)" size="small">
+            {{ distributorIdentityLabel(row.distributorProfile) }}
+          </el-tag>
+          <span v-else>普通用户</span>
+        </template>
+      </el-table-column>
       <el-table-column label="邀请人" min-width="180">
         <template #default="{ row }">
           <div class="main-cell">
@@ -51,10 +59,11 @@
       <el-table-column label="注册时间" width="170">
         <template #default="{ row }">{{ new Date(row.createdAt).toLocaleString() }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" link @click="$router.push(`/users/${row.id}`)">详情</el-button>
           <el-button type="primary" link @click="openEditDialog(row)">编辑</el-button>
+          <el-button type="primary" link @click="openRoleDialog(row)">改身份</el-button>
           <el-button type="danger" link :loading="purgingId === row.id" @click="purgeUser(row)">一键清除</el-button>
         </template>
       </el-table-column>
@@ -88,11 +97,67 @@
         <el-button type="primary" :loading="savingUser" @click="saveUser">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="roleVisible" title="修改合作身份" width="600px" destroy-on-close>
+      <el-form :model="roleForm" label-width="120px">
+        <el-form-item label="用户">
+          <div class="main-cell">
+            <strong>{{ roleUser ? userLabel(roleUser) : '--' }}</strong>
+            <span>{{ roleUser?.id || '--' }}</span>
+          </div>
+        </el-form-item>
+        <el-form-item label="当前身份">
+          <el-tag v-if="roleUser?.distributorProfile" :type="distributorTagType(roleUser.distributorProfile)" size="small">
+            {{ distributorIdentityLabel(roleUser.distributorProfile) }}
+          </el-tag>
+          <span v-else>普通用户</span>
+        </el-form-item>
+        <el-form-item label="修改为">
+          <el-radio-group v-model="roleForm.role">
+            <el-radio-button label="normal">普通用户</el-radio-button>
+            <el-radio-button :label="1">特邀合作伙伴</el-radio-button>
+            <el-radio-button :label="2">涨识推荐官</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="roleForm.role !== 'normal'" label="合作名称">
+          <el-input v-model="roleForm.name" placeholder="默认使用用户昵称或手机号" />
+        </el-form-item>
+        <el-form-item v-if="roleForm.role === 2" label="所属特邀伙伴">
+          <el-select v-model="roleForm.parentId" placeholder="默认系统" clearable filterable style="width: 100%">
+            <el-option v-for="item in selectableLevelOneOptions" :key="item.id" :label="`${item.name}（${item.code}）`" :value="item.id" />
+          </el-select>
+          <span class="form-hint">不选择时，如果该用户本身是被特邀伙伴邀请来的，会优先归属邀请人；否则归属系统。</span>
+        </el-form-item>
+        <el-form-item v-if="roleForm.role === 1" label="新用户额外赠点">
+          <el-input-number v-model="roleForm.newUserGiftOverride" :min="0" :max="100000" :precision="0" :step="1" />
+          <span class="form-hint">留空或 0 表示不额外赠送；这是系统默认新用户赠点之外的额外点数。</span>
+        </el-form-item>
+        <el-form-item v-if="roleForm.role !== 'normal'" label="状态">
+          <el-select v-model="roleForm.status" style="width: 100%">
+            <el-option label="启用" value="active" />
+            <el-option label="待审核" value="pending" />
+            <el-option label="已驳回" value="rejected" />
+            <el-option label="禁用" value="disabled" />
+          </el-select>
+        </el-form-item>
+        <el-alert
+          v-if="roleForm.role === 'normal' && roleUser?.distributorProfile"
+          title="改为普通用户会禁用该用户现有合作身份，小程序端不再展示合作内容，历史流水保留。"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="roleVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingRole" @click="saveDistributorRole">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue';
+import { computed, reactive, ref, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '@/api';
 
@@ -106,10 +171,25 @@ const purgingId = ref('');
 const editVisible = ref(false);
 const savingUser = ref(false);
 const editUser = ref<any>(null);
+const roleVisible = ref(false);
+const savingRole = ref(false);
+const roleUser = ref<any>(null);
+const levelOneOptions = ref<any[]>([]);
 const editForm = reactive({
   nickname: '',
   shareCode: '',
   status: 1,
+});
+const roleForm = reactive({
+  role: 'normal' as 'normal' | 1 | 2,
+  name: '',
+  parentId: '',
+  status: 'active',
+  newUserGiftOverride: null as number | null,
+});
+const selectableLevelOneOptions = computed(() => {
+  const ownDistributorId = roleUser.value?.distributorProfile?.id;
+  return levelOneOptions.value.filter(item => item.id !== ownDistributorId);
 });
 
 async function load() {
@@ -137,6 +217,24 @@ function avatarText(row: any) {
   return String(row.nickname || row.phone || row.shareCode || row.id || '用').slice(0, 1).toUpperCase();
 }
 
+function distributorIdentityLabel(profile: any) {
+  if (!profile) return '普通用户';
+  const level = profile.level === 1 ? '特邀合作伙伴' : '涨识推荐官';
+  const statusMap: Record<string, string> = {
+    pending: '待审核',
+    active: '启用',
+    rejected: '已驳回',
+    disabled: '禁用',
+  };
+  return `${level}/${statusMap[profile.status] || profile.status || '--'}`;
+}
+
+function distributorTagType(profile: any) {
+  if (!profile || profile.status === 'disabled' || profile.status === 'rejected') return 'info';
+  if (profile.status === 'pending') return 'warning';
+  return profile.level === 1 ? 'success' : 'primary';
+}
+
 function openEditDialog(row: any) {
   editUser.value = row;
   Object.assign(editForm, {
@@ -145,6 +243,22 @@ function openEditDialog(row: any) {
     status: row.status ?? 1,
   });
   editVisible.value = true;
+}
+
+async function openRoleDialog(row: any) {
+  roleUser.value = row;
+  const profile = row.distributorProfile;
+  Object.assign(roleForm, {
+    role: profile?.status && profile.status !== 'disabled' ? profile.level : 'normal',
+    name: profile?.name || row.nickname || row.phone || '',
+    parentId: profile?.parentId || '',
+    status: profile?.status && profile.status !== 'disabled' ? profile.status : 'active',
+    newUserGiftOverride: profile?.newUserGiftOverride ?? null,
+  });
+  roleVisible.value = true;
+  if (!levelOneOptions.value.length) {
+    await loadLevelOneOptions();
+  }
 }
 
 async function saveUser() {
@@ -169,6 +283,64 @@ async function saveUser() {
     ElMessage.error(err?.response?.data?.message || err?.message || '保存失败');
   } finally {
     savingUser.value = false;
+  }
+}
+
+async function loadLevelOneOptions() {
+  const res = await api.distribution.levelOne() as any;
+  levelOneOptions.value = res.data || [];
+}
+
+async function saveDistributorRole() {
+  if (!roleUser.value?.id) return;
+  const profile = roleUser.value.distributorProfile;
+  savingRole.value = true;
+  try {
+    if (roleForm.role === 'normal') {
+      if (profile?.id) {
+        await api.distribution.updateDistributor(profile.id, {
+          name: profile.name || roleUser.value.nickname || roleUser.value.phone || `用户${roleUser.value.id.slice(0, 6)}`,
+          level: profile.level || 2,
+          parentId: profile.parentId || '',
+          status: 'disabled',
+          newUserGiftOverride: profile.level === 1 ? (profile.newUserGiftOverride ?? null) : null,
+          isGeneralAgent: false,
+          generalAgentRate: 2000,
+          generalAgentParentId: null,
+        });
+      }
+      ElMessage.success('已改为普通用户');
+    } else {
+      const payload: any = {
+        userId: roleUser.value.id,
+        name: roleForm.name.trim(),
+        level: roleForm.role,
+        parentId: roleForm.role === 2 ? roleForm.parentId : null,
+        status: roleForm.status,
+        newUserGiftOverride: roleForm.role === 1 ? (roleForm.newUserGiftOverride ?? null) : null,
+      };
+      if (roleForm.role === 1) {
+        payload.isGeneralAgent = profile?.isGeneralAgent ?? false;
+        payload.generalAgentRate = profile?.generalAgentRate ?? 2000;
+        payload.generalAgentParentId = profile?.generalAgentParentId || null;
+      } else {
+        payload.isGeneralAgent = false;
+        payload.generalAgentRate = 2000;
+        payload.generalAgentParentId = null;
+      }
+      if (profile?.id) {
+        await api.distribution.updateDistributor(profile.id, payload);
+      } else {
+        await api.distribution.createDistributor(payload);
+      }
+      ElMessage.success('合作身份已保存');
+    }
+    roleVisible.value = false;
+    await load();
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || err?.message || '保存失败');
+  } finally {
+    savingRole.value = false;
   }
 }
 

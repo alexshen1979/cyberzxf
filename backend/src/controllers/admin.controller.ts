@@ -262,6 +262,20 @@ export async function getUsers(ctx: Context) {
       take: pageSize,
       include: {
         pointsAccount: { select: { balance: true, frozen: true, expiredAt: true } },
+        distributorProfile: {
+          select: {
+            id: true,
+            code: true,
+            level: true,
+            status: true,
+            parentId: true,
+            name: true,
+            newUserGiftOverride: true,
+            isGeneralAgent: true,
+            generalAgentRate: true,
+            generalAgentParentId: true,
+          },
+        },
         shareReferralRecord: {
           select: {
             referrerUserId: true,
@@ -429,7 +443,20 @@ export async function getUserDetail(ctx: Context) {
       pointsAccount: true,
       orders: { orderBy: { createdAt: 'desc' }, take: 10 },
       consultationRecords: { orderBy: { createdAt: 'desc' }, take: 10 },
-      distributorProfile: { select: { code: true, level: true, status: true } },
+      distributorProfile: {
+        select: {
+          id: true,
+          code: true,
+          level: true,
+          status: true,
+          parentId: true,
+          name: true,
+          newUserGiftOverride: true,
+          isGeneralAgent: true,
+          generalAgentRate: true,
+          generalAgentParentId: true,
+        },
+      },
       shareReferralRecord: {
         select: {
           sourceCode: true,
