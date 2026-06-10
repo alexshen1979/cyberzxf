@@ -105,6 +105,9 @@ async function handlePay() {
       sessionId: analyticsSessionId,
       channel: 'mini_program',
       source: 'recharge_page',
+      supportsVirtualPay: canUseVirtualPayment(),
+      clientVersion: 'virtual-pay-20260608',
+      ...getClientPaymentContext(),
     });
     const payParams = orderRes.data.payParams;
     if (!payParams) {
@@ -123,7 +126,7 @@ async function handlePay() {
       uni.showToast({ title: '支付成功，到账稍后刷新', icon: 'none' });
     }
   } catch (e: any) {
-    const message = e?.errMsg?.includes('cancel')
+    const message = e?.errMsg?.includes('cancel') || e?.errCode === -2
       ? '支付已取消'
       : (e?.response?.data?.message || e?.message || '支付失败');
     uni.showToast({ title: message, icon: 'none' });
@@ -146,18 +149,80 @@ function recordRechargeAnalytics(eventType: 'page_view' | 'pay_click', product?:
 }
 
 function requestWechatPayment(payParams: {
-  timeStamp: string;
-  nonceStr: string;
-  package: string;
-  signType: 'RSA';
-  paySign: string;
+  provider?: 'wechat_virtual';
+  mode?: 'short_series_goods';
+  signData?: string;
+  paySig?: string;
+  signature?: string;
+  timeStamp?: string;
+  nonceStr?: string;
+  package?: string;
+  signType?: 'RSA';
+  paySign?: string;
 }) {
+  if (payParams.provider === 'wechat_virtual') {
+    return requestWechatVirtualPayment(payParams);
+  }
+
   return new Promise<void>((resolve, reject) => {
     uni.requestPayment(Object.assign({}, payParams, {
       success: () => resolve(),
       fail: reject,
     } as any));
   });
+}
+
+function requestWechatVirtualPayment(payParams: {
+  mode?: 'short_series_goods';
+  signData?: string;
+  paySig?: string;
+  signature?: string;
+}) {
+  return new Promise<void>((resolve, reject) => {
+    const wxApi = typeof wx !== 'undefined' ? wx : null;
+    if (!wxApi?.requestVirtualPayment || !canUseVirtualPayment()) {
+      reject(new Error('当前微信版本不支持小程序虚拟支付，请升级微信后重试'));
+      return;
+    }
+    wxApi.requestVirtualPayment({
+      signData: payParams.signData || '',
+      paySig: payParams.paySig || '',
+      signature: payParams.signature || '',
+      mode: payParams.mode || 'short_series_goods',
+      success: () => resolve(),
+      fail: reject,
+    });
+  });
+}
+
+function canUseVirtualPayment() {
+  const wxApi = typeof wx !== 'undefined' ? wx : null;
+  if (!wxApi) return false;
+  const systemInfo = wxApi.getSystemInfoSync?.();
+  const sdkVersion = systemInfo?.SDKVersion || '';
+  return compareVersion(sdkVersion, '2.19.2') >= 0 || !!wxApi.canIUse?.('requestVirtualPayment');
+}
+
+function getClientPaymentContext() {
+  const wxApi = typeof wx !== 'undefined' ? wx : null;
+  const systemInfo = wxApi?.getSystemInfoSync?.() || {};
+  return {
+    clientPlatform: systemInfo.platform || '',
+    system: systemInfo.system || '',
+  };
+}
+
+function compareVersion(v1: string, v2: string) {
+  const a = v1.split('.').map(n => parseInt(n || '0', 10));
+  const b = v2.split('.').map(n => parseInt(n || '0', 10));
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i += 1) {
+    const n1 = a[i] || 0;
+    const n2 = b[i] || 0;
+    if (n1 > n2) return 1;
+    if (n1 < n2) return -1;
+  }
+  return 0;
 }
 
 async function waitOrderPaid(orderNo: string) {

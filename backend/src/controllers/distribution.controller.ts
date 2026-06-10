@@ -10,6 +10,7 @@ import {
   getMyDistribution,
   getMyDistributionCommissions,
   getMyDistributionQrCode,
+  getMyDistributionRegistrationRewards,
   getMyDistributionWithdrawals,
   getGeneralAgentStatsForAdmin,
   getWithdrawalTransferPackage,
@@ -62,6 +63,13 @@ export async function commissions(ctx: Context) {
   const page = parseInt((ctx.query.page as string) || '1', 10);
   const pageSize = parseInt((ctx.query.pageSize as string) || '20', 10);
   ctx.body = { success: true, data: await getMyDistributionCommissions(userId, page, pageSize) };
+}
+
+export async function registrationRewards(ctx: Context) {
+  const userId = ctx.state.user.userId;
+  const page = parseInt((ctx.query.page as string) || '1', 10);
+  const pageSize = parseInt((ctx.query.pageSize as string) || '20', 10);
+  ctx.body = { success: true, data: await getMyDistributionRegistrationRewards(userId, page, pageSize) };
 }
 
 export async function withdrawals(ctx: Context) {
@@ -171,5 +179,6 @@ function sanitizeDistributorAdminInput(ctx: Context, input: Record<string, any>)
   delete data.isGeneralAgent;
   delete data.generalAgentRate;
   delete data.generalAgentParentId;
+  delete data.registrationCashRewardEnabled;
   return data;
 }

@@ -6,6 +6,7 @@ import axios from 'axios';
 import { getWechatMiniProgramCredentials } from './payment.service';
 import { getPointSettings } from './point-config.service';
 import { createReferralForNewUser, ensureUserShareCode, grantPartnerNewUserExtraGift } from './distribution.service';
+import { lookupIpLocation } from './ip-location.service';
 
 let accessTokenCache: { token: string; expiresAt: number } | null = null;
 
@@ -47,9 +48,11 @@ async function mpOAuth(code: string) {
 }
 
 // 统一登录入口：查找或创建用户
-export async function loginByMiniProgram(code: string, profile?: { nickName?: string; avatarUrl?: string; phoneCode?: string }, referralCode?: string) {
-  const { openId, unionId } = await miniProgramLogin(code);
+export async function loginByMiniProgram(code: string, profile?: { nickName?: string; avatarUrl?: string; phoneCode?: string; province?: string; city?: string }, referralCode?: string, clientIp?: string) {
+  const { openId, unionId, sessionKey } = await miniProgramLogin(code);
   const profileData = normalizeWechatProfile(profile);
+  const locationData = normalizeUserLocation(profile);
+  const ipLocationData = await lookupUserLocationByIp(clientIp);
   const phone = profile?.phoneCode ? await getPhoneNumberByCode(profile.phoneCode) : '';
   const defaultNickname = profileData.nickname || buildDefaultNickname(phone);
 
@@ -58,13 +61,16 @@ export async function loginByMiniProgram(code: string, profile?: { nickName?: st
   });
 
   if (user) {
+    const locationPatch = buildExistingUserLocationPatch(user, locationData, ipLocationData);
     // 更新绑定信息
     user = await prisma.user.update({
       where: { id: user.id },
       data: {
         miniOpenId: openId,
+        miniSessionKey: sessionKey,
         ...(unionId ? { unionId } : {}),
         ...profileData,
+        ...locationPatch,
         ...(!profileData.nickname && phone && shouldRefreshDefaultNickname(user.nickname) ? { nickname: defaultNickname } : {}),
         ...(phone ? { phone } : {}),
       },
@@ -76,9 +82,11 @@ export async function loginByMiniProgram(code: string, profile?: { nickName?: st
       const newUser = await tx.user.create({
         data: {
           miniOpenId: openId,
+          miniSessionKey: sessionKey,
           ...(unionId ? { unionId } : {}),
           nickname: defaultNickname,
           ...(profileData.avatar ? { avatar: profileData.avatar } : {}),
+          ...buildNewUserLocationData(locationData, ipLocationData),
           ...(phone ? { phone } : {}),
         },
       });
@@ -91,6 +99,17 @@ export async function loginByMiniProgram(code: string, profile?: { nickName?: st
   if (!user) throw new AppError(404, '用户不存在', 'USER_NOT_FOUND');
   const token = signToken({ userId: user.id });
   return { token, user: sanitizeUser(user) };
+}
+
+export async function ensureUserLocationByIp(user: any, clientIp?: string) {
+  if (!user?.id || (user.province && user.city)) return user;
+  const ipLocationData = await lookupUserLocationByIp(clientIp);
+  const data = buildExistingUserLocationPatch(user, {}, ipLocationData);
+  if (!Object.keys(data).length) return user;
+  return prisma.user.update({
+    where: { id: user.id },
+    data,
+  });
 }
 
 // 公众号网页授权登录：code 换公众号 OpenID 后绑定/创建统一用户
@@ -167,8 +186,8 @@ async function giftNewUserPoints(userId: string, tx?: any, referralCode?: string
 
 // 脱敏用户信息
 function sanitizeUser(user: any) {
-  const { id, nickname, avatar, phone, status, createdAt, shareCode } = user;
-  return { id, nickname, avatar, phone, status, createdAt, shareCode };
+  const { id, nickname, avatar, phone, province, city, status, createdAt, shareCode } = user;
+  return { id, nickname, avatar, phone, province, city, status, createdAt, shareCode };
 }
 
 async function getPhoneNumberByCode(phoneCode: string) {
@@ -251,6 +270,48 @@ function normalizeWechatProfile(profile?: { nickName?: string; avatarUrl?: strin
     ...(nickname ? { nickname } : {}),
     ...(avatar ? { avatar } : {}),
   };
+}
+
+function normalizeUserLocation(input?: { province?: string; city?: string }) {
+  const province = normalizeLocationText(input?.province, 40);
+  const city = normalizeLocationText(input?.city, 40);
+  return {
+    ...(province ? { province } : {}),
+    ...(city ? { city } : {}),
+  };
+}
+
+async function lookupUserLocationByIp(clientIp?: string) {
+  const location = await lookupIpLocation(clientIp);
+  if (!location) return {};
+  return {
+    ...(location.province ? { province: location.province } : {}),
+    ...(location.city ? { city: location.city } : {}),
+  };
+}
+
+function buildNewUserLocationData(profileLocation: any, ipLocation: any) {
+  return {
+    ...(profileLocation.province ? { province: profileLocation.province } : ipLocation.province ? { province: ipLocation.province } : {}),
+    ...(profileLocation.city ? { city: profileLocation.city } : ipLocation.city ? { city: ipLocation.city } : {}),
+  };
+}
+
+function buildExistingUserLocationPatch(user: any, profileLocation: any, ipLocation: any) {
+  const data: Record<string, string> = {};
+  if (profileLocation.province) data.province = profileLocation.province;
+  else if (!user.province && ipLocation.province) data.province = ipLocation.province;
+
+  if (profileLocation.city) data.city = profileLocation.city;
+  else if (!user.city && ipLocation.city) data.city = ipLocation.city;
+
+  return data;
+}
+
+function normalizeLocationText(value: any, max: number) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.replace(/[<>]/g, '').slice(0, max);
 }
 
 function buildDefaultNickname(phone?: string) {

@@ -21,6 +21,9 @@
       <el-table-column prop="phone" label="手机号" min-width="120">
         <template #default="{ row }">{{ row.phone || '--' }}</template>
       </el-table-column>
+      <el-table-column label="省份城市" min-width="130">
+        <template #default="{ row }">{{ locationLabel(row) }}</template>
+      </el-table-column>
       <el-table-column prop="shareCode" label="邀请码" width="130">
         <template #default="{ row }">{{ row.shareCode || '--' }}</template>
       </el-table-column>
@@ -211,6 +214,12 @@ function inviterLabel(row: any) {
   const referrer = row.shareReferralRecord?.referrer;
   if (!referrer) return '系统';
   return referrer.nickname || referrer.phone || referrer.shareCode || referrer.id || '系统';
+}
+
+function locationLabel(row: any) {
+  const parts = [row.province, row.city].filter(Boolean);
+  const uniqueParts = parts.filter((item, index) => parts.indexOf(item) === index);
+  return uniqueParts.join(' · ') || '--';
 }
 
 function avatarText(row: any) {

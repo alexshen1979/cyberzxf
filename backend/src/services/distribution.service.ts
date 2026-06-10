@@ -4,6 +4,9 @@ import QRCode from 'qrcode';
 import { prisma } from '../utils/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { createLogger } from '../utils/logger';
+import {
+  summarizePaymentDevices,
+} from './payment-device';
 import { config } from '../config';
 import { getPointSettings } from './point-config.service';
 import {
@@ -38,6 +41,7 @@ const DEFAULT_DAILY_SHARE_REWARD_POINTS = 10;
 const DAILY_SHARE_REWARD_SOURCE = 'daily_share_reward';
 const DEFAULT_SHARE_REFERRAL_REWARD_POINTS = 20;
 const SHARE_REFERRAL_REWARD_SOURCE = 'share_referral_reward';
+const DEFAULT_REFERRER_REGISTRATION_REWARD_AMOUNT = 50;
 const PARTNER_NEW_USER_EXTRA_GIFT_SOURCE = 'partner_new_user_extra_gift';
 const DIRECT_COMMISSION_ROLES = ['level1_direct', 'level2_direct'];
 const TRANSFERRING_WITHDRAWAL_STATUSES = ['transferring', 'wait_user_confirm'];
@@ -61,6 +65,7 @@ export async function ensureDistributionDefaults(db: any = prisma) {
         level2Rate: DEFAULT_LEVEL2_RATE,
         dailyShareReward: DEFAULT_DAILY_SHARE_REWARD_POINTS,
         referralReward: DEFAULT_SHARE_REFERRAL_REWARD_POINTS,
+        referrerRegistrationRewardAmount: DEFAULT_REFERRER_REGISTRATION_REWARD_AMOUNT,
         minWithdrawalAmount: DEFAULT_MIN_WITHDRAWAL_AMOUNT,
         withdrawalFreezeDays: DEFAULT_WITHDRAWAL_FREEZE_DAYS,
         transferSceneId: DEFAULT_TRANSFER_SCENE_ID,
@@ -463,8 +468,8 @@ export async function getMyDistribution(userId: string) {
   const [
     directReferralCount,
     paidReferralCount,
-    commissionTotal,
     commissionCount,
+    registrationRewardCount,
     withdrawalSummary,
     teamReferralCount,
     shareReferralCount,
@@ -473,11 +478,8 @@ export async function getMyDistribution(userId: string) {
   ] = await Promise.all([
     prisma.distributionReferral.count({ where: { distributorId: distributor.id } }),
     prisma.distributionReferral.count({ where: { distributorId: distributor.id, firstOrderId: { not: null } } }),
-    prisma.distributionCommission.aggregate({
-      where: { distributorId: distributor.id },
-      _sum: { amount: true },
-    }),
     prisma.distributionCommission.count({ where: { distributorId: distributor.id } }),
+    prisma.distributionRegistrationReward.count({ where: { distributorId: distributor.id } }),
     getDistributorWithdrawalSummary(distributor.id, setting),
     distributor.level === 1
       ? prisma.distributionReferral.count({ where: { firstLevelDistributorId: distributor.id } })
@@ -495,6 +497,7 @@ export async function getMyDistribution(userId: string) {
       paidReferralCount,
       teamReferralCount,
       commissionCount,
+      registrationRewardCount,
       ...withdrawalSummary,
       shareReferralCount,
       shareRewardCount,
@@ -518,6 +521,15 @@ export async function getMyDistributionCommissions(userId: string, page = 1, pag
   });
 
   return listCommissionsByWhere({ distributorId: distributor.id }, page, pageSize);
+}
+
+export async function getMyDistributionRegistrationRewards(userId: string, page = 1, pageSize = 20) {
+  const distributor = await prisma.distributor.findUnique({ where: { userId } });
+  if (!distributor || distributor.status !== 'active' || distributor.level !== 2) {
+    return { list: [], total: 0, page, pageSize };
+  }
+
+  return listRegistrationRewardsByWhere({ distributorId: distributor.id }, page, pageSize);
 }
 
 export async function getMyDistributionWithdrawals(userId: string, page = 1, pageSize = 20) {
@@ -566,6 +578,7 @@ export async function applyDistributionWithdrawal(userId: string, input: Record<
       distributorId: distributor.id,
       userId,
       amount,
+      ...allocateWithdrawalDeviceAmounts(amount, summary.availableDeviceBreakdown),
       status: 'pending',
       method: 'wechat_balance',
       accountName: String(input.accountName || distributor.user?.nickname || distributor.user?.phone || distributor.name || '').trim().slice(0, 50) || null,
@@ -751,6 +764,7 @@ async function createShareReferralAndReward(db: any, userId: string, referrerUse
     },
   });
   await grantShareReferralReward(db, referrerUserId, shareReferral.id);
+  await grantReferrerRegistrationCashReward(db, shareReferral, referrerUserId);
   return shareReferral;
 }
 
@@ -794,6 +808,35 @@ async function grantShareReferralReward(db: any, referrerUserId: string, shareRe
       source: SHARE_REFERRAL_REWARD_SOURCE,
       sourceId: shareReferralId,
       remark: `邀请新用户注册赠送 ${rewardPoints} 点`,
+    },
+  });
+}
+
+async function grantReferrerRegistrationCashReward(db: any, shareReferral: any, referrerUserId: string) {
+  const distributionSetting = await getCurrentDistributionSetting(db);
+  const amount = getReferrerRegistrationRewardAmount(distributionSetting);
+  if (amount <= 0) return null;
+
+  const distributor = await db.distributor.findUnique({
+    where: { userId: referrerUserId },
+    select: { id: true, level: true, status: true, registrationCashRewardEnabled: true },
+  });
+  if (!distributor || distributor.status !== 'active' || distributor.level !== 2 || distributor.registrationCashRewardEnabled !== true) return null;
+
+  const existing = await db.distributionRegistrationReward.findUnique({
+    where: { shareReferralId: shareReferral.id },
+  });
+  if (existing) return existing;
+
+  return db.distributionRegistrationReward.create({
+    data: {
+      id: crypto.randomUUID(),
+      shareReferralId: shareReferral.id,
+      distributorId: distributor.id,
+      referralUserId: shareReferral.userId,
+      amount,
+      status: 'settled',
+      createdAt: shareReferral.createdAt || new Date(),
     },
   });
 }
@@ -1225,6 +1268,9 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
   const level2Rate = normalizeRateBps(input.level2Rate);
   const dailyShareReward = normalizePointAmount(input.dailyShareReward ?? DEFAULT_DAILY_SHARE_REWARD_POINTS, '每日分享赠点');
   const referralReward = normalizePointAmount(input.referralReward ?? DEFAULT_SHARE_REFERRAL_REWARD_POINTS, '好友注册奖励');
+  const rawRegistrationRewardAmount = input.referrerRegistrationRewardAmount
+    ?? (input.referrerRegistrationRewardYuan !== undefined ? Number(input.referrerRegistrationRewardYuan) * 100 : DEFAULT_REFERRER_REGISTRATION_REWARD_AMOUNT);
+  const referrerRegistrationRewardAmount = normalizeMoneyAmount(rawRegistrationRewardAmount, true);
   const minWithdrawalAmount = normalizeMoneyAmount(input.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT, true);
   const withdrawalFreezeDays = normalizeFreezeDays(input.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS);
   const transferRule = normalizeTransferRule(input);
@@ -1255,6 +1301,7 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
       level2Rate,
       dailyShareReward,
       referralReward,
+      referrerRegistrationRewardAmount,
       minWithdrawalAmount,
       withdrawalFreezeDays,
       ...transferRule,
@@ -1270,6 +1317,7 @@ export async function updateDistributionSettingsForAdmin(input: Record<string, a
       level2Rate,
       dailyShareReward,
       referralReward,
+      referrerRegistrationRewardAmount,
       minWithdrawalAmount,
       withdrawalFreezeDays,
       ...transferRule,
@@ -1295,6 +1343,9 @@ export async function getDistributionDashboardForAdmin() {
     commissionCount,
     commissionTotal,
     settledCommissionTotal,
+    registrationRewardCount,
+    registrationRewardTotal,
+    settledRegistrationRewardTotal,
     withdrawalTotal,
     withdrawalPendingTotal,
     generalAgentCount,
@@ -1302,6 +1353,11 @@ export async function getDistributionDashboardForAdmin() {
     generalAgentCommissionTotal,
     generalAgentPendingTotal,
     generalAgentPaidTotal,
+    commissionRows,
+    settledCommissionRows,
+    generalAgentRows,
+    pendingGeneralAgentRows,
+    paidGeneralAgentRows,
   ] = await Promise.all([
     prisma.distributor.count({ where: { code: { not: SYSTEM_DISTRIBUTOR_CODE } } }),
     prisma.distributor.count({ where: { level: 1, code: { not: SYSTEM_DISTRIBUTOR_CODE } } }),
@@ -1316,6 +1372,15 @@ export async function getDistributionDashboardForAdmin() {
       },
       _sum: { amount: true },
     }),
+    prisma.distributionRegistrationReward.count({ where: realRegistrationRewardWhere() }),
+    prisma.distributionRegistrationReward.aggregate({ where: realRegistrationRewardWhere(), _sum: { amount: true } }),
+    prisma.distributionRegistrationReward.aggregate({
+      where: {
+        ...realRegistrationRewardWhere(),
+        createdAt: { lte: availableBefore },
+      },
+      _sum: { amount: true },
+    }),
     prisma.distributionWithdrawal.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
     prisma.distributionWithdrawal.aggregate({ where: { status: { in: LOCKED_WITHDRAWAL_STATUSES } }, _sum: { amount: true } }),
     prisma.distributor.count({ where: { level: 1, isGeneralAgent: true, code: { not: SYSTEM_DISTRIBUTOR_CODE } } }),
@@ -1323,9 +1388,35 @@ export async function getDistributionDashboardForAdmin() {
     prisma.generalAgentCommission.aggregate({ _sum: { amount: true } }),
     prisma.generalAgentCommission.aggregate({ where: { status: 'pending' }, _sum: { amount: true } }),
     prisma.generalAgentCommission.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
+    prisma.distributionCommission.findMany({
+      where: realDistributorCommissionWhere(),
+      include: { order: { select: { paymentDevice: true, payChannel: true, virtualOrderType: true } } },
+    }),
+    prisma.distributionCommission.findMany({
+      where: {
+        ...realDistributorCommissionWhere(),
+        createdAt: { lte: availableBefore },
+      },
+      include: { order: { select: { paymentDevice: true, payChannel: true, virtualOrderType: true } } },
+    }),
+    prisma.generalAgentCommission.findMany({
+      include: { order: { select: { paymentDevice: true, payChannel: true, virtualOrderType: true } } },
+    }),
+    prisma.generalAgentCommission.findMany({
+      where: { status: 'pending' },
+      include: { order: { select: { paymentDevice: true, payChannel: true, virtualOrderType: true } } },
+    }),
+    prisma.generalAgentCommission.findMany({
+      where: { status: 'paid' },
+      include: { order: { select: { paymentDevice: true, payChannel: true, virtualOrderType: true } } },
+    }),
   ]);
-  const commissionAmount = commissionTotal._sum.amount || 0;
-  const settledCommissionAmount = settledCommissionTotal._sum.amount || 0;
+  const rechargeCommissionAmount = commissionTotal._sum.amount || 0;
+  const settledRechargeCommissionAmount = settledCommissionTotal._sum.amount || 0;
+  const registrationRewardAmount = registrationRewardTotal._sum.amount || 0;
+  const settledRegistrationRewardAmount = settledRegistrationRewardTotal._sum.amount || 0;
+  const commissionAmount = rechargeCommissionAmount + registrationRewardAmount;
+  const settledCommissionAmount = settledRechargeCommissionAmount + settledRegistrationRewardAmount;
 
   return {
     distributorCount,
@@ -1333,8 +1424,13 @@ export async function getDistributionDashboardForAdmin() {
     level2Count,
     referralCount,
     commissionCount,
+    registrationRewardCount,
     commissionAmount,
+    rechargeCommissionAmount,
+    registrationRewardAmount,
     settledCommissionAmount,
+    settledRechargeCommissionAmount,
+    settledRegistrationRewardAmount,
     frozenCommissionAmount: Math.max(0, commissionAmount - settledCommissionAmount),
     paidWithdrawalAmount: withdrawalTotal._sum.amount || 0,
     pendingWithdrawalAmount: withdrawalPendingTotal._sum.amount || 0,
@@ -1343,6 +1439,11 @@ export async function getDistributionDashboardForAdmin() {
     generalAgentCommissionAmount: generalAgentCommissionTotal._sum.amount || 0,
     generalAgentPendingAmount: generalAgentPendingTotal._sum.amount || 0,
     generalAgentPaidAmount: generalAgentPaidTotal._sum.amount || 0,
+    commissionDeviceBreakdown: summarizePaymentDevices(commissionRows),
+    settledCommissionDeviceBreakdown: summarizePaymentDevices(settledCommissionRows),
+    generalAgentDeviceBreakdown: summarizePaymentDevices(generalAgentRows),
+    generalAgentPendingDeviceBreakdown: summarizePaymentDevices(pendingGeneralAgentRows),
+    generalAgentPaidDeviceBreakdown: summarizePaymentDevices(paidGeneralAgentRows),
     withdrawalFreezeDays: freezeDays,
   };
 }
@@ -1543,6 +1644,7 @@ export async function createDistributorForAdmin(input: Record<string, any>) {
   const isGeneralAgent = level === 1 && input.isGeneralAgent === true;
   const generalAgentRate = level === 1 ? normalizeRateBps(input.generalAgentRate ?? DEFAULT_GENERAL_AGENT_RATE) : DEFAULT_GENERAL_AGENT_RATE;
   const generalAgentParentId = level === 1 && !isGeneralAgent ? await resolveGeneralAgentParentId(input.generalAgentParentId, userId) : null;
+  const registrationCashRewardEnabled = level === 2 && input.registrationCashRewardEnabled === true;
   const distributor = await prisma.distributor.create({
     data: {
       userId,
@@ -1556,6 +1658,7 @@ export async function createDistributorForAdmin(input: Record<string, any>) {
       generalAgentRate,
       status,
       newUserGiftOverride,
+      registrationCashRewardEnabled,
       approvedAt: status === 'active' ? new Date() : null,
     },
   });
@@ -1593,6 +1696,7 @@ export async function updateDistributorForAdmin(id: string, input: Record<string
   data.level = nextLevel;
   if (nextLevel === 1) {
     data.parentId = null;
+    data.registrationCashRewardEnabled = false;
     const generalAgentInputTouched = Object.prototype.hasOwnProperty.call(input, 'isGeneralAgent')
       || Object.prototype.hasOwnProperty.call(input, 'generalAgentRate')
       || Object.prototype.hasOwnProperty.call(input, 'generalAgentParentId');
@@ -1626,6 +1730,7 @@ export async function updateDistributorForAdmin(id: string, input: Record<string
     data.generalAgentRate = DEFAULT_GENERAL_AGENT_RATE;
     data.generalAgentParentId = null;
     data.generalAgentParentAssignedAt = null;
+    data.registrationCashRewardEnabled = input.registrationCashRewardEnabled === true;
   }
 
   return prisma.$transaction(async (tx) => {
@@ -1679,7 +1784,7 @@ export async function listGeneralAgentCommissionsForAdmin(params: Record<string,
         generalAgent: { select: { id: true, name: true, code: true, generalAgentRate: true } },
         sourceDistributor: { select: { id: true, name: true, code: true, level: true } },
         directDistributor: { select: { id: true, name: true, code: true, level: true } },
-        order: { select: { id: true, orderNo: true, amount: true, productName: true, paidAt: true } },
+        order: { select: orderPaymentSelect() },
       },
     }),
     prisma.generalAgentCommission.count({ where }),
@@ -1718,12 +1823,27 @@ export async function getGeneralAgentStatsForAdmin(id: string) {
     paidCommission,
     commissionCount,
     orderCount,
+    rows,
+    pendingRows,
+    paidRows,
   ] = await Promise.all([
     prisma.generalAgentCommission.aggregate({ where: { generalAgentId: id }, _sum: { amount: true } }),
     prisma.generalAgentCommission.aggregate({ where: { generalAgentId: id, status: 'pending' }, _sum: { amount: true } }),
     prisma.generalAgentCommission.aggregate({ where: { generalAgentId: id, status: 'paid' }, _sum: { amount: true } }),
     prisma.generalAgentCommission.count({ where: { generalAgentId: id } }),
     prisma.generalAgentCommission.count({ where: { generalAgentId: id } }),
+    prisma.generalAgentCommission.findMany({
+      where: { generalAgentId: id },
+      include: { order: { select: { paymentDevice: true, payChannel: true, virtualOrderType: true } } },
+    }),
+    prisma.generalAgentCommission.findMany({
+      where: { generalAgentId: id, status: 'pending' },
+      include: { order: { select: { paymentDevice: true, payChannel: true, virtualOrderType: true } } },
+    }),
+    prisma.generalAgentCommission.findMany({
+      where: { generalAgentId: id, status: 'paid' },
+      include: { order: { select: { paymentDevice: true, payChannel: true, virtualOrderType: true } } },
+    }),
   ]);
   return {
     agent,
@@ -1735,6 +1855,9 @@ export async function getGeneralAgentStatsForAdmin(id: string) {
     commissionAmount: totalCommission._sum.amount || 0,
     pendingAmount: pendingCommission._sum.amount || 0,
     paidAmount: paidCommission._sum.amount || 0,
+    paymentDeviceBreakdown: summarizePaymentDevices(rows),
+    pendingDeviceBreakdown: summarizePaymentDevices(pendingRows),
+    paidDeviceBreakdown: summarizePaymentDevices(paidRows),
   };
 }
 
@@ -1754,7 +1877,7 @@ export async function markGeneralAgentCommissionForAdmin(id: string, input: Reco
       generalAgent: { select: { id: true, name: true, code: true, generalAgentRate: true } },
       sourceDistributor: { select: { id: true, name: true, code: true, level: true } },
       directDistributor: { select: { id: true, name: true, code: true, level: true } },
-      order: { select: { id: true, orderNo: true, amount: true, productName: true, paidAt: true } },
+      order: { select: orderPaymentSelect() },
     },
   });
 }
@@ -1916,6 +2039,10 @@ export async function handleWechatTransferCallbackForDistribution(body: Record<s
 }
 
 function realDistributorCommissionWhere() {
+  return { distributor: { code: { not: SYSTEM_DISTRIBUTOR_CODE } } };
+}
+
+function realRegistrationRewardWhere() {
   return { distributor: { code: { not: SYSTEM_DISTRIBUTOR_CODE } } };
 }
 
@@ -2254,7 +2381,7 @@ async function listCommissionsByWhere(where: any, page: number, pageSize: number
       take: pageSize,
       include: {
         distributor: { select: { id: true, name: true, code: true, level: true } },
-        order: { select: { id: true, orderNo: true, amount: true, productName: true, paidAt: true } },
+        order: { select: orderPaymentSelect() },
       },
     }),
     prisma.distributionCommission.count({ where }),
@@ -2262,6 +2389,34 @@ async function listCommissionsByWhere(where: any, page: number, pageSize: number
   const userIds = [...new Set(list.map(item => item.referralUserId).filter(Boolean))];
   const users = userIds.length
     ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, nickname: true, phone: true } })
+    : [];
+  const userMap = new Map(users.map(user => [user.id, user]));
+
+  return {
+    list: list.map(item => ({ ...item, referralUser: userMap.get(item.referralUserId) || null })),
+    total,
+    page,
+    pageSize,
+  };
+}
+
+async function listRegistrationRewardsByWhere(where: any, page: number, pageSize: number) {
+  const [list, total] = await Promise.all([
+    prisma.distributionRegistrationReward.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: {
+        distributor: { select: { id: true, name: true, code: true, level: true } },
+        shareReferral: { select: { id: true, sourceCode: true, createdAt: true } },
+      },
+    }),
+    prisma.distributionRegistrationReward.count({ where }),
+  ]);
+  const userIds = [...new Set(list.map(item => item.referralUserId).filter(Boolean))];
+  const users = userIds.length
+    ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, nickname: true, phone: true, shareCode: true } })
     : [];
   const userMap = new Map(users.map(user => [user.id, user]));
 
@@ -2417,6 +2572,21 @@ function withdrawalInclude() {
   };
 }
 
+function orderPaymentSelect() {
+  return {
+    id: true,
+    orderNo: true,
+    amount: true,
+    productName: true,
+    paidAt: true,
+    payChannel: true,
+    paymentDevice: true,
+    virtualOrderType: true,
+    virtualSettState: true,
+    virtualSettTime: true,
+  };
+}
+
 async function getDistributorWithdrawalSummary(distributorId: string, setting?: any) {
   const currentSetting = setting || (await ensureDistributionDefaults()).setting;
   const freezeDays = currentSetting.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS;
@@ -2426,6 +2596,10 @@ async function getDistributorWithdrawalSummary(distributorId: string, setting?: 
   const [
     commissionTotal,
     availableCommissionTotal,
+    commissionRows,
+    availableCommissionRows,
+    registrationRewardTotal,
+    availableRegistrationRewardTotal,
     pendingWithdrawalTotal,
     paidWithdrawalTotal,
   ] = await Promise.all([
@@ -2434,6 +2608,28 @@ async function getDistributorWithdrawalSummary(distributorId: string, setting?: 
       _sum: { amount: true },
     }),
     prisma.distributionCommission.aggregate({
+      where: {
+        distributorId,
+        createdAt: { lte: availableBefore },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.distributionCommission.findMany({
+      where: { distributorId },
+      include: { order: { select: orderPaymentSelect() } },
+    }),
+    prisma.distributionCommission.findMany({
+      where: {
+        distributorId,
+        createdAt: { lte: availableBefore },
+      },
+      include: { order: { select: orderPaymentSelect() } },
+    }),
+    prisma.distributionRegistrationReward.aggregate({
+      where: { distributorId },
+      _sum: { amount: true },
+    }),
+    prisma.distributionRegistrationReward.aggregate({
       where: {
         distributorId,
         createdAt: { lte: availableBefore },
@@ -2456,24 +2652,68 @@ async function getDistributorWithdrawalSummary(distributorId: string, setting?: 
     }),
   ]);
 
-  const commissionAmount = commissionTotal._sum.amount || 0;
-  const settledCommissionAmount = availableCommissionTotal._sum.amount || 0;
+  const rechargeCommissionAmount = commissionTotal._sum.amount || 0;
+  const settledRechargeCommissionAmount = availableCommissionTotal._sum.amount || 0;
+  const registrationRewardAmount = registrationRewardTotal._sum.amount || 0;
+  const settledRegistrationRewardAmount = availableRegistrationRewardTotal._sum.amount || 0;
+  const commissionAmount = rechargeCommissionAmount + registrationRewardAmount;
+  const settledCommissionAmount = settledRechargeCommissionAmount + settledRegistrationRewardAmount;
   const lockedWithdrawalAmount = pendingWithdrawalTotal._sum.amount || 0;
   const paidWithdrawalAmount = paidWithdrawalTotal._sum.amount || 0;
   const availableWithdrawalAmount = Math.max(0, settledCommissionAmount - lockedWithdrawalAmount - paidWithdrawalAmount);
   const frozenCommissionAmount = Math.max(0, commissionAmount - settledCommissionAmount);
+  const deviceBreakdown = summarizePaymentDevices(commissionRows);
+  const settledDeviceBreakdown = summarizePaymentDevices(availableCommissionRows);
+  const availableDeviceBreakdown = allocateAvailableDeviceBreakdown(settledDeviceBreakdown, lockedWithdrawalAmount + paidWithdrawalAmount);
 
   return {
     commissionAmount,
+    rechargeCommissionAmount,
+    registrationRewardAmount,
     settledCommissionAmount,
+    settledRechargeCommissionAmount,
+    settledRegistrationRewardAmount,
     frozenCommissionAmount,
     availableWithdrawalAmount,
+    deviceBreakdown,
+    settledDeviceBreakdown,
+    availableDeviceBreakdown,
     lockedWithdrawalAmount,
     paidWithdrawalAmount,
     minWithdrawalAmount: currentSetting.minWithdrawalAmount || DEFAULT_MIN_WITHDRAWAL_AMOUNT,
     withdrawalFreezeDays: freezeDays,
     transferRule: formatTransferRule(currentSetting),
   };
+}
+
+function allocateAvailableDeviceBreakdown(settledBreakdown: any, consumedAmount: number) {
+  const total = Number(settledBreakdown?.ios?.amount || 0)
+    + Number(settledBreakdown?.android?.amount || 0)
+    + Number(settledBreakdown?.wechatPay?.amount || 0)
+    + Number(settledBreakdown?.unknown?.amount || 0);
+  const ratio = total > 0 ? Math.max(0, Math.min(1, (total - Math.max(0, consumedAmount)) / total)) : 0;
+  return {
+    ios: { amount: Math.round(Number(settledBreakdown?.ios?.amount || 0) * ratio), count: settledBreakdown?.ios?.count || 0 },
+    android: { amount: Math.round(Number(settledBreakdown?.android?.amount || 0) * ratio), count: settledBreakdown?.android?.count || 0 },
+    wechatPay: { amount: Math.round(Number(settledBreakdown?.wechatPay?.amount || 0) * ratio), count: settledBreakdown?.wechatPay?.count || 0 },
+    unknown: { amount: Math.round(Number(settledBreakdown?.unknown?.amount || 0) * ratio), count: settledBreakdown?.unknown?.count || 0 },
+  };
+}
+
+function allocateWithdrawalDeviceAmounts(amount: number, availableBreakdown: any) {
+  const summary = availableBreakdown || {};
+  const total = Number(summary?.ios?.amount || 0)
+    + Number(summary?.android?.amount || 0)
+    + Number(summary?.wechatPay?.amount || 0)
+    + Number(summary?.unknown?.amount || 0);
+  if (total <= 0 || amount <= 0) {
+    return { iosAmount: 0, androidAmount: 0, legacyAmount: 0, unknownAmount: amount };
+  }
+  const iosAmount = Math.min(amount, Math.floor(amount * Number(summary.ios?.amount || 0) / total));
+  const androidAmount = Math.min(amount - iosAmount, Math.floor(amount * Number(summary.android?.amount || 0) / total));
+  const legacyAmount = Math.min(amount - iosAmount - androidAmount, Math.floor(amount * Number(summary.wechatPay?.amount || 0) / total));
+  const unknownAmount = Math.max(0, amount - iosAmount - androidAmount - legacyAmount);
+  return { iosAmount, androidAmount, legacyAmount, unknownAmount };
 }
 
 async function assertWithdrawalTransferRule(
@@ -2587,6 +2827,8 @@ function userShareSelect() {
     nickname: true,
     avatar: true,
     phone: true,
+    province: true,
+    city: true,
     status: true,
     createdAt: true,
     shareCode: true,
@@ -2754,6 +2996,8 @@ function formatDistributionSetting(setting: any) {
     level2Rate: setting.level2Rate,
     dailyShareReward: getDailyShareRewardPoints(setting),
     referralReward: getReferralRewardPoints(setting),
+    referrerRegistrationRewardAmount: getReferrerRegistrationRewardAmount(setting),
+    referrerRegistrationRewardYuan: getReferrerRegistrationRewardAmount(setting) / 100,
     minWithdrawalAmount: setting.minWithdrawalAmount ?? DEFAULT_MIN_WITHDRAWAL_AMOUNT,
     withdrawalFreezeDays: setting.withdrawalFreezeDays ?? DEFAULT_WITHDRAWAL_FREEZE_DAYS,
     transferSceneId: transferRule.sceneId,
@@ -2807,6 +3051,10 @@ function getReferralRewardPoints(setting: any) {
   return normalizePointAmount(setting?.referralReward ?? DEFAULT_SHARE_REFERRAL_REWARD_POINTS, '好友注册奖励');
 }
 
+function getReferrerRegistrationRewardAmount(setting: any) {
+  return normalizeMoneyAmount(setting?.referrerRegistrationRewardAmount ?? DEFAULT_REFERRER_REGISTRATION_REWARD_AMOUNT, true);
+}
+
 function emptyDistributionStats() {
   return {
     directReferralCount: 0,
@@ -2814,7 +3062,12 @@ function emptyDistributionStats() {
     teamReferralCount: 0,
     commissionCount: 0,
     commissionAmount: 0,
+    rechargeCommissionAmount: 0,
+    registrationRewardAmount: 0,
+    registrationRewardCount: 0,
     settledCommissionAmount: 0,
+    settledRechargeCommissionAmount: 0,
+    settledRegistrationRewardAmount: 0,
     frozenCommissionAmount: 0,
     availableWithdrawalAmount: 0,
     lockedWithdrawalAmount: 0,

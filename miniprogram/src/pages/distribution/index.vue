@@ -9,7 +9,9 @@
     <view class="qr-card">
       <view class="section-head">
         <text class="section-title">我的邀请码</text>
-        <text class="section-action" @click="loadQrcode(true)">刷新</text>
+        <text class="section-action" :class="{ disabled: qrcodeLoading || qrcodeSaving }" @click="saveInviteQrcode">
+          {{ qrcodeActionText }}
+        </text>
       </view>
       <view class="qr-box">
         <image v-if="qrcodeUrl" class="qr-img" :src="qrcodeUrl" mode="aspectFit" />
@@ -30,7 +32,7 @@
       </view>
     </view>
 
-    <view class="stats-grid" :class="{ compact: !showCommissionStats }">
+    <view class="stats-grid" :class="{ compact: !showCommissionStats, four: showRegistrationRewardStats }">
       <view class="stat-item">
         <text class="stat-value">{{ stats.shareReferralCount || 0 }}</text>
         <text class="stat-label">邀请注册</text>
@@ -40,8 +42,12 @@
         <text class="stat-label">注册奖励</text>
       </view>
       <view class="stat-item" v-if="showCommissionStats">
-        <text class="stat-value">{{ formatMoney(stats.commissionAmount || 0) }}</text>
-        <text class="stat-label">奖励累计</text>
+        <text class="stat-value">{{ formatMoney(stats.rechargeCommissionAmount || 0) }}</text>
+        <text class="stat-label">充值提成</text>
+      </view>
+      <view class="stat-item" v-if="showRegistrationRewardStats">
+        <text class="stat-value">{{ formatMoney(stats.registrationRewardAmount || 0) }}</text>
+        <text class="stat-label">注册现金奖励</text>
       </view>
     </view>
 
@@ -101,16 +107,18 @@
       <view class="withdraw-card" v-if="isActive">
         <view class="section-head">
           <text class="section-title">奖励提现</text>
-          <text class="section-action" @click="loadWithdrawals">刷新</text>
+          <text class="section-action" @click="withdrawRuleVisible = true">查看说明</text>
         </view>
         <view class="withdraw-grid">
           <view>
             <text class="withdraw-value">{{ formatMoney(stats.availableWithdrawalAmount || 0) }}</text>
             <text class="withdraw-label">可提现</text>
+            <text class="withdraw-source">{{ deviceBreakdownText(stats.availableDeviceBreakdown) }}</text>
           </view>
           <view>
             <text class="withdraw-value">{{ formatMoney(stats.frozenCommissionAmount || 0) }}</text>
             <text class="withdraw-label">待结算</text>
+            <text class="withdraw-source">{{ pendingDeviceBreakdownText }}</text>
           </view>
           <view>
             <text class="withdraw-value">{{ formatMoney(stats.lockedWithdrawalAmount || 0) }}</text>
@@ -121,8 +129,6 @@
             <text class="withdraw-label">已提现</text>
           </view>
         </view>
-        <view class="withdraw-tip">最低 {{ formatMoney(stats.minWithdrawalAmount || 1000) }} 可申请；新奖励满 {{ stats.withdrawalFreezeDays ?? 7 }} 天后可提现。</view>
-        <view class="transfer-rule" v-if="transferRuleText">{{ transferRuleText }}</view>
         <view class="withdraw-form">
           <input class="withdraw-input" v-model="withdrawAmountInput" type="digit" placeholder="输入提现金额" />
           <view class="primary-btn withdraw-btn" :class="{ disabled: withdrawing }" @click="applyWithdrawal">
@@ -147,17 +153,66 @@
           </view>
         </view>
       </view>
+      <view class="rule-modal-mask" v-if="withdrawRuleVisible" @click="withdrawRuleVisible = false">
+        <view class="rule-modal" @click.stop>
+          <view class="rule-modal-head">
+            <text>奖励提现说明</text>
+            <text class="rule-modal-close" @click="withdrawRuleVisible = false">关闭</text>
+          </view>
+          <view class="rule-row">
+            <text class="rule-label">提现门槛</text>
+            <text class="rule-text">最低 {{ formatMoney(stats.minWithdrawalAmount || 1000) }} 可申请；安卓/鸿蒙奖励满 {{ stats.withdrawalFreezeDays ?? 7 }} 天后可提现。</text>
+          </view>
+          <view class="rule-row">
+            <text class="rule-label">苹果结算</text>
+            <text class="rule-text">根据 Apple 规定，iPhone 充值经 Apple IAP 结算，通常在自然月结束后 45-60 天内结算给腾讯，再划转至开发者虚拟支付账户。Apple 充值产生的奖励请按苹果结算周期耐心等待，到账后会进入可提现金额。</text>
+          </view>
+          <view class="rule-row">
+            <text class="rule-label">确认收款</text>
+            <text class="rule-text">根据微信规定，提现审核通过并发起微信转账后，需要回到本页面点击“确认收款”，完成后进入微信零钱。</text>
+          </view>
+          <view class="rule-row" v-if="transferRuleText">
+            <text class="rule-label">转账规则</text>
+            <text class="rule-text">{{ transferRuleText }}</text>
+          </view>
+        </view>
+      </view>
+      <view class="commission-card" v-if="showRegistrationRewardStats">
+        <view class="section-head">
+          <text class="section-title">邀请注册现金奖励</text>
+          <text class="section-action" @click="loadRegistrationRewards">刷新</text>
+        </view>
+        <view class="registration-reward-summary">
+          <view>
+            <text class="summary-label">每邀请 1 人注册</text>
+            <text class="summary-value">{{ formatMoney(registrationRewardUnitAmount) }}</text>
+          </view>
+          <view>
+            <text class="summary-label">已获得</text>
+            <text class="summary-value">{{ formatMoney(stats.registrationRewardAmount || 0) }}</text>
+          </view>
+        </view>
+        <view class="empty-list" v-if="registrationRewards.length === 0">暂无邀请注册现金奖励</view>
+        <view class="commission-item" v-for="item in registrationRewards" :key="item.id">
+          <view>
+            <text class="commission-title">邀请注册奖励</text>
+            <text class="commission-sub">{{ registrationRewardSourceText(item) }}</text>
+            <text class="commission-sub">邀请码 {{ item.shareReferral?.sourceCode || shareCode || '--' }} · {{ formatDate(item.createdAt) }}</text>
+          </view>
+          <text class="commission-amount">{{ formatMoney(item.amount) }}</text>
+        </view>
+      </view>
       <view class="commission-card" v-if="isActive">
         <view class="section-head">
-          <text class="section-title">推荐奖励</text>
+          <text class="section-title">充值提成</text>
           <text class="section-action" @click="loadCommissions">刷新</text>
         </view>
-        <view class="empty-list" v-if="commissions.length === 0">暂无奖励记录</view>
+        <view class="empty-list" v-if="commissions.length === 0">暂无充值提成记录</view>
         <view class="commission-item" v-for="item in commissions" :key="item.id">
           <view>
             <text class="commission-title">{{ roleLabel(item.role) }}</text>
             <text class="commission-sub">{{ commissionSourceText(item) }}</text>
-            <text class="commission-sub">{{ item.order?.productName || '充值订单' }} · {{ formatDate(item.createdAt) }}</text>
+            <text class="commission-sub">{{ item.order?.productName || '充值订单' }} · {{ paymentDeviceLabel(item.order?.paymentDevice) }} · {{ formatDate(item.createdAt) }}</text>
           </view>
           <text class="commission-amount">{{ formatMoney(item.amount) }}</text>
         </view>
@@ -167,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { onLoad, onPullDownRefresh, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app';
 import QRCode from 'qrcode';
 import { api } from '@/api';
@@ -179,15 +234,18 @@ declare const wx: any;
 const userStore = useUserStore();
 const data = ref<any>(null);
 const commissions = ref<any[]>([]);
+const registrationRewards = ref<any[]>([]);
 const withdrawals = ref<any[]>([]);
 const applying = ref(false);
 const withdrawing = ref(false);
 const qrcodeLoading = ref(false);
+const qrcodeSaving = ref(false);
 const qrcodeUrl = ref('');
 const canvasQrVisible = ref(false);
 const referralCodeInput = ref('');
 const bindingReferral = ref(false);
 const withdrawAmountInput = ref('');
+const withdrawRuleVisible = ref(false);
 
 const distributor = computed(() => data.value?.distributor || null);
 const stats = computed(() => data.value?.stats || {});
@@ -199,18 +257,37 @@ const isRejected = computed(() => distributor.value?.status === 'rejected');
 const isBlocked = computed(() => isDisabled.value || isRejected.value);
 const showDistributionInfo = computed(() => Boolean(distributor.value) && !isBlocked.value);
 const showCommissionStats = computed(() => isActive.value);
+const showRegistrationRewardStats = computed(() => (
+  isActive.value
+  && Number(distributor.value?.level) === 2
+  && distributor.value?.registrationCashRewardEnabled === true
+));
 const shareReferral = computed(() => data.value?.shareReferral || null);
 const canApplyDistribution = computed(() => data.value?.canApply === true);
 const shareCode = computed(() => data.value?.shareCode || userStore.userInfo?.shareCode || '');
 const sharePath = computed(() => data.value?.sharePath || withShareRef('pages/volunteer/index'));
 const dailyShareRewardPoints = computed(() => data.value?.dailyShareRewardPoints ?? 10);
 const referralRewardPoints = computed(() => data.value?.referralRewardPoints ?? 20);
+const registrationRewardUnitAmount = computed(() => setting.value?.referrerRegistrationRewardAmount ?? 50);
+const qrcodeActionText = computed(() => {
+  if (qrcodeSaving.value) return '保存中';
+  if (qrcodeLoading.value) return '生成中';
+  return '下载专属二维码';
+});
 const transferRule = computed(() => stats.value?.transferRule || setting.value?.transferRule || {});
 const transferRuleText = computed(() => {
   const rule = transferRule.value || {};
   const singleMax = rule.singleMax ?? 20000;
   const userDailyLimit = rule.userDailyLimit ?? 200000;
-  return `转账规则：受微信支付限制，单笔不超过 ${formatRuleMoney(singleMax)}，单日不超过 ${formatRuleMoney(userDailyLimit)}。`;
+  return `受微信支付限制，单笔不超过 ${formatRuleMoney(singleMax)}，单日不超过 ${formatRuleMoney(userDailyLimit)}。`;
+});
+const pendingDeviceBreakdownText = computed(() => {
+  const total = stats.value.deviceBreakdown || {};
+  const settled = stats.value.settledDeviceBreakdown || {};
+  return deviceBreakdownText({
+    ios: { amount: Math.max(0, deviceAmount(total, 'ios') - deviceAmount(settled, 'ios')) },
+    android: { amount: Math.max(0, deviceAmount(total, 'android') - deviceAmount(settled, 'android')) },
+  });
 });
 const rewardTipText = computed(() => {
   const tips = [];
@@ -271,7 +348,9 @@ async function loadAll() {
   }
   await loadQrcode(false);
   if (isActive.value) {
-    await Promise.all([loadCommissions(), loadWithdrawals()]);
+    const tasks = [loadCommissions(), loadWithdrawals()];
+    if (showRegistrationRewardStats.value) tasks.push(loadRegistrationRewards());
+    await Promise.all(tasks);
   }
 }
 
@@ -306,7 +385,8 @@ async function loadQrcode(showToast = false) {
         sharePath: payload.sharePath || data.value?.sharePath,
       });
       syncUserShareCode(data.value?.shareCode);
-      qrcodeUrl.value = await materializeImageDataUrl(payload.dataUrl);
+      const rawQrUrl = await materializeImageDataUrl(payload.dataUrl);
+      qrcodeUrl.value = await decorateInviteQrToTempFile(rawQrUrl, payload.shareCode || shareCode.value) || rawQrUrl;
       canvasQrVisible.value = false;
     } catch (error) {
       const localQrUrl = await generateLocalInviteQr();
@@ -323,10 +403,73 @@ async function loadQrcode(showToast = false) {
   }
 }
 
+async function saveInviteQrcode() {
+  if (qrcodeSaving.value || qrcodeLoading.value) return;
+  qrcodeSaving.value = true;
+  try {
+    const filePath = await ensureInviteQrImagePath();
+    if (!filePath) throw new Error('专属二维码生成失败');
+    await saveImageToAlbum(filePath);
+    uni.showToast({ title: '已保存到相册', icon: 'success' });
+    recordShare('qrcode', sharePath.value);
+  } catch (e: any) {
+    const message = e?.errMsg || e?.message || '';
+    if (String(message).includes('auth deny') || String(message).includes('authorize no response')) {
+      uni.showModal({
+        title: '需要相册权限',
+        content: '请允许保存到相册，才能下载你的专属邀请码图片。',
+        confirmText: '去设置',
+        success: (res) => {
+          if (res.confirm) uni.openSetting({});
+        },
+      });
+    } else {
+      uni.showToast({ title: e?.message || '保存失败，请稍后重试', icon: 'none' });
+    }
+  } finally {
+    qrcodeSaving.value = false;
+  }
+}
+
+async function ensureInviteQrImagePath() {
+  if (!qrcodeUrl.value) {
+    await loadQrcode(false);
+  }
+  if (!qrcodeUrl.value) return '';
+  return materializeQrImagePath(qrcodeUrl.value);
+}
+
+async function materializeQrImagePath(path: string) {
+  const raw = String(path || '');
+  if (!raw) return '';
+  if (/^data:image\/png;base64,/.test(raw)) {
+    return writePngDataUrlToTempFile(raw, `zhangshi-invite-code-${shareCode.value || 'me'}.png`);
+  }
+  if (/^https?:\/\//.test(raw)) {
+    const res = await uni.downloadFile({ url: raw });
+    if (res.statusCode && res.statusCode >= 400) throw new Error('二维码下载失败');
+    return res.tempFilePath;
+  }
+  return raw;
+}
+
+function saveImageToAlbum(filePath: string) {
+  return uni.saveImageToPhotosAlbum({ filePath });
+}
+
 async function loadCommissions() {
   if (!distributor.value || !isActive.value) return;
   const res = await api.distribution.commissions(1, 20);
   commissions.value = (res.data as any).list || [];
+}
+
+async function loadRegistrationRewards() {
+  if (!showRegistrationRewardStats.value) {
+    registrationRewards.value = [];
+    return;
+  }
+  const res = await api.distribution.registrationRewards(1, 20);
+  registrationRewards.value = (res.data as any).list || [];
 }
 
 async function loadWithdrawals() {
@@ -368,7 +511,12 @@ async function applyWithdrawal() {
   try {
     await api.distribution.applyWithdrawal(amount);
     withdrawAmountInput.value = '';
-    uni.showToast({ title: '提现申请已提交', icon: 'success' });
+    uni.showModal({
+      title: '提现申请已提交',
+      content: '审核通过并发起微信转账后，请回到本页面点击“确认收款”，完成后才会进入微信零钱。',
+      showCancel: false,
+      confirmText: '知道了',
+    });
     await loadAll();
   } catch (e: any) {
     uni.showToast({ title: e.message || '申请失败', icon: 'none' });
@@ -496,38 +644,123 @@ function drawInviteQrToTempFile(content: string, code: string) {
   canvasQrVisible.value = true;
   const modules = qr.modules;
   const matrixSize = modules.size;
-  const canvasSize = 320;
-  const margin = 18;
-  const cellSize = Math.floor((canvasSize - margin * 2) / matrixSize);
-  const qrSize = cellSize * matrixSize;
-  const offset = Math.floor((canvasSize - qrSize) / 2);
-  const ctx = uni.createCanvasContext('inviteQrCanvas');
 
-  ctx.setFillStyle('#ffffff');
-  ctx.fillRect(0, 0, canvasSize, canvasSize);
-  ctx.setFillStyle('#0f766e');
-  for (let row = 0; row < matrixSize; row += 1) {
-    for (let col = 0; col < matrixSize; col += 1) {
-      if (modules.get(row, col)) {
-        ctx.fillRect(offset + col * cellSize, offset + row * cellSize, cellSize, cellSize);
+  return withInviteQrCanvas((ctx, metrics) => {
+    const qrArea = getInviteQrArea(metrics);
+    const cellSize = Math.floor(qrArea.codeSize / matrixSize);
+    const qrSize = cellSize * matrixSize;
+    const offsetX = qrArea.x + Math.floor((qrArea.codeSize - qrSize) / 2);
+    const offsetY = qrArea.y + Math.floor((qrArea.codeSize - qrSize) / 2);
+
+    paintInviteQrBackground(ctx, metrics);
+    ctx.setFillStyle('#0f766e');
+    for (let row = 0; row < matrixSize; row += 1) {
+      for (let col = 0; col < matrixSize; col += 1) {
+        if (modules.get(row, col)) {
+          ctx.fillRect(offsetX + col * cellSize, offsetY + row * cellSize, cellSize, cellSize);
+        }
       }
     }
-  }
+    drawInviteCodeCaption(ctx, code, metrics);
+  });
+}
 
+async function decorateInviteQrToTempFile(imagePath: string, code: string) {
+  const normalizedCode = normalizeInviteCodeForImage(code);
+  if (!imagePath || !normalizedCode) return imagePath;
+  qrcodeUrl.value = '';
+  canvasQrVisible.value = true;
+  await nextTick();
+
+  return withInviteQrCanvas((ctx, metrics) => {
+    const qrArea = getInviteQrArea(metrics);
+    paintInviteQrBackground(ctx, metrics);
+    ctx.drawImage(imagePath, qrArea.x, qrArea.y, qrArea.codeSize, qrArea.codeSize);
+    drawInviteCodeCaption(ctx, normalizedCode, metrics);
+  });
+}
+
+function withInviteQrCanvas(drawer: (ctx: any, metrics: { width: number; height: number }) => void) {
   return new Promise<string>((resolve) => {
-    ctx.draw(false, () => {
-      uni.canvasToTempFilePath({
-        canvasId: 'inviteQrCanvas',
-        width: canvasSize,
-        height: canvasSize,
-        destWidth: canvasSize,
-        destHeight: canvasSize,
-        fileType: 'png',
-        success: (res) => resolve(res.tempFilePath),
-        fail: () => resolve(''),
+    getInviteQrCanvasMetrics().then((metrics) => {
+      const ctx = uni.createCanvasContext('inviteQrCanvas');
+      drawer(ctx, metrics);
+      ctx.draw(false, () => {
+        uni.canvasToTempFilePath({
+          canvasId: 'inviteQrCanvas',
+          width: metrics.width,
+          height: metrics.height,
+          destWidth: metrics.width * 3,
+          destHeight: metrics.height * 3,
+          fileType: 'png',
+          success: (res) => resolve(res.tempFilePath),
+          fail: () => resolve(''),
+        });
       });
     });
   });
+}
+
+function getInviteQrCanvasMetrics() {
+  return new Promise<{ width: number; height: number }>((resolve) => {
+    nextTick(() => {
+      uni.createSelectorQuery()
+        .select('.qr-canvas')
+        .boundingClientRect((rect: any) => {
+          const width = Math.max(160, Math.round(Number(rect?.width) || 210));
+          const height = Math.max(188, Math.round(Number(rect?.height) || 245));
+          resolve({ width, height });
+        })
+        .exec();
+    });
+  });
+}
+
+function paintInviteQrBackground(ctx: any, metrics: { width: number; height: number }) {
+  ctx.setFillStyle('#ffffff');
+  ctx.fillRect(0, 0, metrics.width, metrics.height);
+  ctx.setFillStyle('#f0fdfa');
+  const bottomBarHeight = getInviteQrBottomBarHeight(metrics);
+  ctx.fillRect(0, metrics.height - bottomBarHeight, metrics.width, bottomBarHeight);
+}
+
+function getInviteQrArea(metrics: { width: number; height: number }) {
+  const bottomBarHeight = getInviteQrBottomBarHeight(metrics);
+  const topPadding = Math.max(4, Math.round(metrics.width * 0.025));
+  const sidePadding = Math.max(5, Math.round(metrics.width * 0.025));
+  const availableHeight = metrics.height - bottomBarHeight - topPadding;
+  const codeSize = Math.max(120, Math.min(metrics.width - sidePadding * 2, availableHeight));
+  return {
+    codeSize,
+    x: Math.round((metrics.width - codeSize) / 2),
+    y: topPadding + Math.round((availableHeight - codeSize) * 0.42),
+  };
+}
+
+function getInviteQrBottomBarHeight(metrics: { height: number }) {
+  return Math.max(30, Math.round(metrics.height * 0.13));
+}
+
+function drawInviteCodeCaption(ctx: any, code: string, metrics: { width: number; height: number }) {
+  const text = normalizeInviteCodeForImage(code);
+  if (!text) return;
+  const label = `邀请码 ${text}`;
+  const fontSize = getInviteCodeFontSize(label, metrics.width);
+  ctx.setFontSize(fontSize);
+  ctx.setFillStyle('#0f766e');
+  ctx.setTextAlign('center');
+  if (typeof ctx.setTextBaseline === 'function') ctx.setTextBaseline('middle');
+  ctx.fillText(label, metrics.width / 2, metrics.height - Math.round(getInviteQrBottomBarHeight(metrics) / 2));
+}
+
+function normalizeInviteCodeForImage(code: string) {
+  return String(code || '').trim().toUpperCase().replace(/\s+/g, '').slice(0, 24);
+}
+
+function getInviteCodeFontSize(text: string, canvasWidth: number) {
+  const length = Math.max(1, text.length);
+  const maxWidth = canvasWidth * 0.76;
+  return Math.max(10, Math.min(14, Math.floor(maxWidth / (length * 0.62))));
 }
 
 function writePngDataUrlToTempFile(dataUrl: string, filename: string) {
@@ -568,6 +801,26 @@ function commissionSourceText(item: any) {
   const orderAmount = formatMoney(item.order?.amount || 0);
   const orderType = isRecurringRole(item.role) ? '复充' : '首充';
   return `${userName} ${orderType} ${orderAmount}，产生推荐奖励`;
+}
+
+function paymentDeviceLabel(value: string) {
+  if (value === 'ios') return 'Apple IAP';
+  if (value === 'android') return '安卓/鸿蒙';
+  if (value === 'wechat_pay') return '普通微信支付';
+  return '未识别支付端';
+}
+
+function deviceAmount(summary: any, key: string) {
+  return Number(summary?.[key]?.amount || 0);
+}
+
+function deviceBreakdownText(summary: any) {
+  return `iOS ${formatMoney(deviceAmount(summary, 'ios'))} / 安卓 ${formatMoney(deviceAmount(summary, 'android'))}`;
+}
+
+function registrationRewardSourceText(item: any) {
+  const userName = item.referralUser?.nickname || item.referralUser?.phone || item.referralUserId || '新用户';
+  return `${userName} 通过你的邀请码注册，产生邀请注册现金奖励`;
 }
 
 function isRecurringRole(role: string) {
@@ -730,6 +983,10 @@ onShareTimeline(() => {
   &.compact {
     grid-template-columns: repeat(2, 1fr);
   }
+
+  &.four {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .stat-item {
@@ -784,19 +1041,106 @@ onShareTimeline(() => {
   margin-top: 6rpx;
 }
 
-.withdraw-tip {
-  margin-top: 14rpx;
-  line-height: 1.5;
+.withdraw-source {
+  display: block;
+  margin-top: 8rpx;
+  color: $text-tertiary;
+  font-size: 20rpx;
+  line-height: 1.35;
 }
 
-.transfer-rule {
-  margin-top: 10rpx;
-  padding: 12rpx 16rpx;
-  border-radius: 12rpx;
-  background: #f0fdfa;
+.rule-modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.rule-modal {
+  width: 100%;
+  max-height: 78vh;
+  overflow-y: auto;
+  padding: 28rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-shadow: 0 20rpx 60rpx rgba(15, 23, 42, 0.18);
+}
+
+.rule-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10rpx;
+  color: $text-primary;
+  font-size: $font-lg;
+  font-weight: 900;
+}
+
+.rule-modal-close {
+  color: #0f766e;
+  font-size: $font-sm;
+  font-weight: 800;
+}
+
+.rule-row {
+  display: flex;
+  gap: 14rpx;
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid rgba(15, 118, 110, 0.1);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+}
+
+.rule-label {
+  flex: none;
+  width: 112rpx;
   color: #0f766e;
   font-size: 22rpx;
-  line-height: 1.5;
+  font-weight: 900;
+}
+
+.rule-text {
+  flex: 1;
+  min-width: 0;
+  color: #315e59;
+  font-size: 22rpx;
+  line-height: 1.55;
+}
+
+.registration-reward-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12rpx;
+  margin-bottom: 8rpx;
+}
+
+.registration-reward-summary > view {
+  padding: 18rpx 14rpx;
+  border-radius: 16rpx;
+  background: #f8fafc;
+}
+
+.summary-label,
+.summary-value {
+  display: block;
+}
+
+.summary-label {
+  color: $text-tertiary;
+  font-size: $font-xs;
+}
+
+.summary-value {
+  margin-top: 6rpx;
+  color: #0f766e;
+  font-size: 30rpx;
+  font-weight: 900;
 }
 
 .withdraw-form {
@@ -866,25 +1210,30 @@ onShareTimeline(() => {
 }
 
 .qr-box {
-  width: 360rpx;
-  height: 360rpx;
+  width: 420rpx;
+  height: 490rpx;
   margin: 0 auto;
-  border-radius: 22rpx;
-  background: #f8fafc;
+  padding: 14rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  border: 1rpx solid rgba(15, 118, 110, 0.12);
+  box-shadow: 0 16rpx 36rpx rgba(15, 23, 42, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .qr-img {
   width: 100%;
   height: 100%;
+  border-radius: 16rpx;
 }
 
 .qr-canvas {
-  width: 320px;
-  height: 320px;
+  width: 392rpx;
+  height: 462rpx;
+  border-radius: 16rpx;
 }
 
 .qr-placeholder {

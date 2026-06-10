@@ -12,9 +12,12 @@ model User {
   unionId                 String?   @unique @map("union_id")
   mpOpenId                String?   @unique @map("mp_open_id")
   miniOpenId              String?   @unique @map("mini_open_id")
+  miniSessionKey          String?   @map("mini_session_key")
   nickname                String?
   avatar                  String?
   phone                   String?
+  province                String?
+  city                    String?
   shareCode               String?   @unique @map("share_code")
   status                  Int       @default(1)
   referredByDistributorId String?   @map("referred_by_distributor_id")
@@ -80,6 +83,8 @@ model ShareReferral {
   sourceCode     String   @map("source_code")
   createdAt      DateTime @default(now()) @map("created_at")
 
+  registrationReward DistributionRegistrationReward?
+
   @@index([referrerUserId])
   @@index([sourceCode])
   @@map("share_referrals")
@@ -126,6 +131,16 @@ model Order {
   bonusPoints       Int       @default(0) @map("bonus_points")
   status            String    @default("pending")
   transactionId     String?   @map("transaction_id")
+  payChannel        String    @default("wechat_pay") @map("pay_channel")
+  paymentDevice     String    @default("wechat_pay") @map("payment_device")
+  virtualWxOrderId  String?   @map("virtual_wx_order_id")
+  virtualOrderType  Int?      @map("virtual_order_type")
+  virtualSettState  Int?      @map("virtual_sett_state")
+  virtualSettTime   DateTime? @map("virtual_sett_time")
+  virtualPlatformFee Int?     @map("virtual_platform_fee")
+  virtualCpsFee     Int?      @map("virtual_cps_fee")
+  virtualNetAmount  Int?      @map("virtual_net_amount")
+  virtualSyncedAt   DateTime? @map("virtual_synced_at")
   paidAt            DateTime? @map("paid_at")
   commissionSettled Boolean   @default(false) @map("commission_settled")
   createdAt         DateTime  @default(now()) @map("created_at")
@@ -136,8 +151,22 @@ model Order {
   rechargeEvents          RechargeAnalyticsEvent[]
 
   @@index([userId])
+  @@index([payChannel])
+  @@index([paymentDevice])
+  @@index([virtualSettState])
   @@index([commissionSettled])
   @@map("orders")
+}
+
+model VirtualPaymentBalanceSnapshot {
+  id                  String   @id @default(uuid())
+  availableAmountFen  Int      @default(0) @map("available_amount_fen")
+  currencyCode        String   @default("CNY") @map("currency_code")
+  raw                 String?
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("virtual_payment_balance_snapshots")
 }
 
 model RechargeAnalyticsEvent {
@@ -168,6 +197,7 @@ model DistributionSetting {
   level2Rate           Int      @default(2000) @map("level2_rate")
   dailyShareReward     Int      @default(10) @map("daily_share_reward")
   referralReward       Int      @default(20) @map("referral_reward")
+  referrerRegistrationRewardAmount Int @default(50) @map("referrer_registration_reward_amount")
   minWithdrawalAmount  Int      @default(1000) @map("min_withdrawal_amount")
   withdrawalFreezeDays Int      @default(7) @map("withdrawal_freeze_days")
   transferSceneId      String   @default("1005") @map("transfer_scene_id")
@@ -208,6 +238,7 @@ model Distributor {
   generalAgentRate     Int           @default(2000) @map("general_agent_rate")
   status     String        @default("active")
   newUserGiftOverride Int?  @map("new_user_gift_override")
+  registrationCashRewardEnabled Boolean @default(false) @map("registration_cash_reward_enabled")
   appliedAt  DateTime      @default(now()) @map("applied_at")
   approvedAt DateTime?     @map("approved_at")
   createdAt  DateTime      @default(now()) @map("created_at")
@@ -217,6 +248,7 @@ model Distributor {
   referrals           DistributionReferral[]   @relation("DirectDistributorReferrals")
   firstLevelReferrals DistributionReferral[]   @relation("FirstLevelDistributorReferrals")
   commissions         DistributionCommission[]
+  registrationRewards DistributionRegistrationReward[]
   generalAgentCommissions GeneralAgentCommission[] @relation("GeneralAgentCommissionOwner")
   generatedGeneralAgentCommissions GeneralAgentCommission[] @relation("GeneralAgentCommissionSource")
   personalGeneralAgentCommissions GeneralAgentCommission[] @relation("GeneralAgentCommissionDirectDistributor")
@@ -267,6 +299,22 @@ model DistributionCommission {
   @@map("distribution_commissions")
 }
 
+model DistributionRegistrationReward {
+  id              String        @id @default(uuid())
+  shareReferralId String        @unique @map("share_referral_id")
+  shareReferral   ShareReferral @relation(fields: [shareReferralId], references: [id], onDelete: Cascade)
+  distributorId   String        @map("distributor_id")
+  distributor     Distributor   @relation(fields: [distributorId], references: [id], onDelete: Cascade)
+  referralUserId  String        @map("referral_user_id")
+  amount          Int
+  status          String        @default("settled")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  @@index([distributorId, createdAt])
+  @@index([referralUserId])
+  @@map("distribution_registration_rewards")
+}
+
 model GeneralAgentCommission {
   id                  String      @id @default(uuid())
   orderId             String      @map("order_id")
@@ -302,6 +350,10 @@ model DistributionWithdrawal {
   distributor   Distributor @relation(fields: [distributorId], references: [id], onDelete: Cascade)
   userId        String?     @map("user_id")
   amount        Int
+  iosAmount     Int        @default(0) @map("ios_amount")
+  androidAmount Int        @default(0) @map("android_amount")
+  legacyAmount  Int        @default(0) @map("legacy_amount")
+  unknownAmount Int        @default(0) @map("unknown_amount")
   status        String      @default("pending")
   method        String      @default("wechat_balance")
   accountName   String?     @map("account_name")
@@ -416,6 +468,18 @@ model WechatPayConfig {
   platformPublicKeyPath String?  @map("platform_public_key_path")
   notifyUrl             String?  @map("notify_url")
   transferNotifyUrl     String?  @map("transfer_notify_url")
+  rechargePayMode       String   @default("wechat_pay") @map("recharge_pay_mode")
+  virtualOfferId        String?  @map("virtual_offer_id")
+  virtualAppKey         String?  @map("virtual_app_key")
+  virtualSandboxAppKey  String?  @map("virtual_sandbox_app_key")
+  virtualEnv            Int      @default(0) @map("virtual_env")
+  virtualProductMap     String?  @map("virtual_product_map")
+  virtualSettlementSyncEnabled Boolean @default(true) @map("virtual_settlement_sync_enabled")
+  virtualSettlementSyncIntervalHours Int @default(6) @map("virtual_settlement_sync_interval_hours")
+  virtualSettlementSyncDays Int @default(120) @map("virtual_settlement_sync_days")
+  virtualSettlementSyncLimit Int @default(30) @map("virtual_settlement_sync_limit")
+  virtualSettlementLastSyncedAt DateTime? @map("virtual_settlement_last_synced_at")
+  virtualSettlementLastResult String? @map("virtual_settlement_last_result")
   updatedAt             DateTime @updatedAt @map("updated_at")
   createdAt             DateTime @default(now()) @map("created_at")
 

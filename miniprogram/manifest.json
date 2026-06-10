@@ -3,8 +3,8 @@
   "appid": "__UNI__XXXXXXX",
   "vueVersion": "3",
   "description": "涨识",
-  "versionName": "1.1.2",
-  "versionCode": "112",
+  "versionName": "1.2.1",
+  "versionCode": "121",
   "transformPx": false,
   "uniStatistics": {
     "enable": false
@@ -19,6 +19,14 @@
       "minified": true
     },
     "usingComponents": true,
+    "permission": {
+      "scope.userLocation": {
+        "desc": "用于根据当前位置默认选择高考省份"
+      }
+    },
+    "requiredPrivateInfos": [
+      "getLocation"
+    ],
     "plugins": {
       "WechatSI": {
         "version": "0.3.7",

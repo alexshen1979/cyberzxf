@@ -1,0 +1,10 @@
+ALTER TABLE "users" ADD COLUMN "mini_session_key" TEXT;
+ALTER TABLE "orders" ADD COLUMN "pay_channel" TEXT NOT NULL DEFAULT 'wechat_pay';
+ALTER TABLE "orders" ADD COLUMN "virtual_wx_order_id" TEXT;
+CREATE INDEX "orders_pay_channel_idx" ON "orders"("pay_channel");
+ALTER TABLE "wechat_pay_config" ADD COLUMN "recharge_pay_mode" TEXT NOT NULL DEFAULT 'wechat_pay';
+ALTER TABLE "wechat_pay_config" ADD COLUMN "virtual_offer_id" TEXT;
+ALTER TABLE "wechat_pay_config" ADD COLUMN "virtual_app_key" TEXT;
+ALTER TABLE "wechat_pay_config" ADD COLUMN "virtual_sandbox_app_key" TEXT;
+ALTER TABLE "wechat_pay_config" ADD COLUMN "virtual_env" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "wechat_pay_config" ADD COLUMN "virtual_product_map" TEXT;

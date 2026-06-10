@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import * as authService from '../services/auth.service';
 import { prisma } from '../utils/prisma';
 import { ensureUserShareCode } from '../services/distribution.service';
+import { getClientIp } from '../services/ip-location.service';
 import { AppError } from '../middleware/errorHandler';
 
 const AVATAR_OUTPUT_DIR = path.resolve(process.cwd(), 'uploads', 'avatars');
@@ -24,7 +25,7 @@ export async function miniProgramLogin(ctx: Context) {
     return;
   }
 
-  const result = await authService.loginByMiniProgram(code, userInfo, referralCode);
+  const result = await authService.loginByMiniProgram(code, userInfo, referralCode, getClientIp(ctx));
   ctx.body = { success: true, data: result };
 }
 
@@ -42,14 +43,15 @@ export async function mpOAuthLogin(ctx: Context) {
 
 export async function getProfile(ctx: Context) {
   const userId = ctx.state.user.userId;
-  const user = await ensureUserShareCode(userId);
+  const userWithShareCode = await ensureUserShareCode(userId);
+  const user = await authService.ensureUserLocationByIp(userWithShareCode, getClientIp(ctx));
 
   ctx.body = { success: true, data: user };
 }
 
 export async function updateProfile(ctx: Context) {
   const userId = ctx.state.user.userId;
-  const { nickname, avatar, phone } = ctx.request.body as any;
+  const { nickname, avatar, phone, province, city } = ctx.request.body as any;
 
   const data: any = {};
   if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'nickname')) {
@@ -61,12 +63,18 @@ export async function updateProfile(ctx: Context) {
   if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'phone')) {
     data.phone = phone;
   }
+  if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'province')) {
+    data.province = normalizeLocationText(province);
+  }
+  if (Object.prototype.hasOwnProperty.call(ctx.request.body as any, 'city')) {
+    data.city = normalizeLocationText(city);
+  }
 
   const user = await prisma.$transaction(async (tx) => {
     const updated = await tx.user.update({
       where: { id: userId },
       data,
-      select: { id: true, nickname: true, avatar: true, phone: true, shareCode: true, createdAt: true },
+      select: { id: true, nickname: true, avatar: true, phone: true, province: true, city: true, shareCode: true, createdAt: true },
     });
 
     if (Object.prototype.hasOwnProperty.call(data, 'nickname')) {
@@ -80,6 +88,11 @@ export async function updateProfile(ctx: Context) {
   });
 
   ctx.body = { success: true, data: user };
+}
+
+function normalizeLocationText(value: any) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text ? text.replace(/[<>]/g, '').slice(0, 40) : null;
 }
 
 export async function uploadAvatar(ctx: Context) {

@@ -46,6 +46,8 @@ router.get('/payments/products', optionalAuth, paymentCtrl.getProducts);   // �
 router.post('/payments/analytics', optionalAuth, paymentCtrl.recordRechargeAnalytics); // 充值页统计
 router.post('/payments/order', auth, paymentCtrl.createOrder);             // 创建订单
 router.post('/payments/callback', paymentCtrl.paymentCallback);            // 支付回调
+router.get('/payments/virtual-callback', paymentCtrl.verifyVirtualPaymentCallback); // 小程序虚拟支付推送验证
+router.post('/payments/virtual-callback', paymentCtrl.virtualPaymentCallback); // 小程序虚拟支付推送
 router.get('/payments/orders/:orderNo', auth, paymentCtrl.getOrderDetail); // 单个订单状态
 router.get('/payments/orders', auth, paymentCtrl.getOrders);               // 订单列表
 
@@ -110,6 +112,7 @@ router.get('/distribution/qrcode', auth, distributionCtrl.qrcode);
 router.post('/distribution/share', auth, distributionCtrl.recordShare);
 router.post('/distribution/bind-referral', auth, distributionCtrl.bindReferral);
 router.get('/distribution/commissions', auth, distributionCtrl.commissions);
+router.get('/distribution/registration-rewards', auth, distributionCtrl.registrationRewards);
 router.get('/distribution/withdrawals', auth, distributionCtrl.withdrawals);
 router.post('/distribution/withdrawals', auth, distributionCtrl.applyWithdrawal);
 router.get('/distribution/withdrawals/:id/transfer-package', auth, distributionCtrl.withdrawalTransferPackage);
@@ -139,6 +142,10 @@ admin.delete('/recharge-products/:id', adminAuth, adminCtrl.deleteRechargeProduc
 // 订单管理
 admin.get('/orders/menu-stats', adminAuth, adminCtrl.getOrderMenuStats);
 admin.get('/orders/recharge-analytics', adminAuth, paymentCtrl.adminRechargeAnalytics);
+admin.get('/orders/virtual-settlements', adminAuth, paymentCtrl.adminVirtualSettlementOverview);
+admin.post('/orders/virtual-settlements/sync', adminAuth, paymentCtrl.adminSyncVirtualSettlements);
+admin.get('/orders/virtual-settlements/sync-settings', adminAuth, paymentCtrl.adminVirtualSettlementSyncSettings);
+admin.put('/orders/virtual-settlements/sync-settings', adminAuth, paymentCtrl.adminUpdateVirtualSettlementSyncSettings);
 admin.get('/orders', adminAuth, adminCtrl.getAllOrders);
 admin.get('/orders/:id', adminAuth, adminCtrl.getOrderDetail);
 admin.get('/payment-config/status', adminAuth, paymentCtrl.getConfigStatus);

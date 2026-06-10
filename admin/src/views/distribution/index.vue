@@ -86,6 +86,10 @@
           <el-input-number v-model="settingsForm.referralReward" :min="0" :max="100000" :precision="0" :step="1" />
           <span class="hint">点，好友通过邀请码注册后赠送给邀请人</span>
         </el-form-item>
+        <el-form-item label="大学生兼职注册奖励">
+          <el-input-number v-model="settingsForm.referrerRegistrationRewardYuan" :min="0" :max="1000" :precision="2" :step="0.1" />
+          <span class="hint">元/人，推荐官专用，好友注册后产生现金奖励</span>
+        </el-form-item>
         <el-form-item label="最低提现">
           <el-input-number v-model="settingsForm.minWithdrawalYuan" :min="1" :max="10000" :precision="2" :step="1" />
           <span class="hint">元</span>
@@ -216,6 +220,13 @@
                 <el-table-column label="奖励单" width="90">
                   <template #default="{ row: child }">{{ child._count?.commissions || 0 }}</template>
                 </el-table-column>
+                <el-table-column label="注册现金奖励" width="120">
+                  <template #default="{ row: child }">
+                    <el-tag :type="child.registrationCashRewardEnabled ? 'success' : 'info'" size="small">
+                      {{ child.registrationCashRewardEnabled ? '已开启' : '未开启' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
                 <el-table-column label="状态" width="90">
                   <template #default="{ row: child }">
                     <el-tag :type="statusTagType(child.status)" size="small">{{ statusLabel(child.status) }}</el-tag>
@@ -251,6 +262,14 @@
               <el-tag :type="row.isGroup ? 'warning' : 'success'" size="small">{{ row.isGroup ? '分组' : levelLabel(row.level) }}</el-tag>
               <el-tag v-if="store.isFullAdmin && row.isGeneralAgent" type="danger" size="small">总代 {{ percentLabel(row.generalAgentRate) }}</el-tag>
             </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="注册现金奖励" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.level === 2 && !row.isGroup" :type="row.registrationCashRewardEnabled ? 'success' : 'info'" size="small">
+              {{ row.registrationCashRewardEnabled ? '已开启' : '未开启' }}
+            </el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="所属关系" min-width="180">
@@ -321,9 +340,21 @@
       <div class="agent-summary" v-if="generalAgentSummary">
         <div><span>下级合伙人</span><strong>{{ generalAgentSummary.childPartnerCount || 0 }}</strong></div>
         <div><span>下级推荐官</span><strong>{{ generalAgentSummary.childReferralOfficerCount || 0 }}</strong></div>
-        <div><span>佣金总额</span><strong>{{ formatMoney(generalAgentSummary.commissionAmount || 0) }}</strong></div>
-        <div><span>待线下结算</span><strong>{{ formatMoney(generalAgentSummary.pendingAmount || 0) }}</strong></div>
-        <div><span>已线下结算</span><strong>{{ formatMoney(generalAgentSummary.paidAmount || 0) }}</strong></div>
+        <div>
+          <span>佣金总额</span>
+          <strong>{{ formatMoney(generalAgentSummary.commissionAmount || 0) }}</strong>
+          <em>{{ compactDeviceBreakdownText(generalAgentSummary.paymentDeviceBreakdown) }}</em>
+        </div>
+        <div>
+          <span>待线下结算</span>
+          <strong>{{ formatMoney(generalAgentSummary.pendingAmount || 0) }}</strong>
+          <em>{{ compactDeviceBreakdownText(generalAgentSummary.pendingDeviceBreakdown) }}</em>
+        </div>
+        <div>
+          <span>已线下结算</span>
+          <strong>{{ formatMoney(generalAgentSummary.paidAmount || 0) }}</strong>
+          <em>{{ compactDeviceBreakdownText(generalAgentSummary.paidDeviceBreakdown) }}</em>
+        </div>
       </div>
       <el-table :data="generalAgentCommissions" v-loading="loadingGeneralAgentCommissions" style="width: 100%" empty-text="暂无总代佣金">
         <el-table-column label="总代" min-width="150">
@@ -348,6 +379,11 @@
         </el-table-column>
         <el-table-column label="订单金额" width="110">
           <template #default="{ row }">{{ formatMoney(row.order?.amount || 0) }}</template>
+        </el-table-column>
+        <el-table-column label="支付端" width="110">
+          <template #default="{ row }">
+            <el-tag :type="paymentDeviceTagType(row.order?.paymentDevice)" size="small">{{ paymentDeviceLabel(row.order?.paymentDevice) }}</el-tag>
+          </template>
         </el-table-column>
         <el-table-column label="比例" width="90">
           <template #default="{ row }">{{ percentLabel(row.rateBps) }}</template>
@@ -410,6 +446,11 @@
         <el-table-column label="订单金额" width="110">
           <template #default="{ row }">{{ formatMoney(row.order?.amount || 0) }}</template>
         </el-table-column>
+        <el-table-column label="支付端" width="110">
+          <template #default="{ row }">
+            <el-tag :type="paymentDeviceTagType(row.order?.paymentDevice)" size="small">{{ paymentDeviceLabel(row.order?.paymentDevice) }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="比例" width="90">
           <template #default="{ row }">{{ (row.rateBps / 100).toFixed(2) }}%</template>
         </el-table-column>
@@ -462,7 +503,10 @@
         </el-table-column>
         <el-table-column label="金额" width="110">
           <template #default="{ row }">
-            <strong>{{ formatMoney(row.amount) }}</strong>
+            <div class="main-cell">
+              <strong>{{ formatMoney(row.amount) }}</strong>
+              <span>{{ withdrawalDeviceText(row) }}</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -523,6 +567,10 @@
           <el-select v-model="distributorForm.parentId" placeholder="默认系统" filterable style="width: 100%">
             <el-option v-for="item in levelOneOptions" :key="item.id" :label="`${item.name}（${item.code}）`" :value="item.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="distributorForm.level === 2 && store.isFullAdmin" label="注册现金奖励">
+          <el-switch v-model="distributorForm.registrationCashRewardEnabled" />
+          <span class="hint">默认不开启；开启后，该推荐官邀请新用户注册才会获得大学生兼职现金奖励</span>
         </el-form-item>
         <el-form-item v-if="distributorForm.level === 1" label="新用户额外赠点">
           <el-input-number v-model="distributorForm.newUserGiftOverride" :min="0" :max="100000" :precision="0" :step="1" />
@@ -594,6 +642,11 @@
             <el-table-column label="订单金额" width="110">
               <template #default="{ row }">{{ formatMoney(row.order?.amount || 0) }}</template>
             </el-table-column>
+            <el-table-column label="支付端" width="110">
+              <template #default="{ row }">
+                <el-tag :type="paymentDeviceTagType(row.order?.paymentDevice)" size="small">{{ paymentDeviceLabel(row.order?.paymentDevice) }}</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="比例" width="90">
               <template #default="{ row }">{{ (row.rateBps / 100).toFixed(2) }}%</template>
             </el-table-column>
@@ -619,7 +672,12 @@
           <el-table :data="ledgerWithdrawals" v-loading="loadingLedgerWithdrawals" style="width: 100%" empty-text="暂无提现流水">
             <el-table-column prop="withdrawalNo" label="提现单号" width="170" />
             <el-table-column prop="amount" label="提现金额" width="120">
-              <template #default="{ row }">{{ formatMoney(row.amount || 0) }}</template>
+              <template #default="{ row }">
+                <div class="main-cell">
+                  <strong>{{ formatMoney(row.amount || 0) }}</strong>
+                  <span>{{ withdrawalDeviceText(row) }}</span>
+                </div>
+              </template>
             </el-table-column>
             <el-table-column label="状态" width="120">
               <template #default="{ row }">
@@ -651,6 +709,11 @@
             </el-table-column>
             <el-table-column label="订单金额" width="110">
               <template #default="{ row }">{{ formatMoney(row.order?.amount || 0) }}</template>
+            </el-table-column>
+            <el-table-column label="支付端" width="110">
+              <template #default="{ row }">
+                <el-tag :type="paymentDeviceTagType(row.order?.paymentDevice)" size="small">{{ paymentDeviceLabel(row.order?.paymentDevice) }}</el-tag>
+              </template>
             </el-table-column>
             <el-table-column label="比例" width="90">
               <template #default="{ row }">{{ percentLabel(row.rateBps) }}</template>
@@ -704,6 +767,7 @@ const settingsForm = reactive({
   recurringCommissionDays: 180,
   dailyShareReward: 10,
   referralReward: 20,
+  referrerRegistrationRewardYuan: 0.5,
   minWithdrawalYuan: 10,
   withdrawalFreezeDays: 7,
   transferSceneId: '1005',
@@ -773,6 +837,7 @@ const distributorForm = reactive({
   parentId: '',
   status: 'active',
   newUserGiftOverride: null as number | null,
+  registrationCashRewardEnabled: false,
   isGeneralAgent: false,
   generalAgentPercent: 20,
   generalAgentParentId: '',
@@ -784,7 +849,13 @@ const metricCards = computed(() => [
     value: dashboard.value.referralCount || 0,
     tip: '通过特邀合作伙伴或涨识推荐官邀请码建立推荐合作关系的用户，不包含普通邀请注册。',
   },
-  { label: '奖励总额', value: formatMoney(dashboard.value.commissionAmount || 0) },
+  { label: '现金奖励总额', value: formatMoney(dashboard.value.commissionAmount || 0), tip: '充值提成 + 推荐官邀请注册现金奖励。' },
+  {
+    label: '充值提成',
+    value: formatMoney(dashboard.value.rechargeCommissionAmount || 0),
+    note: `iOS ${formatMoney(deviceAmount(dashboard.value.commissionDeviceBreakdown, 'ios'))} / 安卓 ${formatMoney(deviceAmount(dashboard.value.commissionDeviceBreakdown, 'android'))}`,
+  },
+  { label: '注册现金奖励', value: formatMoney(dashboard.value.registrationRewardAmount || 0), note: `${dashboard.value.registrationRewardCount || 0} 笔` },
   {
     label: '待结算',
     value: formatMoney(dashboard.value.frozenCommissionAmount || 0),
@@ -792,8 +863,16 @@ const metricCards = computed(() => [
   },
   { label: '提现中', value: formatMoney(dashboard.value.pendingWithdrawalAmount || 0) },
   { label: '已提现', value: formatMoney(dashboard.value.paidWithdrawalAmount || 0) },
-  { label: '总代待结算', value: formatMoney(dashboard.value.generalAgentPendingAmount || 0) },
-  { label: '总代已结算', value: formatMoney(dashboard.value.generalAgentPaidAmount || 0) },
+  {
+    label: '总代待结算',
+    value: formatMoney(dashboard.value.generalAgentPendingAmount || 0),
+    note: compactDeviceBreakdownText(dashboard.value.generalAgentPendingDeviceBreakdown),
+  },
+  {
+    label: '总代已结算',
+    value: formatMoney(dashboard.value.generalAgentPaidAmount || 0),
+    note: compactDeviceBreakdownText(dashboard.value.generalAgentPaidDeviceBreakdown),
+  },
 ]);
 
 async function loadActiveSection(section = activeSection.value) {
@@ -834,6 +913,7 @@ async function loadSettings() {
     recurringCommissionDays: res.data.recurringCommissionDays ?? 180,
     dailyShareReward: res.data.dailyShareReward ?? 10,
     referralReward: res.data.referralReward ?? 20,
+    referrerRegistrationRewardYuan: res.data.referrerRegistrationRewardYuan ?? toYuan(res.data.referrerRegistrationRewardAmount, 0.5),
     minWithdrawalYuan: res.data.minWithdrawalYuan ?? ((res.data.minWithdrawalAmount || 1000) / 100),
     withdrawalFreezeDays: res.data.withdrawalFreezeDays ?? 7,
     transferSceneId: res.data.transferSceneId ?? '1005',
@@ -874,6 +954,7 @@ async function saveSettings() {
       recurringCommissionDays: Math.round(settingsForm.recurringCommissionDays),
       dailyShareReward: Math.round(Number(settingsForm.dailyShareReward || 0)),
       referralReward: Math.round(Number(settingsForm.referralReward || 0)),
+      referrerRegistrationRewardAmount: Math.round(Number(settingsForm.referrerRegistrationRewardYuan || 0) * 100),
       minWithdrawalAmount: Math.round(settingsForm.minWithdrawalYuan * 100),
       withdrawalFreezeDays: Math.round(settingsForm.withdrawalFreezeDays),
       transferSceneId: String(settingsForm.transferSceneId || '').trim(),
@@ -968,6 +1049,9 @@ async function loadGeneralAgentCommissions() {
         commissionAmount: dashboard.value.generalAgentCommissionAmount || 0,
         pendingAmount: dashboard.value.generalAgentPendingAmount || 0,
         paidAmount: dashboard.value.generalAgentPaidAmount || 0,
+        paymentDeviceBreakdown: dashboard.value.generalAgentDeviceBreakdown,
+        pendingDeviceBreakdown: dashboard.value.generalAgentPendingDeviceBreakdown,
+        paidDeviceBreakdown: dashboard.value.generalAgentPaidDeviceBreakdown,
       };
     }
   } finally {
@@ -1069,6 +1153,7 @@ function openDistributorDialog(row?: any) {
     parentId: row.parentId || '',
     status: row.status || 'active',
     newUserGiftOverride: row.newUserGiftOverride ?? null,
+    registrationCashRewardEnabled: row.registrationCashRewardEnabled === true,
     isGeneralAgent: row.isGeneralAgent ?? false,
     generalAgentPercent: Number(row.generalAgentRate ?? 2000) / 100,
     generalAgentParentId: row.generalAgentParentId || '',
@@ -1080,6 +1165,7 @@ function openDistributorDialog(row?: any) {
     parentId: '',
     status: 'active',
     newUserGiftOverride: null,
+    registrationCashRewardEnabled: false,
     isGeneralAgent: false,
     generalAgentPercent: 20,
     generalAgentParentId: '',
@@ -1101,6 +1187,7 @@ async function saveDistributor() {
       parentId: distributorForm.level === 2 ? distributorForm.parentId : null,
       status: distributorForm.status,
       newUserGiftOverride: distributorForm.level === 1 ? (distributorForm.newUserGiftOverride ?? null) : null,
+      registrationCashRewardEnabled: distributorForm.level === 2 && store.isFullAdmin && distributorForm.registrationCashRewardEnabled === true,
     };
     if (store.isFullAdmin) {
       payload.isGeneralAgent = distributorForm.level === 1 ? distributorForm.isGeneralAgent : false;
@@ -1129,6 +1216,7 @@ async function reviewDistributor(row: any, status: 'active' | 'rejected') {
       level: row.level,
       parentId: row.parentId,
       newUserGiftOverride: row.newUserGiftOverride,
+      registrationCashRewardEnabled: row.registrationCashRewardEnabled === true,
       status,
     };
     if (store.isFullAdmin) {
@@ -1278,6 +1366,38 @@ function withdrawalStatusLabel(status: string) {
   if (status === 'rejected') return '已驳回';
   if (status === 'failed') return '打款失败';
   return status || '-';
+}
+
+function paymentDeviceLabel(value: string) {
+  if (value === 'ios') return 'Apple IAP';
+  if (value === 'android') return '安卓/鸿蒙';
+  if (value === 'wechat_pay') return '普通微信支付';
+  return '未识别';
+}
+
+function paymentDeviceTagType(value: string) {
+  if (value === 'ios') return 'warning';
+  if (value === 'android') return 'success';
+  if (value === 'wechat_pay') return 'info';
+  return 'danger';
+}
+
+function deviceAmount(summary: any, key: string) {
+  return Number(summary?.[key]?.amount || 0);
+}
+
+function compactDeviceBreakdownText(summary: any) {
+  return `iOS ${formatMoney(deviceAmount(summary, 'ios'))} / 安卓 ${formatMoney(deviceAmount(summary, 'android'))}`;
+}
+
+function withdrawalDeviceText(row: any) {
+  const parts = [
+    row.iosAmount ? `iOS ${formatMoney(row.iosAmount)}` : '',
+    row.androidAmount ? `安卓 ${formatMoney(row.androidAmount)}` : '',
+    row.legacyAmount ? `旧支付 ${formatMoney(row.legacyAmount)}` : '',
+    row.unknownAmount ? `未识别 ${formatMoney(row.unknownAmount)}` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' / ') : '来源未拆分';
 }
 
 function withdrawalTagType(status: string) {
@@ -1521,17 +1641,23 @@ h2 {
     background: var(--el-fill-color-light);
   }
 
-  span {
+  span,
+  em {
     display: block;
     color: var(--el-text-color-secondary);
     font-size: 12px;
     line-height: 1.4;
+    font-style: normal;
   }
 
   strong {
     display: block;
     margin-top: 5px;
     font-size: 18px;
+  }
+
+  em {
+    margin-top: 6px;
   }
 }
 

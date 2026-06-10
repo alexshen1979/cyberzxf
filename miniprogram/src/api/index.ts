@@ -84,7 +84,7 @@ export const api = {
     miniLogin: (code: string, userInfo?: any, referralCode?: string) =>
       request<{ token: string; user: any }>({ url: '/auth/miniprogram-login', method: 'POST', data: { code, userInfo, referralCode } }),
     getProfile: () =>
-      request<{ id: string; nickname: string; avatar: string; phone: string }>({ url: '/auth/profile' }),
+      request<{ id: string; nickname: string; avatar: string; phone: string; province?: string; city?: string }>({ url: '/auth/profile' }),
     uploadAvatar: (image: string) =>
       request<{ avatar: string; user: any }>({ url: '/auth/avatar', method: 'POST', data: { image }, timeout: 30000 }),
     updateProfile: (data: any) =>
@@ -137,17 +137,23 @@ export const api = {
       }>>({ url: '/payments/products' }),
     recordAnalytics: (data: { eventType: string; productId?: string; amount?: number; sessionId?: string; channel?: string; source?: string }) =>
       request<{ recorded: boolean }>({ url: '/payments/analytics', method: 'POST', data }),
-    createOrder: (productId: string, meta?: { sessionId?: string; channel?: string; source?: string }) =>
+    createOrder: (productId: string, meta?: { sessionId?: string; channel?: string; source?: string; supportsVirtualPay?: boolean; clientVersion?: string }) =>
       request<{
         orderNo: string;
         amount: number;
         productName: string;
+        payChannel?: 'wechat_virtual' | 'wechat_pay';
         payParams: {
-          timeStamp: string;
-          nonceStr: string;
-          package: string;
-          signType: 'RSA';
-          paySign: string;
+          provider?: 'wechat_virtual';
+          mode?: 'short_series_goods';
+          signData?: string;
+          paySig?: string;
+          signature?: string;
+          timeStamp?: string;
+          nonceStr?: string;
+          package?: string;
+          signType?: 'RSA';
+          paySign?: string;
         };
       }>({ url: '/payments/order', method: 'POST', data: { productId, ...(meta || {}) } }),
     getOrder: (orderNo: string) =>
@@ -253,6 +259,8 @@ export const api = {
       request({ url: '/distribution/bind-referral', method: 'POST', data: { referralCode } }),
     commissions: (page = 1, pageSize = 20) =>
       request({ url: `/distribution/commissions?page=${page}&pageSize=${pageSize}` }),
+    registrationRewards: (page = 1, pageSize = 20) =>
+      request({ url: `/distribution/registration-rewards?page=${page}&pageSize=${pageSize}` }),
     withdrawals: (page = 1, pageSize = 20) =>
       request({ url: `/distribution/withdrawals?page=${page}&pageSize=${pageSize}` }),
     applyWithdrawal: (amount: number, remark?: string) =>

@@ -8,6 +8,7 @@ import { AppError } from '../middleware/errorHandler';
 import { syncMenu as syncWechatMenuService } from '../services/wechat.service';
 import { getBalance } from '../services/points.service';
 import { getRevenueStats } from '../services/payment.service';
+import { paymentDeviceLabel, summarizePaymentDevices } from '../services/payment-device';
 import { createLogger } from '../utils/logger';
 import { ensureDistributionDefaults, getDistributionSettingsForAdmin } from '../services/distribution.service';
 import {
@@ -443,6 +444,23 @@ export async function getUserDetail(ctx: Context) {
       pointsAccount: true,
       orders: { orderBy: { createdAt: 'desc' }, take: 10 },
       consultationRecords: { orderBy: { createdAt: 'desc' }, take: 10 },
+      volunteerReports: {
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          title: true,
+          province: true,
+          year: true,
+          subjectType: true,
+          score: true,
+          rank: true,
+          input: true,
+          markdownReport: true,
+          pointsCost: true,
+          createdAt: true,
+        },
+      },
       distributorProfile: {
         select: {
           id: true,
@@ -835,11 +853,13 @@ export async function getAllOrders(ctx: Context) {
   const page = parseInt((ctx.query.page as string) || '1', 10);
   const pageSize = parseInt((ctx.query.pageSize as string) || '20', 10);
   const status = ctx.query.status as string;
+  const paymentDevice = String(ctx.query.paymentDevice || '').trim();
 
   const where: any = {};
   if (status) where.status = status;
+  if (paymentDevice) where.paymentDevice = paymentDevice;
 
-  const [list, total] = await Promise.all([
+  const [list, total, paidOrders] = await Promise.all([
     prisma.order.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -851,6 +871,8 @@ export async function getAllOrders(ctx: Context) {
             id: true,
             nickname: true,
             phone: true,
+            province: true,
+            city: true,
             shareCode: true,
             distributorProfile: { select: { id: true, level: true, status: true, name: true, code: true } },
           },
@@ -864,9 +886,23 @@ export async function getAllOrders(ctx: Context) {
       },
     }),
     prisma.order.count({ where }),
+    prisma.order.findMany({ where: { ...where, status: 'paid' } }),
   ]);
 
-  ctx.body = { success: true, data: { list, total, page, pageSize } };
+  ctx.body = {
+    success: true,
+    data: {
+      list,
+      total,
+      page,
+      pageSize,
+      stats: {
+        paidOrders: paidOrders.length,
+        revenue: paidOrders.reduce((sum, order) => sum + order.amount, 0),
+        paymentDeviceBreakdown: summarizePaymentDevices(paidOrders),
+      },
+    },
+  };
 }
 
 export async function getOrderMenuStats(ctx: Context) {
@@ -894,6 +930,8 @@ export async function getOrderDetail(ctx: Context) {
           id: true,
           nickname: true,
           phone: true,
+          province: true,
+          city: true,
           shareCode: true,
           distributorProfile: { select: { id: true, level: true, status: true, name: true, code: true } },
         },
@@ -1419,9 +1457,9 @@ export async function exportUsers(ctx: Context) {
     include: { pointsAccount: { select: { balance: true } } },
   });
 
-  const headers = ['ID', '昵称', '小程序OpenID', '公众号OpenID', 'UnionID', '点数余额', '状态', '注册时间'];
+  const headers = ['ID', '昵称', '省份', '城市', '小程序OpenID', '公众号OpenID', 'UnionID', '点数余额', '状态', '注册时间'];
   const rows = users.map(u => [
-    u.id, u.nickname || '', u.miniOpenId || '', u.mpOpenId || '', u.unionId || '',
+    u.id, u.nickname || '', u.province || '', u.city || '', u.miniOpenId || '', u.mpOpenId || '', u.unionId || '',
     u.pointsAccount?.balance ?? 0, u.status === 1 ? '正常' : '禁用',
     u.createdAt.toISOString(),
   ]);
@@ -1446,17 +1484,22 @@ export async function exportOrders(ctx: Context) {
     orderBy: { createdAt: 'desc' },
   });
 
-  const headers = ['订单号', '微信交易号', '用户ID', '商品名称', '金额(分)', '购买点数', '赠送点数', '状态', '支付时间', '创建时间'];
+  const headers = ['订单号', '微信交易号', '用户ID', '商品名称', '金额(分)', '购买点数', '赠送点数', '状态', '支付端', '结算状态', '结算时间', '技术服务费(分)', '净收入(分)', '支付时间', '创建时间'];
   const rows = orders.map(o => [
     o.orderNo, o.transactionId || '', o.userId, o.productName, o.amount, o.points, o.bonusPoints,
     o.status === 'paid' ? '已完成' : o.status,
+    paymentDeviceLabel(o.paymentDevice),
+    virtualSettlementLabel(o.virtualSettState),
+    o.virtualSettTime?.toISOString() || '',
+    o.virtualPlatformFee ?? '',
+    o.virtualNetAmount ?? '',
     o.paidAt?.toISOString() || '',
     o.createdAt.toISOString(),
   ]);
 
   const revenue = orders.reduce((sum, o) => sum + o.amount, 0);
-  const summaryHeader = ['', '', '', '', '', '', '', '', '', ''];
-  const summaryRow = ['', '', '', '合计营收(分):', revenue, '总订单数:', orders.length, '', '', ''];
+  const summaryHeader = ['', '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+  const summaryRow = ['', '', '', '合计营收(分):', revenue, '总订单数:', orders.length, '', '', '', '', '', '', '', ''];
 
   ctx.set('Content-Type', 'text/csv; charset=utf-8');
   ctx.set('Content-Disposition', `attachment; filename="orders_${new Date().toISOString().slice(0, 10)}.csv"`);
@@ -1558,8 +1601,10 @@ export async function getDashboard(ctx: Context) {
       revenue: {
         today: revenueToday.totalRevenue,
         todayOrders: revenueToday.totalOrders,
+        todayDeviceBreakdown: revenueToday.paymentDeviceBreakdown,
         month: revenueMonth.totalRevenue,
         monthOrders: revenueMonth.totalOrders,
+        monthDeviceBreakdown: revenueMonth.paymentDeviceBreakdown,
       },
       trends: {
         labels: trendLabels,
@@ -1568,4 +1613,12 @@ export async function getDashboard(ctx: Context) {
       },
     },
   };
+}
+
+function virtualSettlementLabel(value: any) {
+  const state = Number(value);
+  if (state === 2) return '已结算';
+  if (state === 1) return '结算中';
+  if (state === 0 || state === 3) return '待结算';
+  return '-';
 }

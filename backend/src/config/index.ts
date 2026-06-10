@@ -40,6 +40,14 @@ export const config = {
       notifyUrl: process.env.WECHAT_PAY_NOTIFY_URL || '',
       transferNotifyUrl: process.env.WECHAT_TRANSFER_NOTIFY_URL || '',
     },
+    virtualPay: {
+      offerId: process.env.WECHAT_VIRTUAL_PAY_OFFER_ID || '',
+      appKey: process.env.WECHAT_VIRTUAL_PAY_APP_KEY || '',
+      sandboxAppKey: process.env.WECHAT_VIRTUAL_PAY_SANDBOX_APP_KEY || '',
+      env: process.env.WECHAT_VIRTUAL_PAY_ENV || '0',
+      productMap: process.env.WECHAT_VIRTUAL_PAY_PRODUCT_MAP || '',
+      pushToken: process.env.WECHAT_VIRTUAL_PAY_PUSH_TOKEN || '',
+    },
   },
   deepseek: {
     apiKey: process.env.DEEPSEEK_API_KEY || '',

@@ -63,7 +63,12 @@ onMounted(async () => {
       { key: 'users', label: '总用户数', value: String(d.users.total), sub: `月增 ${d.users.monthNew}` },
       { key: 'todayUsers', label: '今日新增用户', value: String(d.users.todayNew), sub: '' },
       { key: 'todayConsults', label: '今日咨询量', value: String(d.consultations.today), sub: `本月 ${d.consultations.month}` },
-      { key: 'monthRevenue', label: '本月营收(元)', value: `¥${(d.revenue.month / 100).toFixed(2)}`, sub: `${d.revenue.monthOrders} 笔订单` },
+      {
+        key: 'monthRevenue',
+        label: '本月营收(元)',
+        value: `¥${(d.revenue.month / 100).toFixed(2)}`,
+        sub: `${d.revenue.monthOrders} 笔 · iOS ${formatMoney(deviceAmount(d.revenue.monthDeviceBreakdown, 'ios'))} / 安卓 ${formatMoney(deviceAmount(d.revenue.monthDeviceBreakdown, 'android'))}`,
+      },
     ];
     if (d.trends) {
       trendData.value = d.trends;
@@ -116,6 +121,14 @@ function initCharts() {
       }],
     });
   }
+}
+
+function deviceAmount(summary: any, key: string) {
+  return Number(summary?.[key]?.amount || 0);
+}
+
+function formatMoney(value: number) {
+  return `¥${(Number(value || 0) / 100).toFixed(2)}`;
 }
 
 async function handleExport(type: string) {

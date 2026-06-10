@@ -1,4 +1,5 @@
 import { Context } from 'koa';
+import { parseStringPromise } from 'xml2js';
 import {
   getProductList,
   getWechatPayConfigStatus,
@@ -6,11 +7,17 @@ import {
   updateWechatPayConfig,
   createOrder as svcCreateOrder,
   getRechargeAnalyticsForAdmin,
+  getWechatVirtualSettlementOverview,
+  getWechatVirtualSettlementSyncSettings,
   handlePaymentCallback,
   handleWechatPayNotify,
+  handleWechatVirtualPayNotify,
   getUserOrders,
   getUserOrderDetail,
   recordRechargeEvent,
+  syncWechatVirtualPaymentSettlements,
+  updateWechatVirtualSettlementSyncSettings,
+  verifyWechatVirtualPayPushSignature,
 } from '../services/payment.service';
 import { config } from '../config';
 
@@ -34,7 +41,7 @@ export async function updateAdminPaymentConfig(ctx: Context) {
 
 export async function createOrder(ctx: Context) {
   const userId = ctx.state.user.userId;
-  const { productId, sessionId, channel, source } = ctx.request.body as Record<string, any>;
+  const { productId, sessionId, channel, source, supportsVirtualPay, clientVersion, clientPlatform, system } = ctx.request.body as Record<string, any>;
 
   if (!productId) {
     ctx.status = 422;
@@ -42,7 +49,7 @@ export async function createOrder(ctx: Context) {
     return;
   }
 
-  const order = await svcCreateOrder(userId, productId, { sessionId, channel, source });
+  const order = await svcCreateOrder(userId, productId, { sessionId, channel, source, supportsVirtualPay, clientVersion, clientPlatform, system });
   ctx.body = { success: true, data: order };
 }
 
@@ -55,6 +62,23 @@ export async function recordRechargeAnalytics(ctx: Context) {
 
 export async function adminRechargeAnalytics(ctx: Context) {
   ctx.body = { success: true, data: await getRechargeAnalyticsForAdmin(ctx.query as Record<string, any>) };
+}
+
+export async function adminVirtualSettlementOverview(ctx: Context) {
+  ctx.body = { success: true, data: await getWechatVirtualSettlementOverview() };
+}
+
+export async function adminSyncVirtualSettlements(ctx: Context) {
+  const input = Object.assign({}, ctx.query || {}, ctx.request.body || {});
+  ctx.body = { success: true, data: await syncWechatVirtualPaymentSettlements(input as Record<string, any>) };
+}
+
+export async function adminVirtualSettlementSyncSettings(ctx: Context) {
+  ctx.body = { success: true, data: await getWechatVirtualSettlementSyncSettings() };
+}
+
+export async function adminUpdateVirtualSettlementSyncSettings(ctx: Context) {
+  ctx.body = { success: true, data: await updateWechatVirtualSettlementSyncSettings(ctx.request.body as Record<string, any>) };
 }
 
 export async function paymentCallback(ctx: Context) {
@@ -71,6 +95,38 @@ export async function paymentCallback(ctx: Context) {
   ctx.body = { code: 'SUCCESS', message: 'OK' };
 }
 
+export async function verifyVirtualPaymentCallback(ctx: Context) {
+  const { signature, timestamp, nonce, echostr } = ctx.query;
+
+  if (verifyWechatVirtualPayPushSignature({
+    signature: signature as string,
+    timestamp: timestamp as string,
+    nonce: nonce as string,
+  })) {
+    ctx.body = echostr || '';
+    return;
+  }
+
+  ctx.status = 403;
+  ctx.body = '签名验证失败';
+}
+
+export async function virtualPaymentCallback(ctx: Context) {
+  const body = await normalizeWechatCallbackBody((ctx.request as any).rawBody || ctx.request.body);
+
+  if (config.server.isDev && body?.orderNo) {
+    await handlePaymentCallback(body.orderNo, body.transactionId || `virtual-dev-${Date.now()}`, {
+      payChannel: 'wechat_virtual',
+      virtualWxOrderId: body.virtualWxOrderId,
+    });
+    ctx.body = 'success';
+    return;
+  }
+
+  await handleWechatVirtualPayNotify(body);
+  ctx.body = 'success';
+}
+
 export async function getOrders(ctx: Context) {
   const userId = ctx.state.user.userId;
   const page = parseInt((ctx.query.page as string) || '1', 10);
@@ -85,4 +141,19 @@ export async function getOrderDetail(ctx: Context) {
   const orderNo = ctx.params.orderNo;
   const result = await getUserOrderDetail(userId, orderNo);
   ctx.body = { success: true, data: result };
+}
+
+async function normalizeWechatCallbackBody(body: any) {
+  if (typeof body === 'string' && body.trim().startsWith('<')) {
+    const parsed = await parseStringPromise(body);
+    return flattenXmlObject(parsed.xml || parsed);
+  }
+  if (body?.xml) return flattenXmlObject(body.xml);
+  return flattenXmlObject(body || {});
+}
+
+function flattenXmlObject(input: any): any {
+  if (Array.isArray(input)) return flattenXmlObject(input[0]);
+  if (!input || typeof input !== 'object') return input;
+  return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, flattenXmlObject(value)]));
 }

@@ -116,6 +116,7 @@ import { onPullDownRefresh, onShow } from '@dcloudio/uni-app';
 import { api } from '@/api';
 import { useUserStore } from '@/store/user';
 import CategoryIcon from '@/components/CategoryIcon.vue';
+import pkg from '../../../package.json';
 
 const userStore = useUserStore();
 
@@ -123,7 +124,7 @@ const showEditDialog = ref(false);
 const editForm = reactive({ nickname: '', phone: '', avatar: '' });
 const pendingAvatarPath = ref('');
 const publicFreeGift = ref(100);
-const appVersion = '1.1.2';
+const appVersion = pkg.version;
 
 const profileSubtitle = computed(() => {
   if (!userStore.isLogin) return `登录领取 ${publicFreeGift.value} 点体验额度`;

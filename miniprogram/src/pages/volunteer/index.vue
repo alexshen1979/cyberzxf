@@ -602,6 +602,8 @@ const artSupport = ref<Array<{
 }>>([]);
 const reportCost = ref(38);
 const publicFreeGift = ref(100);
+const provinceAutoLocated = ref(false);
+const provinceLocationTried = ref(false);
 let rankLookupTimer: ReturnType<typeof setTimeout> | null = null;
 let rankLookupSeq = 0;
 let recommendationPreviewTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1036,14 +1038,211 @@ function mergeMajorSuggestions(keyword: string, remoteItems: Array<{ id: string;
   return result.slice(0, 18);
 }
 
-function selectProvince(province: string) {
-  form.province = province;
+const locatedProvinceStorageKey = 'volunteer_located_province';
+const provinceAliasMap: Record<string, string> = {
+  内蒙古自治区: '内蒙古',
+  广西壮族自治区: '广西',
+  西藏自治区: '西藏',
+  宁夏回族自治区: '宁夏',
+  新疆维吾尔自治区: '新疆',
+  香港特别行政区: '香港',
+  澳门特别行政区: '澳门',
+};
+const provinceCentroids: Record<string, { lat: number; lng: number }> = {
+  北京: { lat: 39.9042, lng: 116.4074 },
+  天津: { lat: 39.3434, lng: 117.3616 },
+  河北: { lat: 38.0428, lng: 114.5149 },
+  山西: { lat: 37.8706, lng: 112.5489 },
+  内蒙古: { lat: 40.8175, lng: 111.7652 },
+  辽宁: { lat: 41.8057, lng: 123.4315 },
+  吉林: { lat: 43.8965, lng: 125.3268 },
+  黑龙江: { lat: 45.8038, lng: 126.5349 },
+  上海: { lat: 31.2304, lng: 121.4737 },
+  江苏: { lat: 32.0603, lng: 118.7969 },
+  浙江: { lat: 30.2741, lng: 120.1551 },
+  安徽: { lat: 31.8612, lng: 117.2857 },
+  福建: { lat: 26.0745, lng: 119.2965 },
+  江西: { lat: 28.6829, lng: 115.8582 },
+  山东: { lat: 36.6512, lng: 117.1201 },
+  河南: { lat: 34.7657, lng: 113.7536 },
+  湖北: { lat: 30.5928, lng: 114.3055 },
+  湖南: { lat: 28.2282, lng: 112.9388 },
+  广东: { lat: 23.1291, lng: 113.2644 },
+  广西: { lat: 22.817, lng: 108.3669 },
+  海南: { lat: 20.044, lng: 110.1999 },
+  重庆: { lat: 29.563, lng: 106.5516 },
+  四川: { lat: 30.5728, lng: 104.0668 },
+  贵州: { lat: 26.647, lng: 106.6302 },
+  云南: { lat: 25.0389, lng: 102.7183 },
+  西藏: { lat: 29.647, lng: 91.117 },
+  陕西: { lat: 34.3416, lng: 108.9398 },
+  甘肃: { lat: 36.0611, lng: 103.8343 },
+  青海: { lat: 36.6171, lng: 101.7782 },
+  宁夏: { lat: 38.4872, lng: 106.2309 },
+  新疆: { lat: 43.8256, lng: 87.6168 },
+  台湾: { lat: 25.033, lng: 121.5654 },
+  香港: { lat: 22.3193, lng: 114.1694 },
+  澳门: { lat: 22.1987, lng: 113.5439 },
+};
+
+function provinceKey(name: string) {
+  return String(name || '')
+    .trim()
+    .replace(/特别行政区$/, '')
+    .replace(/壮族自治区$|回族自治区$|维吾尔自治区$/, '')
+    .replace(/自治区$|省$|市$/, '');
+}
+
+function normalizeProvinceName(name?: string) {
+  const raw = String(name || '').trim();
+  if (!raw) return '';
+  const alias = provinceAliasMap[raw] || raw;
+  const key = provinceKey(alias);
+  return provinceOptions.value.find(item => provinceKey(item) === key) || '';
+}
+
+function resolveProvinceFromLocationText(values: unknown[]) {
+  const options = provinceOptions.value;
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (!text) continue;
+    const normalized = normalizeProvinceName(text);
+    if (normalized) return normalized;
+    const matched = options.find(item => text.includes(item) || text.includes(provinceKey(item)));
+    if (matched) return matched;
+  }
+  return '';
+}
+
+function resolveProvinceFromCoordinates(latitude?: number, longitude?: number) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+
+  let bestProvince = '';
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const [province, point] of Object.entries(provinceCentroids)) {
+    const normalized = normalizeProvinceName(province);
+    if (!normalized) continue;
+    const lngWeight = Math.cos((lat * Math.PI) / 180);
+    const distance = Math.pow(lat - point.lat, 2) + Math.pow((lng - point.lng) * lngWeight, 2);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestProvince = normalized;
+    }
+  }
+  return bestProvince;
+}
+
+function applyProvince(province: string, options: { manual?: boolean; autoLocated?: boolean } = {}) {
+  const normalized = normalizeProvinceName(province);
+  if (!normalized) return false;
+  form.province = normalized;
+  syncUserLocation(normalized);
   ensureSubjectOption();
   validateScores({ toast: false, clamp: true });
-  provinceTouched.value = true;
   provincePanelOpen.value = false;
-  locationStatus.value = `已选择 ${province}`;
+  if (options.manual) {
+    provinceTouched.value = true;
+    provinceAutoLocated.value = false;
+    locationStatus.value = `已选择 ${normalized}`;
+  } else if (options.autoLocated) {
+    provinceAutoLocated.value = true;
+    locationStatus.value = `已按定位默认选择 ${normalized}，可手动修改`;
+  } else {
+    locationStatus.value = `已选择 ${normalized}`;
+  }
   locationStatusTone.value = 'success';
+  return true;
+}
+
+function extractProvinceFromLocationResult(result: any) {
+  const address = result?.address || result?.addressComponent || result?.address_component || {};
+  const candidates = [
+    result?.province,
+    result?.address,
+    result?.name,
+    result?.fullAddress,
+    result?.formattedAddress,
+    address?.province,
+    address?.city,
+    address?.district,
+  ];
+  return resolveProvinceFromLocationText(candidates) || resolveProvinceFromCoordinates(result?.latitude, result?.longitude);
+}
+
+function locationUnavailableBySystemSetting() {
+  try {
+    const systemSetting = (uni as any).getSystemSetting?.();
+    if (systemSetting && systemSetting.locationEnabled === false) return true;
+  } catch { /* ignore */ }
+  try {
+    const appAuthorizeSetting = (uni as any).getAppAuthorizeSetting?.();
+    const locationAuthorized = appAuthorizeSetting?.locationAuthorized;
+    return locationAuthorized === false || locationAuthorized === 'denied' || locationAuthorized === 'config error';
+  } catch {
+    return false;
+  }
+}
+
+function fallbackProvinceAfterLocationFail(message = '定位未开启，请手动选择高考省份') {
+  if (provinceTouched.value || form.province) return;
+  const cached = normalizeProvinceName(uni.getStorageSync(locatedProvinceStorageKey));
+  if (cached && applyProvince(cached, { autoLocated: true })) {
+    locationStatus.value = `定位未开启，已默认使用上次省份 ${cached}`;
+    locationStatusTone.value = 'warning';
+    return;
+  }
+  locationStatus.value = message;
+  locationStatusTone.value = 'warning';
+}
+
+async function autoSelectProvinceByLocation() {
+  if (provinceLocationTried.value || provinceTouched.value || form.province || !provinceOptions.value.length) return;
+
+  provinceLocationTried.value = true;
+  locationStatus.value = '正在根据定位识别省份...';
+  locationStatusTone.value = 'muted';
+
+  if (locationUnavailableBySystemSetting()) {
+    fallbackProvinceAfterLocationFail();
+    return;
+  }
+
+  uni.getLocation({
+    type: 'gcj02',
+    isHighAccuracy: false,
+    success: (result: any) => {
+      if (provinceTouched.value || form.province) return;
+      const province = extractProvinceFromLocationResult(result);
+      if (province && applyProvince(province, { autoLocated: true })) {
+        uni.setStorageSync(locatedProvinceStorageKey, province);
+      } else {
+        locationStatus.value = '未能识别当前省份，请手动选择';
+        locationStatusTone.value = 'warning';
+      }
+    },
+    fail: () => {
+      fallbackProvinceAfterLocationFail();
+    },
+  });
+}
+
+function selectProvince(province: string) {
+  applyProvince(province, { manual: true });
+}
+
+function syncUserLocation(province: string, city = '') {
+  if (!userStore.isLogin || !province) return;
+  const current = userStore.userInfo || {};
+  if (current.province === province && (!city || current.city === city)) return;
+  api.auth.updateProfile({ province, ...(city ? { city } : {}) })
+    .then((res: any) => {
+      userStore.userInfo = Object.assign({}, userStore.userInfo || {}, res.data || { province, city });
+    })
+    .catch((err: any) => {
+      console.warn('[volunteer] sync user location failed', err?.message || err);
+    });
 }
 
 function openProvincePanel() {
@@ -1207,6 +1406,7 @@ async function loadRegions() {
     regionTree.value = (res.data || []).map((province: any) => Object.assign({}, province, {
       children: province.children || [],
     }));
+    await autoSelectProvinceByLocation();
   } catch {
     regionTree.value = [];
   }
