@@ -33,6 +33,9 @@ type AdminInvitationNode = {
   id: string;
   nickname: string | null;
   phone: string | null;
+  province: string | null;
+  city: string | null;
+  registerIp: string | null;
   miniOpenId: string | null;
   mpOpenId: string | null;
   shareCode: string | null;
@@ -243,6 +246,7 @@ export async function getUsers(ctx: Context) {
       { id: { contains: keyword } },
       { nickname: { contains: keyword } },
       { phone: { contains: keyword } },
+      { registerIp: { contains: keyword } },
       { shareCode: { contains: keyword } },
       { mpOpenId: { contains: keyword } },
       { miniOpenId: { contains: keyword } },
@@ -387,6 +391,9 @@ function buildInvitationNode(
     id: user.id,
     nickname: user.nickname,
     phone: user.phone,
+    province: user.province,
+    city: user.city,
+    registerIp: user.registerIp,
     miniOpenId: user.miniOpenId,
     mpOpenId: user.mpOpenId,
     shareCode: user.shareCode,
@@ -419,6 +426,7 @@ function invitationNodeMatches(node: any, keyword: string) {
     node.id,
     node.nickname,
     node.phone,
+    node.registerIp,
     node.shareCode,
     node.miniOpenId,
     node.mpOpenId,
@@ -747,6 +755,8 @@ export async function purgeUserForAdmin(ctx: Context) {
       tx.volunteerReport.deleteMany({ where: { userId } }),
       tx.dailyShareReward.deleteMany({ where: { userId } }),
       tx.shareEvent.deleteMany({ where: { OR: [{ userId }, ...(user.shareCode ? [{ shareCode: user.shareCode }] : [])] } }),
+      tx.tencentAdConversionEvent.deleteMany({ where: { userId } }),
+      tx.rechargeAnalyticsEvent.deleteMany({ where: { OR: [{ userId }, ...(orderIds.length ? [{ orderId: { in: orderIds } }] : [])] } }),
       tx.pointsTransaction.deleteMany({ where: { userId } }),
       tx.pointsAccount.deleteMany({ where: { userId } }),
       tx.order.deleteMany({ where: { userId } }),
@@ -757,6 +767,8 @@ export async function purgeUserForAdmin(ctx: Context) {
       'volunteerReports',
       'dailyShareRewards',
       'shareEvents',
+      'tencentAdConversionEvents',
+      'rechargeAnalyticsEvents',
       'pointsTransactions',
       'pointsAccounts',
       'orders',
@@ -1457,9 +1469,9 @@ export async function exportUsers(ctx: Context) {
     include: { pointsAccount: { select: { balance: true } } },
   });
 
-  const headers = ['ID', '昵称', '省份', '城市', '小程序OpenID', '公众号OpenID', 'UnionID', '点数余额', '状态', '注册时间'];
+  const headers = ['ID', '昵称', '省份', '城市', '注册IP', '小程序OpenID', '公众号OpenID', 'UnionID', '点数余额', '状态', '注册时间'];
   const rows = users.map(u => [
-    u.id, u.nickname || '', u.province || '', u.city || '', u.miniOpenId || '', u.mpOpenId || '', u.unionId || '',
+    u.id, u.nickname || '', u.province || '', u.city || '', u.registerIp || '', u.miniOpenId || '', u.mpOpenId || '', u.unionId || '',
     u.pointsAccount?.balance ?? 0, u.status === 1 ? '正常' : '禁用',
     u.createdAt.toISOString(),
   ]);

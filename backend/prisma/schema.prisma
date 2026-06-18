@@ -18,6 +18,7 @@ model User {
   phone                   String?
   province                String?
   city                    String?
+  registerIp              String?   @map("register_ip")
   shareCode               String?   @unique @map("share_code")
   status                  Int       @default(1)
   referredByDistributorId String?   @map("referred_by_distributor_id")
@@ -39,9 +40,63 @@ model User {
   distributorProfile    Distributor?          @relation("UserDistributor")
   referredByDistributor Distributor?          @relation("UserReferrer", fields: [referredByDistributorId], references: [id], onDelete: SetNull)
   referralRecord        DistributionReferral? @relation("ReferralCustomer")
+  tencentAdConversions  TencentAdConversionEvent[]
 
   @@index([referredByDistributorId])
+  @@index([registerIp])
   @@map("users")
+}
+
+model TencentAdConversionConfig {
+  id                    String   @id @default("default")
+  enabled               Boolean  @default(true)
+  reportMode            String   @default("click_id") @map("report_mode")
+  accountId             String?  @map("account_id")
+  userActionSetId       String?  @map("user_action_set_id")
+  accessToken           String?  @map("access_token")
+  miniAppId             String?  @map("mini_app_id")
+  conversionId          String?  @map("conversion_id")
+  apiUrl                String   @default("https://api.e.qq.com/v3.0/user_actions/add") @map("api_url")
+  attributionWindowDays Int      @default(30) @map("attribution_window_days")
+  reportWithoutClickId  Boolean  @default(false) @map("report_without_click_id")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("tencent_ad_conversion_config")
+}
+
+model TencentAdConversionEvent {
+  id                  String    @id @default(uuid())
+  userId              String    @map("user_id")
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType           String    @default("REGISTER") @map("event_type")
+  outerActionId       String    @unique @map("outer_action_id")
+  status              String    @default("pending")
+  reportMode          String    @default("click_id") @map("report_mode")
+  accountId           String?   @map("account_id")
+  userActionSetId     String?   @map("user_action_set_id")
+  conversionId        String?   @map("conversion_id")
+  miniAppId           String?   @map("mini_app_id")
+  wechatOpenId        String?   @map("wechat_openid")
+  wechatUnionId       String?   @map("wechat_unionid")
+  clickId             String?   @map("click_id")
+  clickIdSource       String?   @map("click_id_source")
+  cb                  String?
+  callbackUrl         String?   @map("callback_url")
+  rawAttribution      String?   @map("raw_attribution")
+  requestPayload      String?   @map("request_payload")
+  responsePayload     String?   @map("response_payload")
+  lastError           String?   @map("last_error")
+  retryCount          Int       @default(0) @map("retry_count")
+  lastAttemptAt       DateTime? @map("last_attempt_at")
+  reportedAt          DateTime? @map("reported_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([clickId])
+  @@map("tencent_ad_conversion_events")
 }
 
 model ShareEvent {

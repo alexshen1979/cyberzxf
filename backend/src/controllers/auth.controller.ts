@@ -18,14 +18,14 @@ const AVATAR_MIME_EXTENSIONS: Record<string, string> = {
 };
 
 export async function miniProgramLogin(ctx: Context) {
-  const { code, userInfo, referralCode } = ctx.request.body as any;
+  const { code, userInfo, referralCode, adAttribution } = ctx.request.body as any;
   if (!code) {
     ctx.status = 422;
     ctx.body = { success: false, message: '缺少登录凭证 code' };
     return;
   }
 
-  const result = await authService.loginByMiniProgram(code, userInfo, referralCode, getClientIp(ctx));
+  const result = await authService.loginByMiniProgram(code, userInfo, referralCode, getClientIp(ctx), adAttribution);
   ctx.body = { success: true, data: result };
 }
 

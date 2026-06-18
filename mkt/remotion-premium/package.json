@@ -1,0 +1,18 @@
+{
+  "name": "cyberzhang-premium-remotion-ads",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "render": "remotion render",
+    "preview": "remotion preview",
+    "still": "remotion still"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.473",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "remotion": "4.0.473",
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {}
+}

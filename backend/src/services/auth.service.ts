@@ -3,10 +3,12 @@ import { signToken, JwtPayload } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { config } from '../config';
 import axios from 'axios';
+import crypto from 'crypto';
 import { getWechatMiniProgramCredentials } from './payment.service';
 import { getPointSettings } from './point-config.service';
 import { createReferralForNewUser, ensureUserShareCode, grantPartnerNewUserExtraGift } from './distribution.service';
 import { lookupIpLocation } from './ip-location.service';
+import { reportTencentRegisterConversion } from './tencent-ad-conversion.service';
 
 let accessTokenCache: { token: string; expiresAt: number } | null = null;
 
@@ -48,13 +50,14 @@ async function mpOAuth(code: string) {
 }
 
 // 统一登录入口：查找或创建用户
-export async function loginByMiniProgram(code: string, profile?: { nickName?: string; avatarUrl?: string; phoneCode?: string; province?: string; city?: string }, referralCode?: string, clientIp?: string) {
+export async function loginByMiniProgram(code: string, profile?: { nickName?: string; avatarUrl?: string; phoneCode?: string; phoneEncryptedData?: string; phoneIv?: string; province?: string; city?: string }, referralCode?: string, clientIp?: string, adAttribution?: any) {
   const { openId, unionId, sessionKey } = await miniProgramLogin(code);
   const profileData = normalizeWechatProfile(profile);
   const locationData = normalizeUserLocation(profile);
   const ipLocationData = await lookupUserLocationByIp(clientIp);
-  const phone = profile?.phoneCode ? await getPhoneNumberByCode(profile.phoneCode) : '';
+  const phone = await resolvePhoneNumber(profile, sessionKey);
   const defaultNickname = profileData.nickname || buildDefaultNickname(phone);
+  let isNewUser = false;
 
   let user = await prisma.user.findFirst({
     where: unionId ? { unionId } : { miniOpenId: openId },
@@ -87,6 +90,7 @@ export async function loginByMiniProgram(code: string, profile?: { nickName?: st
           nickname: defaultNickname,
           ...(profileData.avatar ? { avatar: profileData.avatar } : {}),
           ...buildNewUserLocationData(locationData, ipLocationData),
+          ...(clientIp ? { registerIp: clientIp } : {}),
           ...(phone ? { phone } : {}),
         },
       });
@@ -94,9 +98,21 @@ export async function loginByMiniProgram(code: string, profile?: { nickName?: st
       await createReferralForNewUser(tx, newUser.id, referralCode);
       return ensureUserShareCode(newUser.id, tx);
     });
+    isNewUser = true;
   }
 
   if (!user) throw new AppError(404, '用户不存在', 'USER_NOT_FOUND');
+  if (isNewUser) {
+    reportTencentRegisterConversion({
+      userId: user.id,
+      openId,
+      unionId,
+      registeredAt: user.createdAt,
+      attribution: adAttribution,
+    }).catch((err) => {
+      console.error('腾讯广告注册转化回传排队失败:', err);
+    });
+  }
   const token = signToken({ userId: user.id });
   return { token, user: sanitizeUser(user) };
 }
@@ -217,6 +233,33 @@ async function getPhoneNumberByCode(phoneCode: string) {
   }
 
   return data.phone_info?.phoneNumber || data.phone_info?.purePhoneNumber || '';
+}
+
+async function resolvePhoneNumber(profile: any, sessionKey?: string) {
+  if (profile?.phoneCode) return getPhoneNumberByCode(String(profile.phoneCode));
+  if (profile?.phoneEncryptedData && profile?.phoneIv && sessionKey) {
+    return decryptPhoneNumber(String(profile.phoneEncryptedData), String(profile.phoneIv), sessionKey);
+  }
+  return '';
+}
+
+function decryptPhoneNumber(encryptedData: string, iv: string, sessionKey: string) {
+  try {
+    const decipher = crypto.createDecipheriv(
+      'aes-128-cbc',
+      Buffer.from(sessionKey, 'base64'),
+      Buffer.from(iv, 'base64'),
+    );
+    decipher.setAutoPadding(true);
+    const decoded = Buffer.concat([
+      decipher.update(Buffer.from(encryptedData, 'base64')),
+      decipher.final(),
+    ]).toString('utf8');
+    const data = JSON.parse(decoded);
+    return data.phoneNumber || data.purePhoneNumber || '';
+  } catch (err) {
+    throw new AppError(400, '手机号授权解密失败，请重新授权', 'WECHAT_PHONE_DECRYPT_FAIL');
+  }
 }
 
 async function requestPhoneNumber(phoneCode: string, accessToken: string) {

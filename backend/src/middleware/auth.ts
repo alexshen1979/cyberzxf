@@ -51,6 +51,18 @@ export async function adminContentAuth(ctx: Context, next: Next) {
   await next();
 }
 
+// 管理员或编辑鉴权：供用户列表、用户详情、基础编辑使用
+export async function adminUserAuth(ctx: Context, next: Next) {
+  const payload = verifyAdminToken(ctx);
+
+  if (!payload.role || !['admin', 'super_admin', 'editor'].includes(payload.role)) {
+    throw new AppError(403, '无用户管理权限', 'FORBIDDEN');
+  }
+
+  ctx.state.user = payload;
+  await next();
+}
+
 // 管理员或编辑鉴权：供合作人员管理等受限后台模块使用
 export async function adminDistributionAuth(ctx: Context, next: Next) {
   const payload = verifyAdminToken(ctx);

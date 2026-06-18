@@ -1499,7 +1499,7 @@ export async function listDistributorsForAdmin(params: Record<string, any>) {
         user: { select: { id: true, nickname: true, phone: true, createdAt: true } },
         parent: { select: { id: true, name: true, code: true } },
         generalAgentParent: { select: { id: true, name: true, code: true, generalAgentRate: true } },
-        _count: { select: { children: true, referrals: true, commissions: true } },
+        _count: { select: { children: true, referrals: true, commissions: true, registrationRewards: true } },
       },
     }),
     prisma.distributor.count({ where }),
@@ -1533,10 +1533,10 @@ export async function listDistributorTreeForAdmin(params: Record<string, any>) {
           status: true,
           userId: true,
           user: { select: { id: true, nickname: true, phone: true, createdAt: true, shareCode: true } },
-          _count: { select: { children: true, referrals: true, commissions: true } },
+          _count: { select: { children: true, referrals: true, commissions: true, registrationRewards: true } },
         },
       },
-      _count: { select: { children: true, referrals: true, commissions: true } },
+      _count: { select: { children: true, referrals: true, commissions: true, registrationRewards: true } },
     },
   });
 
@@ -1576,6 +1576,7 @@ export async function listDistributorTreeForAdmin(params: Record<string, any>) {
         children: unassignedChildren.length,
         referrals: unassignedChildren.reduce((sum, item) => sum + (item._count?.referrals || 0), 0),
         commissions: unassignedChildren.reduce((sum, item) => sum + (item._count?.commissions || 0), 0),
+        registrationRewards: unassignedChildren.reduce((sum, item) => sum + (item._count?.registrationRewards || 0), 0),
       },
       children: unassignedChildren,
     });
@@ -1762,8 +1763,10 @@ export async function listCommissionsForAdmin(params: Record<string, any>) {
   const page = Math.max(1, parseInt(params.page || '1', 10));
   const pageSize = Math.min(100, Math.max(1, parseInt(params.pageSize || '20', 10)));
   const where: any = realDistributorCommissionWhere();
+  const registrationWhere: any = realRegistrationRewardWhere();
   if (params.distributorId) where.distributorId = String(params.distributorId);
-  return listCommissionsByWhere(where, page, pageSize);
+  if (params.distributorId) registrationWhere.distributorId = String(params.distributorId);
+  return listRewardLedgerByWhere(where, registrationWhere, page, pageSize);
 }
 
 export async function listGeneralAgentCommissionsForAdmin(params: Record<string, any>) {
@@ -2393,8 +2396,70 @@ async function listCommissionsByWhere(where: any, page: number, pageSize: number
   const userMap = new Map(users.map(user => [user.id, user]));
 
   return {
-    list: list.map(item => ({ ...item, referralUser: userMap.get(item.referralUserId) || null })),
+    list: list.map(item => ({ ...item, sourceType: 'commission', referralUser: userMap.get(item.referralUserId) || null })),
     total,
+    page,
+    pageSize,
+  };
+}
+
+async function listRewardLedgerByWhere(commissionWhere: any, registrationWhere: any, page: number, pageSize: number) {
+  const take = page * pageSize;
+  const [commissionList, registrationList, commissionTotal, registrationTotal] = await Promise.all([
+    prisma.distributionCommission.findMany({
+      where: commissionWhere,
+      orderBy: { createdAt: 'desc' },
+      take,
+      include: {
+        distributor: { select: { id: true, name: true, code: true, level: true } },
+        order: { select: orderPaymentSelect() },
+      },
+    }),
+    prisma.distributionRegistrationReward.findMany({
+      where: registrationWhere,
+      orderBy: { createdAt: 'desc' },
+      take,
+      include: {
+        distributor: { select: { id: true, name: true, code: true, level: true } },
+        shareReferral: { select: { id: true, sourceCode: true, createdAt: true } },
+      },
+    }),
+    prisma.distributionCommission.count({ where: commissionWhere }),
+    prisma.distributionRegistrationReward.count({ where: registrationWhere }),
+  ]);
+  const userIds = [...new Set([
+    ...commissionList.map(item => item.referralUserId),
+    ...registrationList.map(item => item.referralUserId),
+  ].filter(Boolean))];
+  const users = userIds.length
+    ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, nickname: true, phone: true, shareCode: true } })
+    : [];
+  const userMap = new Map(users.map(user => [user.id, user]));
+  const ledger = [
+    ...commissionList.map(item => ({
+      ...item,
+      sourceType: 'commission',
+      referralUser: userMap.get(item.referralUserId) || null,
+    })),
+    ...registrationList.map(item => ({
+      ...item,
+      sourceType: 'registration_reward',
+      role: 'registration_reward',
+      rateBps: null,
+      orderId: null,
+      order: null,
+      referralUser: userMap.get(item.referralUserId) || null,
+    })),
+  ].sort((a, b) => {
+    const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    if (diff !== 0) return diff;
+    return String(b.id).localeCompare(String(a.id));
+  });
+
+  const start = (page - 1) * pageSize;
+  return {
+    list: ledger.slice(start, start + pageSize),
+    total: commissionTotal + registrationTotal,
     page,
     pageSize,
   };

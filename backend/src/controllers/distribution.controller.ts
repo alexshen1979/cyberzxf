@@ -31,6 +31,7 @@ import {
   updateDistributionSettingsForAdmin,
   updateDistributorForAdmin,
 } from '../services/distribution.service';
+import { AppError } from '../middleware/errorHandler';
 
 export async function me(ctx: Context) {
   const userId = ctx.state.user.userId;
@@ -135,6 +136,7 @@ export async function adminUpdateDistributor(ctx: Context) {
 }
 
 export async function adminCommissions(ctx: Context) {
+  assertEditorLedgerScope(ctx);
   ctx.body = { success: true, data: await listCommissionsForAdmin(ctx.query as Record<string, any>) };
 }
 
@@ -151,6 +153,7 @@ export async function adminMarkGeneralAgentCommission(ctx: Context) {
 }
 
 export async function adminWithdrawals(ctx: Context) {
+  assertEditorLedgerScope(ctx);
   ctx.body = { success: true, data: await listWithdrawalsForAdmin(ctx.query as Record<string, any>) };
 }
 
@@ -181,4 +184,10 @@ function sanitizeDistributorAdminInput(ctx: Context, input: Record<string, any>)
   delete data.generalAgentParentId;
   delete data.registrationCashRewardEnabled;
   return data;
+}
+
+function assertEditorLedgerScope(ctx: Context) {
+  if (ctx.state.user?.role !== 'editor') return;
+  if (String(ctx.query.distributorId || '').trim()) return;
+  throw new AppError(403, '编辑只能查看单个合作人员的流水', 'EDITOR_LEDGER_SCOPE_REQUIRED');
 }

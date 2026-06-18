@@ -25,7 +25,7 @@
               <span>数据大盘</span>
             </template>
           </el-menu-item>
-          <el-menu-item v-if="store.isFullAdmin" index="/users">
+          <el-menu-item v-if="store.canManageUsers" index="/users">
             <template #title>
               <el-icon><User /></el-icon>
               <span class="menu-label">用户管理<i v-if="store.newUsers > 0" class="menu-dot"></i></span>
@@ -41,6 +41,12 @@
             <template #title>
               <el-icon><Tickets /></el-icon>
               <span class="menu-label">订单管理<i v-if="store.newOrders > 0" class="menu-dot"></i></span>
+            </template>
+          </el-menu-item>
+          <el-menu-item v-if="store.isFullAdmin" index="/tencent-ad-conversion">
+            <template #title>
+              <el-icon><Promotion /></el-icon>
+              <span>腾讯广告回传</span>
             </template>
           </el-menu-item>
           <el-sub-menu v-if="store.canManageDistributors" index="distribution">
@@ -167,7 +173,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAdminStore } from '@/store/admin';
 import {
-  School, DataAnalysis, User, Coin, Tickets, Document,
+  School, DataAnalysis, User, Coin, Tickets, Promotion, Document,
   Cpu, MagicStick, ChatDotRound, Bell, Share, Setting,
 } from '@element-plus/icons-vue';
 

@@ -439,6 +439,27 @@ export async function getUserOrderDetail(userId: string, orderNo: string) {
   return order;
 }
 
+export async function syncPaymentOrderStatusForAdmin(orderNo: string) {
+  const normalizedOrderNo = String(orderNo || '').trim();
+  if (!normalizedOrderNo) {
+    throw new AppError(422, '订单号不能为空', 'ORDER_NO_REQUIRED');
+  }
+
+  let order = await prisma.order.findUnique({ where: { orderNo: normalizedOrderNo } });
+  if (!order) {
+    throw new AppError(404, '订单不存在', 'ORDER_NOT_FOUND');
+  }
+
+  if (order.payChannel === 'wechat_virtual') {
+    await syncWechatVirtualOrderStatus(order.orderNo);
+  } else {
+    await syncWechatOrderStatus(order.orderNo);
+  }
+
+  order = await prisma.order.findUnique({ where: { orderNo: normalizedOrderNo } });
+  return order;
+}
+
 // 按时间统计充值（管理后台用）
 export async function getRevenueStats(startDate: Date, endDate: Date) {
   const orders = await prisma.order.findMany({
@@ -724,8 +745,8 @@ async function syncWechatVirtualOrderStatus(orderNo: string) {
   const virtualOrder = response?.order;
   if (!virtualOrder) return;
 
-  if (Number(virtualOrder.status) === 2 || Number(virtualOrder.status) === 3 || Number(virtualOrder.status) === 4) {
-    await handlePaymentCallback(orderNo, virtualOrder.wxpay_order_id || virtualOrder.channel_order_id || virtualOrder.wx_order_id || orderNo, {
+  if (isWechatVirtualOrderPaid(virtualOrder)) {
+    await handlePaymentCallback(orderNo, getWechatVirtualTransactionId(virtualOrder, orderNo), {
       payChannel: 'wechat_virtual',
       virtualWxOrderId: virtualOrder.wx_order_id,
       virtualOrder,
@@ -865,10 +886,16 @@ async function queryAndUpdateWechatVirtualOrder(order: any) {
   if (!virtualOrder) return null;
   const data = buildVirtualOrderUpdateData(virtualOrder, order);
   const status = Number(virtualOrder.status);
-  if ((status === 2 || status === 3 || status === 4) && order.status !== 'paid') {
-    data.status = 'paid';
-    data.paidAt = virtualOrder.paid_time ? new Date(Number(virtualOrder.paid_time) * 1000) : new Date();
-    data.transactionId = virtualOrder.wxpay_order_id || virtualOrder.channel_order_id || virtualOrder.wx_order_id || order.transactionId || order.orderNo;
+  if (isWechatVirtualOrderPaid(virtualOrder) && order.status !== 'paid') {
+    await handlePaymentCallback(order.orderNo, getWechatVirtualTransactionId(virtualOrder, order.orderNo), {
+      payChannel: 'wechat_virtual',
+      virtualWxOrderId: virtualOrder.wx_order_id,
+      virtualOrder,
+    });
+    await notifyWechatVirtualGoodsProvided(order.orderNo, virtualOrder.wx_order_id).catch((err: any) => {
+      logger.warn('虚拟支付结算同步后通知已发货失败: orderNo=%s message=%s', order.orderNo, err?.message || err);
+    });
+    return prisma.order.findUnique({ where: { id: order.id } });
   }
   if (status === 5 || status === 6 || status === 8) {
     data.status = order.status === 'paid' ? order.status : 'failed';
@@ -877,6 +904,18 @@ async function queryAndUpdateWechatVirtualOrder(order: any) {
     where: { id: order.id },
     data,
   });
+}
+
+function isWechatVirtualOrderPaid(virtualOrder: any) {
+  const status = Number(virtualOrder?.status);
+  return status === 2 || status === 3 || status === 4;
+}
+
+function getWechatVirtualTransactionId(virtualOrder: any, fallback: string) {
+  return virtualOrder?.wxpay_order_id
+    || virtualOrder?.channel_order_id
+    || virtualOrder?.wx_order_id
+    || fallback;
 }
 
 async function syncWechatVirtualBizBalance() {

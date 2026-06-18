@@ -3,8 +3,8 @@
   "appid": "__UNI__XXXXXXX",
   "vueVersion": "3",
   "description": "涨识",
-  "versionName": "1.2.1",
-  "versionCode": "121",
+  "versionName": "1.2.6",
+  "versionCode": "126",
   "transformPx": false,
   "uniStatistics": {
     "enable": false
@@ -21,7 +21,7 @@
     "usingComponents": true,
     "permission": {
       "scope.userLocation": {
-        "desc": "用于根据当前位置默认选择高考省份"
+        "desc": "用于授权后自动填写志愿分析中的考生省份，可手动修改"
       }
     },
     "requiredPrivateInfos": [

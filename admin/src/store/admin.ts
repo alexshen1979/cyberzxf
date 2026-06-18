@@ -16,6 +16,7 @@ export const useAdminStore = defineStore('admin', () => {
   const isLogin = computed(() => !!token.value);
   const isFullAdmin = computed(() => role.value !== 'editor');
   const isEditor = computed(() => role.value === 'editor');
+  const canManageUsers = computed(() => isFullAdmin.value || isEditor.value);
   const canManageDistributors = computed(() => isFullAdmin.value || isEditor.value);
 
   async function login(loginUsername: string, password: string) {
@@ -51,9 +52,13 @@ export const useAdminStore = defineStore('admin', () => {
         return;
       }
 
-      if (canManageDistributors.value) {
-        const distributionRes = await api.distribution.pendingCounts() as any;
-        newUsers.value = 0;
+      if (isEditor.value) {
+        const [userRes, distributionRes] = await Promise.all([
+          api.users.menuStats({ lastSeen: localStorage.getItem(USER_SEEN_KEY) || '' }),
+          api.distribution.pendingCounts(),
+        ]) as any[];
+
+        newUsers.value = resolveNewCount(userRes, USER_SEEN_KEY);
         newOrders.value = 0;
         pendingDistributors.value = Number(distributionRes.data?.pendingDistributors || 0);
         pendingWithdrawals.value = 0;
@@ -85,7 +90,7 @@ export const useAdminStore = defineStore('admin', () => {
   }
 
   async function markSeen(storageKey: string, loader: (params?: any) => Promise<any>) {
-    if (!token.value || !isFullAdmin.value) return;
+    if (!token.value || (!isFullAdmin.value && storageKey !== USER_SEEN_KEY)) return;
     try {
       const res = await loader();
       const latest = res.data?.latestCreatedAt ? new Date(res.data.latestCreatedAt).toISOString() : new Date().toISOString();
@@ -119,6 +124,7 @@ export const useAdminStore = defineStore('admin', () => {
     isLogin,
     isFullAdmin,
     isEditor,
+    canManageUsers,
     canManageDistributors,
     login,
     logout,

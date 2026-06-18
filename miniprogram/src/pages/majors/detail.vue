@@ -55,6 +55,10 @@
       </view>
     </view>
 
+    <view class="major-ask-card" @click="askAboutMajor">
+      <text>问问这个专业</text>
+    </view>
+
     <view class="info-card">
       <view class="section-head">
         <text class="section-title">开设院校</text>
@@ -490,6 +494,20 @@ onShareTimeline(() => {
   color: #2563eb;
   font-size: 25rpx;
   font-weight: 900;
+}
+
+.major-ask-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 78rpx;
+  margin-bottom: $spacing-md;
+  border-radius: 18rpx;
+  color: #fff;
+  font-size: 27rpx;
+  font-weight: 900;
+  background: linear-gradient(135deg, #2563eb 0%, #16a34a 100%);
+  box-shadow: 0 14rpx 30rpx rgba(37, 99, 235, 0.18);
 }
 
 .action-row {

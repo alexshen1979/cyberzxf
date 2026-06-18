@@ -32,4 +32,4 @@ rsync -az --delete \
   --exclude '*.p12' \
   "$ROOT_DIR/backend/" "$REMOTE:$REMOTE_DIR/"
 
-ssh "$REMOTE" "cd '$REMOTE_DIR' && npm ci && npx prisma generate && npx prisma migrate deploy && pm2 restart '$APP_NAME' --update-env"
+ssh "$REMOTE" "cd '$REMOTE_DIR' && PUPPETEER_SKIP_DOWNLOAD=1 npm ci && npx prisma generate && npx prisma migrate deploy && pm2 restart '$APP_NAME' --update-env"

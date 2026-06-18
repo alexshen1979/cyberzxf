@@ -1,6 +1,6 @@
 <template>
   <view class="report-page">
-    <view class="summary-card">
+    <view id="report-guide-summary" class="summary-card" :class="reportTutorialTargetClass('summary')">
       <text class="eyebrow">AI 志愿分析报告</text>
       <view class="title-row">
         <text class="title">{{ displayReportTitle }}</text>
@@ -22,7 +22,7 @@
       </view>
       <view class="decision-item">
         <text class="decision-label">推荐依据</text>
-        <text class="decision-value">历年录取线</text>
+        <text class="decision-value">{{ recommendationBasisText }}</text>
       </view>
       <view class="decision-item">
         <text class="decision-label">风险检查</text>
@@ -30,14 +30,20 @@
       </view>
     </view>
 
-    <view class="tabs">
-      <text class="tab" :class="{ active: activeTab === 'cards' }" @click="activeTab = 'cards'">冲稳保</text>
-      <text class="tab" :class="{ active: activeTab === 'report' }" @click="activeTab = 'report'">完整报告</text>
+    <view id="report-guide-tabs" class="tabs" :class="reportTutorialTargetClass('tabs')">
+      <text class="tab" :class="{ active: activeTab === 'cards' }" @click="setActiveReportTab('cards')">冲稳保</text>
+      <text id="report-guide-report-tab" class="tab" :class="[{ active: activeTab === 'report' }, reportTutorialTargetClass('reportTab')]" @click="setActiveReportTab('report')">完整报告</text>
     </view>
 
     <view v-if="activeTab === 'cards'">
-      <view class="section result-section" :class="group.key" v-for="group in groups" :key="group.key">
-        <view class="section-head foldable" @click="toggleGroup(group.key)">
+      <view
+        class="section result-section"
+        :id="`report-guide-${group.key}`"
+        :class="[group.key, reportTutorialTargetClass(group.key)]"
+        v-for="group in groups"
+        :key="group.key"
+      >
+        <view class="section-head foldable" @click="handleGroupToggle(group.key)">
           <text class="section-title">{{ group.title }}</text>
           <view class="section-action">
             <text class="section-count">{{ groupCountText(group) }}</text>
@@ -49,7 +55,8 @@
           <view class="school-list" v-else>
             <view
               class="school-card"
-              :class="group.key"
+              :id="reportTutorialSchoolId(item)"
+              :class="[group.key, reportTutorialSchoolTargetClass(item), { 'no-detail': !hasUniversityDetail(item) }]"
               v-for="item in displayedItems(group)"
               :key="`${group.key}-${item.universityId || item.universityName}-${item.majorName}`"
               @click="openUniversity(item)"
@@ -70,7 +77,8 @@
                   </view>
                   <text class="school-location" v-else>院校信息待补充</text>
                 </view>
-                <text class="school-arrow">›</text>
+                <text class="school-arrow" v-if="hasUniversityDetail(item)">›</text>
+                <text class="school-arrow muted" v-else>资料</text>
               </view>
               <view class="tag-row" v-if="cardMetaChips(item).length || visiblePreferenceTags(item).length || visibleWarningTags(item).length">
                 <text class="meta-chip" v-for="chip in cardMetaChips(item)" :key="chip">{{ chip }}</text>
@@ -96,7 +104,12 @@
               </view>
               <text class="reason">{{ displayReason(item) }}</text>
               <view class="school-actions">
-                <text class="school-ask-btn" @click.stop="askAboutSchool(item)">问问这所学校</text>
+                <text
+                  class="school-ask-btn"
+                  :id="reportTutorialAskSchoolId(item)"
+                  :class="reportTutorialAskSchoolTargetClass(item)"
+                  @click.stop="askAboutSchool(item)"
+                >问问这所学校</text>
               </view>
             </view>
           </view>
@@ -136,7 +149,7 @@
 
       <view class="action-row">
         <view class="secondary-btn" @click="goBackForm">重新分析</view>
-        <view class="primary-btn" @click="askFollowup">继续追问</view>
+        <view id="report-guide-followup" class="primary-btn" :class="reportTutorialTargetClass('followup')" @click="askFollowup">继续追问</view>
       </view>
     </view>
 
@@ -155,7 +168,7 @@
         </view>
       </view>
 
-      <view class="download-panel">
+      <view id="report-guide-download" class="download-panel" :class="reportTutorialTargetClass('download')">
         <view class="download-copy">
           <text class="download-title">保存精美报告</text>
           <text class="download-subtitle">首次生成 PDF {{ exportCosts.pdf }}点，长图 {{ exportCosts.image }}点；同一报告重复保存不再扣点。</text>
@@ -247,14 +260,56 @@
 
       <view class="action-row">
         <view class="secondary-btn" @click="goBackForm">重新分析</view>
-        <view class="primary-btn" @click="askFollowup">继续追问</view>
+        <view id="report-guide-followup" class="primary-btn" :class="reportTutorialTargetClass('followup')" @click="askFollowup">继续追问</view>
+      </view>
+    </view>
+
+    <view
+      id="report-guide-knowledge"
+      class="report-tutorial-nav-target"
+      :class="reportTutorialTargetClass('knowledge')"
+      v-if="reportTutorialOpen && currentReportTutorialStep.key === 'knowledge'"
+    >
+      <view class="report-tutorial-nav-item ai">
+        <text class="nav-item-title">AI追问</text>
+        <text class="nav-item-desc">继续比较学校和专业</text>
+      </view>
+      <view class="report-tutorial-nav-item knowledge">
+        <text class="nav-item-title">资料库</text>
+        <text class="nav-item-desc">查院校专业政策</text>
+      </view>
+    </view>
+
+    <view class="report-tutorial-mask" v-if="reportTutorialOpen" @click.stop></view>
+    <view class="report-tutorial-card" :class="reportTutorialCardPlacement" v-if="reportTutorialOpen" @touchmove.stop>
+      <view class="report-tutorial-head">
+        <text class="report-tutorial-kicker">{{ reportTutorialProgressText }}</text>
+        <text class="report-tutorial-close" @click="finishReportTutorial">×</text>
+      </view>
+      <text class="report-tutorial-title">{{ currentReportTutorialStep.title }}</text>
+      <text class="report-tutorial-desc">{{ currentReportTutorialStep.desc }}</text>
+      <view class="report-tutorial-dots">
+        <text
+          v-for="(_, index) in reportTutorialSteps"
+          :key="index"
+          :class="{ active: index === reportTutorialStep }"
+        ></text>
+      </view>
+      <view class="report-tutorial-actions">
+        <text class="report-tutorial-skip" @click="finishReportTutorial">跳过</text>
+        <text
+          class="report-tutorial-link"
+          v-if="currentReportTutorialStep.actionText"
+          @click="handleReportTutorialAction"
+        >{{ currentReportTutorialStep.actionText }}</text>
+        <text class="report-tutorial-primary" @click="handleReportTutorialPrimary">{{ reportTutorialPrimaryText }}</text>
       </view>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app';
 import { api } from '@/api';
 import { useUserStore } from '@/store/user';
@@ -270,6 +325,8 @@ const loadingMoreGroup = ref('');
 const exportingType = ref<'pdf' | 'image' | ''>('');
 const exportCosts = ref({ pdf: 3, image: 5 });
 const isFavorited = ref(false);
+const reportTutorialOpen = ref(false);
+const reportTutorialStep = ref(0);
 const initialGroupLimit = 12;
 const loadMoreStep = 12;
 const result = computed(() => data.value?.result || data.value);
@@ -277,6 +334,107 @@ const markdownReport = computed(() => data.value?.markdownReport || '');
 const favoriteIcon = computed(() => buildIconSrc('Star', isFavorited.value ? '#ffffff' : '#b45309'));
 const PUBLIC_FIGURE_TERM = ['张', '雪', '峰'].join('');
 const FIXED_NOTICE_TITLE = ['免', '责', '声', '明'].join('');
+
+type ReportTutorialKey =
+  | 'summary'
+  | 'tabs'
+  | 'rush'
+  | 'stable'
+  | 'safe'
+  | 'school'
+  | 'askSchool'
+  | 'reportTab'
+  | 'download'
+  | 'followup'
+  | 'knowledge';
+
+const reportTutorialSteps: Array<{
+  key: ReportTutorialKey;
+  title: string;
+  desc: string;
+  actionText?: string;
+}> = [
+  {
+    key: 'summary',
+    title: '先看总体判断',
+    desc: '这里是本次模拟报志愿的结论摘要，先判断整体方向，再往下看冲稳保结构。',
+  },
+  {
+    key: 'rush',
+    title: '点击查看冲刺建议',
+    desc: '冲刺建议适合争取更高层次院校，重点看专业组、调剂和退档风险。',
+    actionText: '展开冲刺',
+  },
+  {
+    key: 'stable',
+    title: '再看稳妥建议',
+    desc: '稳妥建议通常是方案主体，录取概率和专业选择会更均衡。',
+    actionText: '展开稳妥',
+  },
+  {
+    key: 'safe',
+    title: '最后看保底建议',
+    desc: '保底建议用来守住底线，填报前要确认城市、专业和学费都能接受。',
+    actionText: '展开保底',
+  },
+  {
+    key: 'school',
+    title: '点大学看详情',
+    desc: '点开任意大学，可以查看院校资料；在院校详情底部也能继续问这所学校。',
+  },
+  {
+    key: 'askSchool',
+    title: '不确定就问这所学校',
+    desc: '这里会带着本次报告背景进入 AI 追问，直接问它适合冲、稳还是保。',
+    actionText: '现在追问',
+  },
+  {
+    key: 'reportTab',
+    title: '还能看完整报告',
+    desc: '切换到完整报告，会看到更完整的分析、偏好与风险、冲稳保速览。',
+    actionText: '打开完整报告',
+  },
+  {
+    key: 'download',
+    title: '保存或下载报告',
+    desc: '完整报告可以生成 PDF 或长图。同一份报告重复保存，不会重复扣点。',
+  },
+  {
+    key: 'followup',
+    title: '用 AI 追问继续细化',
+    desc: '点继续追问会自动带上报告上下文，适合比较学校、专业组和最终排序。',
+    actionText: '去AI追问',
+  },
+  {
+    key: 'knowledge',
+    title: '资料库用来查依据',
+    desc: '底部 AI追问适合做决策比较；资料库可以查院校、专业和政策原始资料。',
+    actionText: '打开资料库',
+  },
+];
+
+const currentReportTutorialStep = computed(() => reportTutorialSteps[reportTutorialStep.value] || reportTutorialSteps[0]);
+const reportTutorialProgressText = computed(() => `${reportTutorialStep.value + 1}/${reportTutorialSteps.length}`);
+const reportTutorialPrimaryText = computed(() => reportTutorialStep.value >= reportTutorialSteps.length - 1 ? '完成' : '下一步');
+const reportTutorialCardPlacement = computed(() => {
+  const key = currentReportTutorialStep.value.key;
+  return key === 'followup' || key === 'knowledge' ? 'top' : 'bottom';
+});
+const reportTutorialSchool = computed(() => {
+  const preferredOrder = ['stable', 'rush', 'safe'];
+  for (const key of preferredOrder) {
+    const group = groups.value.find(item => item.key === key);
+    if (group?.items?.length) return group.items[0];
+  }
+  return null;
+});
+const reportTutorialSchoolGroupKey = computed(() => {
+  const school = reportTutorialSchool.value;
+  if (!school) return '';
+  const schoolKey = school.universityId || school.universityName;
+  const group = groups.value.find(item => item.items.some((candidate: any) => (candidate.universityId || candidate.universityName) === schoolKey));
+  return group?.key || '';
+});
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -343,6 +501,22 @@ const displayReportTitle = computed(() => data.value?.title || reportTitle.value
 const isArtReport = computed(() => {
   const source = data.value?.input || data.value;
   return source?.examCategory === 'art';
+});
+
+const hasFallbackRecommendations = computed(() => {
+  const recommendations = result.value?.recommendations || {};
+  return ['rush', 'stable', 'safe'].some(key =>
+    (recommendations[key] || []).some((item: any) =>
+      (item.optionLines || []).some((line: any) => line?.lineType === 'art_fallback') ||
+      (item.optionLines || []).some((line: any) => line?.lineType === 'normal_fallback') ||
+      (item.warningTags || []).includes('资料候选'),
+    ),
+  );
+});
+
+const recommendationBasisText = computed(() => {
+  if (hasFallbackRecommendations.value) return '投档线/院校库';
+  return isArtReport.value ? '艺术投档线' : '历年录取线';
 });
 
 const groups = computed(() => {
@@ -428,6 +602,13 @@ function currentReportId() {
   return data.value?.id || data.value?.reportId || '';
 }
 
+function setActiveReportTab(tab: 'cards' | 'report') {
+  activeTab.value = tab;
+  if (tab === 'report' && reportTutorialOpen.value && currentReportTutorialStep.value.key === 'reportTab') {
+    advanceReportTutorial();
+  }
+}
+
 async function downloadReport(type: 'pdf' | 'image') {
   const reportId = currentReportId();
   if (!reportId) {
@@ -492,6 +673,16 @@ function toggleGroup(key: string) {
   collapsedGroups.value = Object.assign({}, collapsedGroups.value, {
     [key]: !collapsedGroups.value[key],
   });
+}
+
+function handleGroupToggle(key: string) {
+  toggleGroup(key);
+  if (reportTutorialOpen.value && currentReportTutorialStep.value.key === key) {
+    if (collapsedGroups.value[key]) {
+      toggleGroup(key);
+    }
+    advanceReportTutorial();
+  }
 }
 
 function isGroupCollapsed(key: string) {
@@ -640,6 +831,7 @@ async function loadReport(id?: string) {
     data.value = latest;
     if (latest.input || !id) {
       await loadFavoriteState();
+      maybeOpenReportTutorial(id);
       return;
     }
   }
@@ -650,9 +842,185 @@ async function loadReport(id?: string) {
     data.value = res.data;
     uni.setStorageSync('latest_volunteer_report', res.data);
     await loadFavoriteState();
+    maybeOpenReportTutorial(id);
   } catch (err: any) {
     uni.showToast({ title: err?.message || '报告加载失败', icon: 'none' });
   }
+}
+
+function maybeOpenReportTutorial(id?: string) {
+  const pending = uni.getStorageSync('volunteer_report_tutorial_pending');
+  if (!pending) return;
+  const pendingId = String((pending as any)?.reportId || '');
+  const createdAt = Number((pending as any)?.at || 0);
+  const expired = createdAt > 0 && Date.now() - createdAt > 10 * 60 * 1000;
+  const currentId = id || currentReportId();
+  if (expired || (pendingId && currentId && pendingId !== currentId)) {
+    uni.removeStorageSync('volunteer_report_tutorial_pending');
+    return;
+  }
+  uni.removeStorageSync('volunteer_report_tutorial_pending');
+  setTimeout(() => {
+    openReportTutorial();
+  }, 360);
+}
+
+function openReportTutorial() {
+  reportTutorialStep.value = 0;
+  reportTutorialOpen.value = true;
+  prepareReportTutorialStep();
+}
+
+function finishReportTutorial() {
+  reportTutorialOpen.value = false;
+}
+
+function reportTutorialFocusVisible(key: ReportTutorialKey) {
+  return reportTutorialOpen.value && currentReportTutorialStep.value.key === key;
+}
+
+function reportTutorialTargetClass(key: ReportTutorialKey) {
+  return {
+    'report-tutorial-target': reportTutorialFocusVisible(key),
+  };
+}
+
+function reportTutorialSchoolId(item: any) {
+  return isReportTutorialSchool(item) ? 'report-guide-school' : '';
+}
+
+function reportTutorialAskSchoolId(item: any) {
+  return isReportTutorialSchool(item) ? 'report-guide-ask-school' : '';
+}
+
+function reportTutorialSchoolTargetClass(item: any) {
+  return {
+    'report-tutorial-target': reportTutorialFocusVisible('school') && isReportTutorialSchool(item),
+  };
+}
+
+function reportTutorialAskSchoolTargetClass(item: any) {
+  return {
+    'report-tutorial-target': reportTutorialFocusVisible('askSchool') && isReportTutorialSchool(item),
+  };
+}
+
+function isReportTutorialSchool(item: any) {
+  const target = reportTutorialSchool.value;
+  if (!target || !item) return false;
+  const targetKey = target.universityId || target.universityName;
+  const itemKey = item.universityId || item.universityName;
+  return Boolean(targetKey && itemKey && targetKey === itemKey);
+}
+
+function handleReportTutorialPrimary() {
+  if (currentReportTutorialStep.value.key === 'reportTab') {
+    setActiveReportTab('report');
+    return;
+  }
+  if (reportTutorialStep.value >= reportTutorialSteps.length - 1) {
+    finishReportTutorial();
+    return;
+  }
+  advanceReportTutorial();
+}
+
+function handleReportTutorialAction() {
+  const key = currentReportTutorialStep.value.key;
+  if (key === 'rush' || key === 'stable' || key === 'safe') {
+    collapsedGroups.value = Object.assign({}, collapsedGroups.value, { [key]: false });
+    advanceReportTutorial();
+    return;
+  }
+  if (key === 'askSchool') {
+    const school = reportTutorialSchool.value;
+    if (school) askAboutSchool(school);
+    return;
+  }
+  if (key === 'reportTab') {
+    setActiveReportTab('report');
+    return;
+  }
+  if (key === 'followup') {
+    askFollowup();
+    return;
+  }
+  if (key === 'knowledge') {
+    finishReportTutorial();
+    uni.switchTab({ url: '/pages/knowledge/index' });
+  }
+}
+
+function advanceReportTutorial() {
+  if (reportTutorialStep.value >= reportTutorialSteps.length - 1) {
+    finishReportTutorial();
+    return;
+  }
+  reportTutorialStep.value += 1;
+  skipUnavailableReportTutorialSteps();
+  prepareReportTutorialStep();
+}
+
+function skipUnavailableReportTutorialSteps() {
+  while (
+    reportTutorialStep.value < reportTutorialSteps.length - 1 &&
+    reportTutorialStepUnavailable(currentReportTutorialStep.value.key)
+  ) {
+    reportTutorialStep.value += 1;
+  }
+}
+
+function reportTutorialStepUnavailable(key: ReportTutorialKey) {
+  if (key === 'school' || key === 'askSchool') return !reportTutorialSchool.value;
+  return false;
+}
+
+function prepareReportTutorialStep() {
+  nextTick(() => {
+    const key = currentReportTutorialStep.value.key;
+    if (key === 'rush' || key === 'stable' || key === 'safe') {
+      activeTab.value = 'cards';
+      collapsedGroups.value = Object.assign({}, collapsedGroups.value, { [key]: false });
+    }
+    if (key === 'school' || key === 'askSchool') {
+      activeTab.value = 'cards';
+      const groupKey = reportTutorialSchoolGroupKey.value;
+      if (groupKey) {
+        collapsedGroups.value = Object.assign({}, collapsedGroups.value, { [groupKey]: false });
+      }
+    }
+    if (key === 'reportTab') {
+      activeTab.value = 'cards';
+    }
+    if (key === 'download' || key === 'followup') {
+      activeTab.value = 'report';
+    }
+    nextTick(() => {
+      scrollToReportTutorialTarget();
+    });
+  });
+}
+
+function scrollToReportTutorialTarget() {
+  const selector = reportTutorialTargetSelector();
+  if (!selector) return;
+  uni.pageScrollTo({
+    selector,
+    offsetTop: -120,
+    duration: 260,
+  } as any);
+}
+
+function reportTutorialTargetSelector() {
+  const key = currentReportTutorialStep.value.key;
+  if (key === 'summary') return '#report-guide-summary';
+  if (key === 'rush' || key === 'stable' || key === 'safe') return `#report-guide-${key}`;
+  if (key === 'school') return '#report-guide-school';
+  if (key === 'askSchool') return '#report-guide-ask-school';
+  if (key === 'reportTab') return '#report-guide-tabs';
+  if (key === 'download') return '#report-guide-download';
+  if (key === 'followup') return '#report-guide-followup';
+  return '';
 }
 
 function collapseAllGroups() {
@@ -801,11 +1169,16 @@ function buildReportConsultContext(school?: any) {
 }
 
 function openUniversity(item: any) {
-  if (!item?.universityId) {
-    uni.showToast({ title: '该院校暂缺详情', icon: 'none' });
+  if (!hasUniversityDetail(item)) {
+    askAboutSchool(item);
     return;
   }
   uni.navigateTo({ url: `/pages/universities/detail?id=${item.universityId}` });
+}
+
+function hasUniversityDetail(item: any) {
+  const id = String(item?.universityId || '').trim();
+  return Boolean(id && id !== 'null' && id !== 'undefined');
 }
 
 function cardMetaChips(item: any) {
@@ -1045,9 +1418,34 @@ onShareTimeline(() => {
 }
 
 .summary-card {
+  position: relative;
   border-color: rgba(111, 125, 74, 0.14);
   background: linear-gradient(135deg, #edf3e8 0%, #ffffff 58%, #fff7eb 100%);
   box-shadow: 0 14rpx 34rpx rgba(15, 23, 42, 0.05);
+}
+
+.report-tutorial-target {
+  position: relative;
+  z-index: 8891;
+  border-radius: 20rpx;
+  box-shadow: 0 0 0 6rpx rgba(20, 184, 166, 0.24), 0 0 0 16rpx rgba(20, 184, 166, 0.08), 0 18rpx 42rpx rgba(15, 23, 42, 0.20);
+  animation: reportTutorialGlow 1.08s ease-in-out infinite;
+}
+
+.report-tutorial-target::before {
+  content: "";
+  position: absolute;
+  inset: -10rpx;
+  border: 3rpx solid rgba(20, 184, 166, 0.82);
+  border-radius: 24rpx;
+  pointer-events: none;
+  animation: reportTutorialBorder 1.08s ease-in-out infinite;
+}
+
+.tab.report-tutorial-target,
+.school-ask-btn.report-tutorial-target,
+.primary-btn.report-tutorial-target {
+  z-index: 8891;
 }
 
 .decision-card {
@@ -1170,6 +1568,172 @@ onShareTimeline(() => {
   background: rgba(255, 255, 255, 0.82);
 }
 
+.report-tutorial-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 8888;
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.report-tutorial-card {
+  position: fixed;
+  left: 24rpx;
+  right: 24rpx;
+  bottom: calc(24rpx + env(safe-area-inset-bottom));
+  z-index: 8892;
+  padding: 24rpx;
+  box-sizing: border-box;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1rpx solid rgba(15, 118, 110, 0.18);
+  box-shadow: 0 28rpx 72rpx rgba(15, 23, 42, 0.22);
+}
+
+.report-tutorial-card.top {
+  top: calc(24rpx + env(safe-area-inset-top));
+  bottom: auto;
+}
+
+.report-tutorial-card.bottom {
+  top: auto;
+  bottom: calc(24rpx + env(safe-area-inset-bottom));
+}
+
+.report-tutorial-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.report-tutorial-kicker {
+  color: #0f766e;
+  font-size: 22rpx;
+  font-weight: 900;
+}
+
+.report-tutorial-close {
+  width: 48rpx;
+  height: 48rpx;
+  color: #94a3b8;
+  font-size: 44rpx;
+  line-height: 42rpx;
+  text-align: center;
+}
+
+.report-tutorial-title {
+  display: block;
+  margin-top: 4rpx;
+  color: $text-primary;
+  font-size: 32rpx;
+  font-weight: 900;
+  line-height: 1.24;
+}
+
+.report-tutorial-desc {
+  display: block;
+  margin-top: 10rpx;
+  color: $text-secondary;
+  font-size: 25rpx;
+  line-height: 1.42;
+}
+
+.report-tutorial-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+  margin-top: 18rpx;
+}
+
+.report-tutorial-skip,
+.report-tutorial-link,
+.report-tutorial-primary {
+  padding: 12rpx 22rpx;
+  border-radius: $radius-full;
+  font-size: 25rpx;
+  font-weight: 900;
+}
+
+.report-tutorial-skip {
+  color: #64748b;
+}
+
+.report-tutorial-link {
+  margin-left: auto;
+  background: #eef4e8;
+  color: #0f766e;
+}
+
+.report-tutorial-primary {
+  background: #0f766e;
+  color: #fff;
+}
+
+.report-tutorial-dots {
+  display: flex;
+  gap: 8rpx;
+  margin-top: 16rpx;
+}
+
+.report-tutorial-dots text {
+  width: 26rpx;
+  height: 7rpx;
+  border-radius: $radius-full;
+  background: #e2e8f0;
+}
+
+.report-tutorial-dots text.active {
+  width: 48rpx;
+  background: #0f766e;
+}
+
+.report-tutorial-nav-target {
+  position: fixed;
+  left: 24rpx;
+  right: 24rpx;
+  bottom: calc(14rpx + env(safe-area-inset-bottom));
+  z-index: 8891;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12rpx;
+  padding: 14rpx;
+  box-sizing: border-box;
+  border-radius: 22rpx;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1rpx solid rgba(15, 118, 110, 0.18);
+}
+
+.report-tutorial-nav-item {
+  padding: 16rpx 14rpx;
+  border-radius: 18rpx;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.report-tutorial-nav-item.ai {
+  background: #f5f3ff;
+}
+
+.report-tutorial-nav-item.knowledge {
+  background: #ecfdf5;
+}
+
+.nav-item-title {
+  display: block;
+  color: $text-primary;
+  font-size: 25rpx;
+  font-weight: 900;
+}
+
+.nav-item-desc {
+  display: block;
+  margin-top: 4rpx;
+  color: $text-tertiary;
+  font-size: 20rpx;
+  line-height: 1.3;
+}
+
 .tab {
   height: 72rpx;
   line-height: 72rpx;
@@ -1272,6 +1836,10 @@ onShareTimeline(() => {
   border-color: rgba(120, 146, 98, 0.18);
 }
 
+.school-card.no-detail {
+  background: rgba(255, 255, 255, 0.64);
+}
+
 .school-top {
   display: flex;
   align-items: flex-start;
@@ -1357,6 +1925,13 @@ onShareTimeline(() => {
   line-height: 1;
 }
 
+.school-arrow.muted {
+  padding-top: 4rpx;
+  color: #c08457;
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
 .reason {
   display: -webkit-box;
   overflow: hidden;
@@ -1375,13 +1950,19 @@ onShareTimeline(() => {
 }
 
 .school-ask-btn {
-  padding: 9rpx 18rpx;
-  border-radius: $radius-full;
-  background: #eef4e8;
-  color: #60723f;
-  border: 1rpx solid rgba(111, 125, 74, 0.20);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 174rpx;
+  height: 54rpx;
+  padding: 0 20rpx;
+  box-sizing: border-box;
+  border-radius: 14rpx;
+  background: linear-gradient(135deg, #0f766e 0%, #7c3aed 100%);
+  color: #fff;
   font-size: 23rpx;
-  font-weight: 800;
+  font-weight: 900;
+  box-shadow: 0 10rpx 22rpx rgba(15, 118, 110, 0.18);
 }
 
 .reason {
@@ -2063,5 +2644,29 @@ onShareTimeline(() => {
   font-size: $font-sm;
   line-height: 1.75;
   word-break: break-word;
+}
+
+@keyframes reportTutorialGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 6rpx rgba(20, 184, 166, 0.24), 0 0 0 16rpx rgba(20, 184, 166, 0.08), 0 18rpx 42rpx rgba(15, 23, 42, 0.20);
+  }
+  50% {
+    box-shadow: 0 0 0 8rpx rgba(250, 204, 21, 0.52), 0 0 0 20rpx rgba(20, 184, 166, 0.14), 0 24rpx 54rpx rgba(15, 23, 42, 0.24);
+  }
+}
+
+@keyframes reportTutorialBorder {
+  0%,
+  100% {
+    border-color: rgba(20, 184, 166, 0.72);
+    opacity: 0.74;
+    transform: scale(1);
+  }
+  50% {
+    border-color: rgba(250, 204, 21, 0.98);
+    opacity: 1;
+    transform: scale(1.022);
+  }
 }
 </style>

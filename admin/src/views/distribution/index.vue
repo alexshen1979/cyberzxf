@@ -218,7 +218,7 @@
                   <template #default="{ row: child }">{{ child._count?.referrals || 0 }}</template>
                 </el-table-column>
                 <el-table-column label="奖励单" width="90">
-                  <template #default="{ row: child }">{{ child._count?.commissions || 0 }}</template>
+                  <template #default="{ row: child }">{{ rewardLedgerCount(child) }}</template>
                 </el-table-column>
                 <el-table-column label="注册现金奖励" width="120">
                   <template #default="{ row: child }">
@@ -239,7 +239,7 @@
                   <template #default="{ row: child }">
                     <el-button v-if="child.status === 'pending'" type="success" link @click="reviewDistributor(child, 'active')">通过</el-button>
                     <el-button v-if="child.status === 'pending'" type="danger" link @click="reviewDistributor(child, 'rejected')">驳回</el-button>
-                    <el-button v-if="store.isFullAdmin" type="primary" link @click="openLedgerDialog(child)">流水</el-button>
+                    <el-button v-if="canViewLedger(child)" type="primary" link @click="openLedgerDialog(child)">流水</el-button>
                     <el-button type="primary" link @click="openDistributorDialog(child)">编辑</el-button>
                   </template>
                 </el-table-column>
@@ -288,7 +288,7 @@
           <template #default="{ row }">{{ row._count?.children || 0 }}</template>
         </el-table-column>
         <el-table-column label="奖励单" width="90">
-          <template #default="{ row }">{{ row._count?.commissions || 0 }}</template>
+          <template #default="{ row }">{{ rewardLedgerCount(row) }}</template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
@@ -304,7 +304,7 @@
             <template v-if="!row.isGroup">
               <el-button v-if="row.status === 'pending'" type="success" link @click="reviewDistributor(row, 'active')">通过</el-button>
               <el-button v-if="row.status === 'pending'" type="danger" link @click="reviewDistributor(row, 'rejected')">驳回</el-button>
-              <el-button v-if="store.isFullAdmin" type="primary" link @click="openLedgerDialog(row)">流水</el-button>
+              <el-button v-if="canViewLedger(row)" type="primary" link @click="openLedgerDialog(row)">流水</el-button>
               <el-button type="primary" link @click="openDistributorDialog(row)">编辑</el-button>
             </template>
             <span v-else>--</span>
@@ -438,21 +438,22 @@
         <el-table-column label="订单" min-width="210">
           <template #default="{ row }">
             <div class="main-cell">
-              <strong>{{ row.order?.productName || '-' }}</strong>
-              <span>{{ row.order?.orderNo || row.orderId }}</span>
+              <strong>{{ ledgerTitle(row) }}</strong>
+              <span>{{ ledgerSubtitle(row) }}</span>
             </div>
           </template>
         </el-table-column>
         <el-table-column label="订单金额" width="110">
-          <template #default="{ row }">{{ formatMoney(row.order?.amount || 0) }}</template>
+          <template #default="{ row }">{{ ledgerOrderAmount(row) }}</template>
         </el-table-column>
         <el-table-column label="支付端" width="110">
           <template #default="{ row }">
-            <el-tag :type="paymentDeviceTagType(row.order?.paymentDevice)" size="small">{{ paymentDeviceLabel(row.order?.paymentDevice) }}</el-tag>
+            <el-tag v-if="row.order" :type="paymentDeviceTagType(row.order?.paymentDevice)" size="small">{{ paymentDeviceLabel(row.order?.paymentDevice) }}</el-tag>
+            <span v-else>--</span>
           </template>
         </el-table-column>
         <el-table-column label="比例" width="90">
-          <template #default="{ row }">{{ (row.rateBps / 100).toFixed(2) }}%</template>
+          <template #default="{ row }">{{ rateLabel(row) }}</template>
         </el-table-column>
         <el-table-column label="奖励金额" width="110">
           <template #default="{ row }">
@@ -634,21 +635,22 @@
             <el-table-column label="订单" min-width="210">
               <template #default="{ row }">
                 <div class="main-cell">
-                  <strong>{{ row.order?.productName || '-' }}</strong>
-                  <span>{{ row.order?.orderNo || row.orderId }}</span>
+                  <strong>{{ ledgerTitle(row) }}</strong>
+                  <span>{{ ledgerSubtitle(row) }}</span>
                 </div>
               </template>
             </el-table-column>
             <el-table-column label="订单金额" width="110">
-              <template #default="{ row }">{{ formatMoney(row.order?.amount || 0) }}</template>
+              <template #default="{ row }">{{ ledgerOrderAmount(row) }}</template>
             </el-table-column>
             <el-table-column label="支付端" width="110">
               <template #default="{ row }">
-                <el-tag :type="paymentDeviceTagType(row.order?.paymentDevice)" size="small">{{ paymentDeviceLabel(row.order?.paymentDevice) }}</el-tag>
+                <el-tag v-if="row.order" :type="paymentDeviceTagType(row.order?.paymentDevice)" size="small">{{ paymentDeviceLabel(row.order?.paymentDevice) }}</el-tag>
+                <span v-else>--</span>
               </template>
             </el-table-column>
             <el-table-column label="比例" width="90">
-              <template #default="{ row }">{{ (row.rateBps / 100).toFixed(2) }}%</template>
+              <template #default="{ row }">{{ rateLabel(row) }}</template>
             </el-table-column>
             <el-table-column label="奖励金额" width="110">
               <template #default="{ row }">
@@ -690,7 +692,7 @@
             </el-table-column>
           </el-table>
         </el-tab-pane>
-        <el-tab-pane v-if="ledgerDistributor?.isGeneralAgent" label="总代佣金" name="generalAgent">
+        <el-tab-pane v-if="store.isFullAdmin && ledgerDistributor?.isGeneralAgent" label="总代佣金" name="generalAgent">
           <div class="agent-summary" v-if="ledgerGeneralAgentSummary">
             <div><span>下级合伙人</span><strong>{{ ledgerGeneralAgentSummary.childPartnerCount || 0 }}</strong></div>
             <div><span>佣金总额</span><strong>{{ formatMoney(ledgerGeneralAgentSummary.commissionAmount || 0) }}</strong></div>
@@ -1087,8 +1089,8 @@ async function openLedgerDialog(row: any) {
   await Promise.all([
     loadLedgerCommissions(),
     loadLedgerWithdrawals(),
-    row.isGeneralAgent ? loadLedgerGeneralAgentCommissions() : Promise.resolve(),
-    row.isGeneralAgent ? loadLedgerGeneralAgentSummary() : Promise.resolve(),
+    store.isFullAdmin && row.isGeneralAgent ? loadLedgerGeneralAgentCommissions() : Promise.resolve(),
+    store.isFullAdmin && row.isGeneralAgent ? loadLedgerGeneralAgentSummary() : Promise.resolve(),
   ]);
 }
 
@@ -1344,6 +1346,7 @@ function statusTagType(status: string) {
 }
 
 function roleLabel(role: string) {
+  if (role === 'registration_reward') return '注册现金奖励';
   if (role === 'level1_direct') return '直接推荐奖励';
   if (role === 'level2_direct') return '推荐奖励';
   if (role === 'level1_override') return '合作伙伴奖励';
@@ -1351,6 +1354,34 @@ function roleLabel(role: string) {
   if (role === 'level2_recurring_direct') return '复充推荐奖励';
   if (role === 'level1_recurring_override') return '复充合作伙伴奖励';
   return role;
+}
+
+function canViewLedger(row: any) {
+  return store.isFullAdmin || (store.isEditor && !row?.isGroup);
+}
+
+function rewardLedgerCount(row: any) {
+  return Number(row._count?.commissions || 0) + Number(row._count?.registrationRewards || 0);
+}
+
+function rateLabel(row: any) {
+  return row.rateBps || row.rateBps === 0 ? `${(Number(row.rateBps || 0) / 100).toFixed(2)}%` : '--';
+}
+
+function ledgerTitle(row: any) {
+  if (row.sourceType === 'registration_reward') return '邀请注册奖励';
+  return row.order?.productName || '-';
+}
+
+function ledgerSubtitle(row: any) {
+  if (row.sourceType === 'registration_reward') {
+    return `邀请码 ${row.shareReferral?.sourceCode || row.distributor?.code || '--'}`;
+  }
+  return row.order?.orderNo || row.orderId || '--';
+}
+
+function ledgerOrderAmount(row: any) {
+  return row.order ? formatMoney(row.order.amount || 0) : '--';
 }
 
 function percentLabel(rateBps: number) {

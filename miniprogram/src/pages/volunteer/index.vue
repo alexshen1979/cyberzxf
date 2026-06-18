@@ -2,58 +2,72 @@
   <view class="volunteer-page">
     <view class="hero">
       <view class="hero-top">
-        <text class="eyebrow">AI 志愿分析</text>
+        <text class="eyebrow">模拟报志愿</text>
         <view class="points-pill" @click="handlePointsPill">
           <text>{{ pointsPillText }}</text>
         </view>
       </view>
       <text class="title">拉平信息差，拒绝迷茫，多些清晰</text>
-      <text class="hero-desc">输入成绩与位次，先把范围、风险和下一步看清楚。</text>
+      <text class="hero-desc">输入成绩与位次，先把范围和风险看清楚。</text>
+      <view class="guide-entry" @click="openTutorial(true)">
+        <text class="guide-entry-main">第一次用？跟着 6 步生成方案</text>
+        <text class="guide-entry-action">查看引导</text>
+      </view>
     </view>
 
     <view class="mock-card">
-      <view class="mock-head">
-        <text class="mock-title">模拟报志愿</text>
-        <view class="category-switch">
-          <view class="radio-option" :class="{ active: examCategory === 'normal' }" @click="examCategory = 'normal'">
-            <text class="radio-dot"></text>
-            <text>普通类</text>
-          </view>
-          <view class="radio-option" :class="{ active: examCategory === 'art' }" @click="examCategory = 'art'">
-            <text class="radio-dot"></text>
-            <text>艺术类</text>
+      <view class="form-step">
+        <view class="step-row">
+          <text class="step-badge">1</text>
+          <text class="step-title">选择报考类型</text>
+          <view class="step-spacer"></view>
+          <view id="guide-category-target" class="category-switch" :class="tutorialTapTargetClass('category')">
+            <view class="radio-option" :class="{ active: examCategory === 'normal' }" @click="setExamCategory('normal')">
+              <text class="radio-dot"></text>
+              <text>普通类</text>
+            </view>
+            <view class="radio-option" :class="{ active: examCategory === 'art' }" @click="setExamCategory('art')">
+              <text class="radio-dot"></text>
+              <text>艺术类</text>
+            </view>
+            <text v-if="tutorialFocusVisible('category')" class="tutorial-hit-label">{{ currentTutorialStep.hint }}</text>
           </view>
         </view>
       </view>
 
-      <view class="meta-row">
-        <view class="meta-pill" @click="provincePanelOpen = !provincePanelOpen">
-          <text>{{ form.province || '选择省份' }}</text>
+      <view class="form-step">
+        <view class="step-row province-step-row" :class="tutorialTargetClass('province')">
+          <text class="step-badge">2</text>
+          <text class="step-title">确认高考省份</text>
+          <view class="step-spacer"></view>
+          <view id="guide-province-target" class="meta-pill" :class="tutorialTapTargetClass('province')" @click="provincePanelOpen = !provincePanelOpen">
+            <text>{{ form.province || '选择省份' }}</text>
+            <text v-if="tutorialFocusVisible('province')" class="tutorial-hit-label">{{ currentTutorialStep.hint }}</text>
+          </view>
         </view>
-        <view class="meta-pill ghost" @click="openProvincePanel">
-          <text>手动选择</text>
-        </view>
-      </view>
-      <text
-        v-if="locationStatus"
-        class="location-status"
-        :class="locationStatusTone"
-      >{{ locationStatus }}</text>
-
-      <view class="province-tags" v-if="provincePanelOpen">
         <text
-          v-for="item in provinceOptions"
-          :key="item"
-          class="province-tag"
-          :class="{ active: form.province === item }"
-          @click="selectProvince(item)"
-        >{{ item }}</text>
+          v-if="locationStatus"
+          class="location-status"
+          :class="locationStatusTone"
+        >{{ locationStatus }}</text>
+
+        <view class="province-tags" :class="{ 'tutorial-floating-options': tutorialFocusVisible('province') }" v-if="provincePanelOpen">
+          <text
+            v-for="item in provinceOptions"
+            :key="item"
+            class="province-tag"
+            :class="{ active: form.province === item }"
+            @click="selectProvince(item)"
+          >{{ item }}</text>
+        </view>
       </view>
 
-      <view v-if="examCategory === 'normal'" class="subject-area">
-        <view class="level-row">
-          <text class="field-label">{{ selectionMode === 'legacy' ? '高考科类' : '选科' }}</text>
-          <view class="category-switch compact">
+      <view class="form-step">
+        <view class="step-row">
+          <text class="step-badge">3</text>
+          <text class="step-title">{{ examCategory === 'art' ? '专业类别与科目' : '批次与选科' }}</text>
+          <view class="step-spacer"></view>
+          <view v-if="examCategory === 'normal'" class="category-switch compact">
             <view class="radio-option" :class="{ active: admissionLevel === '本科' }" @click="setAdmissionLevel('本科')">
               <text class="radio-dot"></text>
               <text>本科</text>
@@ -63,244 +77,295 @@
               <text>专科</text>
             </view>
           </view>
-        </view>
-
-        <view v-if="selectionMode === 'six-three'" class="subject-block">
-          <view class="field-label-row">
-            <text class="field-hint">6选3</text>
-          </view>
-          <view class="choice-grid three">
-            <view
-              v-for="item in subjectPool"
-              :key="item"
-              class="choice-chip"
-              :class="{ active: comprehensiveSubjects.includes(item), disabled: !comprehensiveSubjects.includes(item) && comprehensiveSubjects.length >= 3 }"
-              @click="toggleComprehensiveSubject(item)"
-            >
-              <text>{{ item }}</text>
-            </view>
-          </view>
-        </view>
-
-        <view v-else-if="selectionMode === 'two-one-four-two'" class="subject-block split">
-          <view class="subject-line">
-            <view class="field-label-row compact">
-              <text class="field-label">首选</text>
-              <text class="field-hint">2选1</text>
-            </view>
-            <view class="choice-row">
-              <view
-                v-for="item in firstChoiceOptions"
-                :key="item"
-                class="choice-chip small"
-                :class="{ active: firstSubject === item }"
-                @click="selectFirstSubject(item)"
-              >
-                <text>{{ item }}</text>
-              </view>
-            </view>
-          </view>
-          <view class="subject-line">
-            <view class="field-label-row compact">
-              <text class="field-label">次选</text>
-              <text class="field-hint">4选2</text>
-            </view>
-            <view class="choice-row wrap">
-              <view
-                v-for="item in secondChoiceOptions"
-                :key="item"
-                class="choice-chip small"
-                :class="{ active: secondarySubjects.includes(item), disabled: !secondarySubjects.includes(item) && secondarySubjects.length >= 2 }"
-                @click="toggleSecondarySubject(item)"
-              >
-                <text>{{ item }}</text>
-              </view>
-            </view>
-          </view>
-        </view>
-
-        <view v-else class="subject-block">
-          <view class="field-label-row">
-            <text class="field-hint">按省份规则</text>
-          </view>
-          <view class="choice-row wrap">
-            <view
-              v-for="item in subjectOptions"
-              :key="item"
-              class="choice-chip"
-              :class="{ active: form.subjectType === item }"
-              @click="form.subjectType = item"
-            >
-              <text>{{ item }}</text>
-            </view>
-          </view>
-        </view>
-
-        <view class="score-title">分数</view>
-        <view class="input-grid">
-          <view class="score-input">
-            <text class="input-mark">分</text>
-            <input v-model.number="form.score" type="number" :placeholder="cultureScorePlaceholder" @input="handleScoreInput" />
-          </view>
-          <view class="score-input">
-            <text class="input-mark">位</text>
-            <input v-model.number="form.rank" type="number" :placeholder="rankPlaceholder" @input="handleRankInput" />
-          </view>
-        </view>
-        <text class="rank-lookup-tip" :class="rankLookupState">{{ rankLookupMessage }}</text>
-      </view>
-
-      <view v-else class="art-area">
-        <view class="field-label-row art-category-head">
-          <text class="field-label">专业类别</text>
-          <view class="meta-pill art-category-pill" @click="artMajorPanelOpen = !artMajorPanelOpen">
-            <text>{{ currentArtCategory }}</text>
-          </view>
-        </view>
-        <view class="province-tags art-category-tags" v-if="artMajorPanelOpen">
-          <text
-            v-for="(item, index) in artMajorOptions"
-            :key="item"
-            class="province-tag art-category-tag"
-            :class="{ active: artMajorIndex === index }"
-            @click="selectArtMajorByIndex(index)"
-          >{{ item }}</text>
-        </view>
-
-        <view class="score-input full">
-          <text class="input-mark">分</text>
-          <input v-model.number="artScore" type="number" :placeholder="artScorePlaceholder" @input="handleArtScoreInput" />
-        </view>
-
-        <view class="art-line">
-          <text class="field-label">高考科目</text>
-          <view class="category-switch compact">
-            <view class="radio-option" :class="{ active: artLevel === '本科' }" @click="artLevel = '本科'">
+          <view v-else class="category-switch compact">
+            <view class="radio-option" :class="{ active: artLevel === '本科' }" @click="setArtLevel('本科')">
               <text class="radio-dot"></text>
               <text>本科</text>
             </view>
-            <view class="radio-option" :class="{ active: artLevel === '专科' }" @click="artLevel = '专科'">
+            <view class="radio-option" :class="{ active: artLevel === '专科' }" @click="setArtLevel('专科')">
               <text class="radio-dot"></text>
               <text>专科</text>
             </view>
           </view>
         </view>
 
-        <view v-if="selectionMode === 'six-three'" class="subject-block">
-          <view class="field-label-row">
-            <text class="field-hint">6选3</text>
-          </view>
-          <view class="choice-grid three">
-            <view
-              v-for="item in subjectPool"
-              :key="item"
-              class="choice-chip"
-              :class="{ active: comprehensiveSubjects.includes(item), disabled: !comprehensiveSubjects.includes(item) && comprehensiveSubjects.length >= 3 }"
-              @click="toggleComprehensiveSubject(item)"
-            >
-              <text>{{ item }}</text>
+        <view v-if="examCategory === 'normal'" class="subject-area" :class="tutorialTargetClass('subjects')">
+          <view
+            v-if="selectionMode === 'six-three'"
+            id="guide-subjects-target"
+            class="subject-block"
+            :class="tutorialTapTargetClass('subjects')"
+          >
+            <view class="field-label-row">
+              <text class="field-hint">6选3</text>
             </view>
-          </view>
-        </view>
-
-        <view v-else-if="selectionMode === 'two-one-four-two'" class="subject-block split">
-          <view class="subject-line">
-            <view class="field-label-row compact">
-              <text class="field-label">首选</text>
-              <text class="field-hint">2选1</text>
-            </view>
-            <view class="choice-row">
+            <view class="choice-grid three">
               <view
-                v-for="item in firstChoiceOptions"
+                v-for="item in subjectPool"
                 :key="item"
-                class="choice-chip small"
-                :class="{ active: firstSubject === item }"
-                @click="selectFirstSubject(item)"
+                class="choice-chip"
+                :class="{ active: comprehensiveSubjects.includes(item), disabled: !comprehensiveSubjects.includes(item) && comprehensiveSubjects.length >= 3 }"
+                @click="toggleComprehensiveSubject(item)"
               >
                 <text>{{ item }}</text>
               </view>
             </view>
+            <text v-if="tutorialFocusVisible('subjects')" class="tutorial-hit-label">{{ currentTutorialStep.hint }}</text>
           </view>
-          <view class="subject-line">
-            <view class="field-label-row compact">
-              <text class="field-label">次选</text>
-              <text class="field-hint">4选2</text>
+
+          <view
+            v-else-if="selectionMode === 'two-one-four-two'"
+            id="guide-subjects-target"
+            class="subject-block split"
+            :class="tutorialTapTargetClass('subjects')"
+          >
+            <view class="subject-line">
+              <view class="field-label-row compact">
+                <text class="field-label">首选</text>
+                <text class="field-hint">2选1</text>
+              </view>
+              <view class="choice-row">
+                <view
+                  v-for="item in firstChoiceOptions"
+                  :key="item"
+                  class="choice-chip small"
+                  :class="{ active: firstSubject === item }"
+                  @click="selectFirstSubject(item)"
+                >
+                  <text>{{ item }}</text>
+                </view>
+              </view>
+            </view>
+            <view class="subject-line">
+              <view class="field-label-row compact">
+                <text class="field-label">次选</text>
+                <text class="field-hint">4选2</text>
+              </view>
+              <view class="choice-row wrap">
+                <view
+                  v-for="item in secondChoiceOptions"
+                  :key="item"
+                  class="choice-chip small"
+                  :class="{ active: secondarySubjects.includes(item), disabled: !secondarySubjects.includes(item) && secondarySubjects.length >= 2 }"
+                  @click="toggleSecondarySubject(item)"
+                >
+                  <text>{{ item }}</text>
+                </view>
+              </view>
+            </view>
+            <text v-if="tutorialFocusVisible('subjects')" class="tutorial-hit-label">{{ currentTutorialStep.hint }}</text>
+          </view>
+
+          <view
+            v-else
+            id="guide-subjects-target"
+            class="subject-block"
+            :class="tutorialTapTargetClass('subjects')"
+          >
+            <view class="field-label-row">
+              <text class="field-hint">按省份规则</text>
             </view>
             <view class="choice-row wrap">
               <view
-                v-for="item in secondChoiceOptions"
+                v-for="item in subjectOptions"
                 :key="item"
-                class="choice-chip small"
-                :class="{ active: secondarySubjects.includes(item), disabled: !secondarySubjects.includes(item) && secondarySubjects.length >= 2 }"
-                @click="toggleSecondarySubject(item)"
+                class="choice-chip"
+                :class="{ active: form.subjectType === item }"
+                @click="selectSubjectType(item)"
+              >
+                <text>{{ item }}</text>
+              </view>
+            </view>
+            <text v-if="tutorialFocusVisible('subjects')" class="tutorial-hit-label">{{ currentTutorialStep.hint }}</text>
+          </view>
+        </view>
+
+        <view v-else class="art-area" :class="tutorialTargetClass('subjects')">
+          <view
+            id="guide-subjects-target"
+            class="field-label-row art-category-head"
+            :class="tutorialTapTargetClass('subjects')"
+          >
+            <text class="field-label">专业类别</text>
+            <view class="meta-pill art-category-pill" @click="artMajorPanelOpen = !artMajorPanelOpen">
+              <text>{{ currentArtCategory }}</text>
+            </view>
+            <text v-if="tutorialFocusVisible('subjects')" class="tutorial-hit-label">{{ currentTutorialStep.hint }}</text>
+          </view>
+          <view class="province-tags art-category-tags" :class="{ 'tutorial-floating-options': tutorialFocusVisible('subjects') }" v-if="artMajorPanelOpen">
+            <text
+              v-for="(item, index) in artMajorOptions"
+              :key="item"
+              class="province-tag art-category-tag"
+              :class="{ active: artMajorIndex === index }"
+              @click="selectArtMajorByIndex(index)"
+            >{{ item }}</text>
+          </view>
+
+          <view class="score-input full">
+            <text class="input-mark">分</text>
+            <input v-model.number="artScore" type="number" :placeholder="artScorePlaceholder" @input="handleArtScoreInput" />
+          </view>
+
+          <view v-if="selectionMode === 'six-three'" class="subject-block">
+            <view class="field-label-row">
+              <text class="field-hint">6选3</text>
+            </view>
+            <view class="choice-grid three">
+              <view
+                v-for="item in subjectPool"
+                :key="item"
+                class="choice-chip"
+                :class="{ active: comprehensiveSubjects.includes(item), disabled: !comprehensiveSubjects.includes(item) && comprehensiveSubjects.length >= 3 }"
+                @click="toggleComprehensiveSubject(item)"
+              >
+                <text>{{ item }}</text>
+              </view>
+            </view>
+          </view>
+
+          <view v-else-if="selectionMode === 'two-one-four-two'" class="subject-block split">
+            <view class="subject-line">
+              <view class="field-label-row compact">
+                <text class="field-label">首选</text>
+                <text class="field-hint">2选1</text>
+              </view>
+              <view class="choice-row">
+                <view
+                  v-for="item in firstChoiceOptions"
+                  :key="item"
+                  class="choice-chip small"
+                  :class="{ active: firstSubject === item }"
+                  @click="selectFirstSubject(item)"
+                >
+                  <text>{{ item }}</text>
+                </view>
+              </view>
+            </view>
+            <view class="subject-line">
+              <view class="field-label-row compact">
+                <text class="field-label">次选</text>
+                <text class="field-hint">4选2</text>
+              </view>
+              <view class="choice-row wrap">
+                <view
+                  v-for="item in secondChoiceOptions"
+                  :key="item"
+                  class="choice-chip small"
+                  :class="{ active: secondarySubjects.includes(item), disabled: !secondarySubjects.includes(item) && secondarySubjects.length >= 2 }"
+                  @click="toggleSecondarySubject(item)"
+                >
+                  <text>{{ item }}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+
+          <view v-else class="subject-block">
+            <view class="field-label-row">
+              <text class="field-hint">按省份规则</text>
+            </view>
+            <view class="choice-row wrap">
+              <view
+                v-for="item in subjectOptions"
+                :key="item"
+                class="choice-chip"
+                :class="{ active: form.subjectType === item }"
+                @click="selectSubjectType(item)"
               >
                 <text>{{ item }}</text>
               </view>
             </view>
           </view>
         </view>
+      </view>
 
-        <view v-else class="subject-block">
-          <view class="field-label-row">
-            <text class="field-hint">按省份规则</text>
-          </view>
-          <view class="choice-row wrap">
-            <view
-              v-for="item in subjectOptions"
-              :key="item"
-              class="choice-chip"
-              :class="{ active: form.subjectType === item }"
-              @click="form.subjectType = item"
-            >
-              <text>{{ item }}</text>
+      <view class="form-step">
+        <view class="step-row score-step-row">
+          <text class="step-badge">4</text>
+          <text class="step-title">填写成绩与位次</text>
+        </view>
+        <view v-if="examCategory === 'normal'" class="score-section" :class="tutorialTargetClass('score')">
+          <view id="guide-score-target" class="input-grid" :class="tutorialTapTargetClass('score')">
+            <view class="score-input">
+              <text class="input-mark">分</text>
+              <input v-model.number="form.score" type="number" :placeholder="cultureScorePlaceholder" @input="handleScoreInput" />
             </view>
+            <view class="score-input">
+              <text class="input-mark">位</text>
+              <input v-model.number="form.rank" type="number" :placeholder="rankPlaceholder" @input="handleRankInput" />
+            </view>
+            <text v-if="tutorialFocusVisible('score')" class="tutorial-hit-label">{{ currentTutorialStep.hint }}</text>
           </view>
+          <text class="rank-lookup-tip" :class="rankLookupState">{{ rankLookupMessage }}</text>
         </view>
 
-        <view class="score-input full">
-          <text class="input-mark">分</text>
-          <input v-model.number="form.score" type="number" :placeholder="cultureScorePlaceholder" @input="handleScoreInput" />
+        <view v-else class="score-section art-score-section" :class="tutorialTargetClass('score')">
+          <view id="guide-score-target" class="score-input full" :class="tutorialTapTargetClass('score')">
+            <text class="input-mark">分</text>
+            <input v-model.number="form.score" type="number" :placeholder="cultureScorePlaceholder" @input="handleScoreInput" />
+            <text v-if="tutorialFocusVisible('score')" class="tutorial-hit-label">{{ currentTutorialStep.hint }}</text>
+          </view>
+          <text class="rank-lookup-tip" :class="rankLookupState">{{ rankLookupMessage }}</text>
         </view>
-        <text class="rank-lookup-tip" :class="rankLookupState">{{ rankLookupMessage }}</text>
+
+        <view class="chart-card" v-if="form.score || form.rank">
+          <view class="chart-canvas">
+            <view class="chart-info">
+              <text>{{ displayScore }} 分</text>
+              <text>{{ rankRangeLabel }}</text>
+              <text>{{ exceedText }}</text>
+            </view>
+            <view class="chart-base"></view>
+            <view class="chart-curve">
+              <view class="chart-curve-line"></view>
+            </view>
+            <view class="chart-marker" :style="{ left: chartMarkerLeft }"></view>
+            <text class="axis-left">{{ minScoreLabel }}</text>
+            <text class="axis-right">{{ cultureScoreMax }}分</text>
+          </view>
+          <view class="school-counts">
+            <text class="count-label">候选池</text>
+            <text class="count rush">{{ recommendationCountText('rush') }}</text>
+            <text>可冲击</text>
+            <text class="count stable">{{ recommendationCountText('stable') }}</text>
+            <text>较稳妥</text>
+            <text class="count safe">{{ recommendationCountText('safe') }}</text>
+            <text>可保底</text>
+          </view>
+          <text class="candidate-hint">{{ recommendationCountHint }}</text>
+        </view>
       </view>
 
-      <view class="chart-card" v-if="form.score || form.rank">
-        <view class="chart-canvas">
-          <view class="chart-info">
-            <text>{{ displayScore }} 分</text>
-            <text>{{ rankRangeLabel }}</text>
-            <text>{{ exceedText }}</text>
+      <view class="form-step">
+        <view
+          id="guide-preference-target"
+          class="preference-entry"
+          @click="openAdvancedPreference"
+        >
+          <text class="step-badge">5</text>
+          <view class="preference-copy">
+            <text class="preference-title">设定偏好与风险 <text class="optional-mark">（非必填）</text></text>
+            <text class="preference-desc">{{ preferenceSummary }}</text>
           </view>
-          <view class="chart-base"></view>
-          <view class="chart-curve">
-            <view class="chart-curve-line"></view>
-          </view>
-          <view class="chart-marker" :style="{ left: chartMarkerLeft }"></view>
-          <text class="axis-left">{{ minScoreLabel }}</text>
-          <text class="axis-right">{{ cultureScoreMax }}分</text>
+          <text class="preference-arrow">›</text>
         </view>
-        <view class="school-counts">
-          <text class="count-label">候选池</text>
-          <text class="count rush">{{ recommendationCountText('rush') }}</text>
-          <text>可冲击</text>
-          <text class="count stable">{{ recommendationCountText('stable') }}</text>
-          <text>较稳妥</text>
-          <text class="count safe">{{ recommendationCountText('safe') }}</text>
-          <text>可保底</text>
-        </view>
-        <text class="candidate-hint">{{ recommendationCountHint }}</text>
       </view>
 
-      <view class="preference-entry" @click="advancedOpen = true">
-        <view>
-          <text class="preference-title">偏好与风险：{{ riskOptions.find(item => item.value === form.riskPreference)?.label }}</text>
-          <text class="preference-desc">{{ preferenceSummary }}</text>
+      <view class="form-step final-step">
+        <view
+          id="guide-submit-target"
+          class="submit-main"
+          :class="[{ disabled: loading || !form.score }, tutorialTargetClass('submit'), tutorialTapTargetClass('submit')]"
+          @click="submit"
+        >
+          <text class="step-badge">6</text>
+          <text>{{ loading ? '生成中...' : '开启智能推荐大学' }}</text>
+          <text
+            v-if="tutorialFocusVisible('submit')"
+            class="tutorial-hit-label"
+          >{{ submitTutorialHint }}</text>
         </view>
-        <text class="preference-arrow">›</text>
-      </view>
-
-      <view class="submit-main" :class="{ disabled: loading || !form.score }" @click="submit">
-        <text>{{ loading ? '生成中...' : '智能推荐大学' }}</text>
       </view>
 
       <view class="engagement-line" :class="engagementState">
@@ -308,14 +373,14 @@
       </view>
     </view>
 
-    <view class="advanced-mask" v-if="advancedOpen" @click="advancedOpen = false">
+    <view class="advanced-mask" v-if="advancedOpen" @click="closeAdvancedPreference">
       <view class="advanced-sheet" @click.stop>
         <view class="sheet-head">
           <view>
             <text class="sheet-title">偏好与风险</text>
             <text class="sheet-sub">不确定可以先跳过，报告仍可生成。</text>
           </view>
-          <text class="sheet-close" @click="advancedOpen = false">完成</text>
+          <text class="sheet-close" @click="closeAdvancedPreference">完成</text>
         </view>
 
         <scroll-view class="sheet-body" scroll-y>
@@ -465,6 +530,39 @@
       <view v-else class="history-state">暂无近期方案，生成后会自动保存在这里</view>
     </view>
 
+    <view class="tutorial-focus-mask" v-if="tutorialOpen && !advancedOpen" @click.stop></view>
+
+    <view
+      class="tutorial-card"
+      :class="[tutorialCardPlacement, { 'near-target': currentTutorialStep.key === 'submit' }]"
+      :style="tutorialCardStyle"
+      v-if="tutorialOpen && !advancedOpen"
+      @touchmove.stop
+    >
+      <view class="tutorial-head">
+        <view class="tutorial-step-badge">
+          <text>{{ tutorialStep + 1 }}</text>
+        </view>
+        <view class="tutorial-copy">
+          <text class="tutorial-progress">{{ tutorialProgressText }}</text>
+          <text class="tutorial-title">{{ currentTutorialStep.title }}</text>
+          <text class="tutorial-desc">{{ currentTutorialStep.desc }}</text>
+        </view>
+        <text class="tutorial-close" @click="finishTutorial">×</text>
+      </view>
+      <view class="tutorial-dots">
+        <text
+          v-for="(_, index) in tutorialSteps"
+          :key="index"
+          :class="{ active: index === tutorialStep }"
+        ></text>
+      </view>
+      <view class="tutorial-actions">
+        <text class="tutorial-skip" @click="finishTutorial">跳过</text>
+        <text class="tutorial-auto-note">按高亮处操作，将自动继续</text>
+      </view>
+    </view>
+
     <view class="analysis-overlay" v-if="loading" @touchmove.stop.prevent>
       <view class="analysis-panel">
         <view class="orbit-loader">
@@ -526,6 +624,45 @@ const adjustmentOptions = [
   { label: '接受调剂', value: 'accept' },
   { label: '看专业组', value: 'depends' },
   { label: '不接受', value: 'reject' },
+] as const;
+const tutorialStorageKey = 'volunteer_home_tutorial_seen_v1';
+const pendingSubmitAfterLoginStorageKey = 'volunteer_pending_submit_after_login';
+const tutorialSteps = [
+  {
+    key: 'category',
+    anchor: 'guide-category-target',
+    title: '先选报考类型',
+    desc: '点普通类或艺术类。大多数考生选普通类，统考生切到艺术类。',
+    hint: '选完自动继续',
+  },
+  {
+    key: 'province',
+    anchor: 'guide-province-target',
+    title: '确认高考省份',
+    desc: '点右侧省份按钮确认考生参加高考的省份。定位不准时直接重新选择。',
+    hint: '选中省份后继续',
+  },
+  {
+    key: 'subjects',
+    anchor: 'guide-subjects-target',
+    title: '选本科专科和科目',
+    desc: '点本科/专科和真实选科。3+1+2 省份先点物理/历史，再点两门次选。',
+    hint: '选完整后继续',
+  },
+  {
+    key: 'score',
+    anchor: 'guide-score-target',
+    title: '填分数，位次可自动查',
+    desc: '点分数输入框，先填预估分也可以。能匹配一分一段时，位次会自动带出来。',
+    hint: '填完自动继续',
+  },
+  {
+    key: 'submit',
+    anchor: 'guide-submit-target',
+    title: '开启智能推荐',
+    desc: '信息填好后点这里生成报告。也可以先设定偏好与风险，让推荐更贴近你。',
+    hint: '点击开启智能推荐',
+  },
 ] as const;
 const fallbackMajorNames = [
   '计算机科学与技术', '软件工程', '人工智能', '数据科学与大数据技术', '网络工程', '信息安全', '物联网工程',
@@ -604,12 +741,18 @@ const reportCost = ref(38);
 const publicFreeGift = ref(100);
 const provinceAutoLocated = ref(false);
 const provinceLocationTried = ref(false);
+const tutorialOpen = ref(false);
+const tutorialStep = ref(0);
+const tutorialAutoChecked = ref(false);
+const tutorialCardPlacement = ref<'top' | 'bottom'>('bottom');
+const tutorialCardStyle = ref('');
 let rankLookupTimer: ReturnType<typeof setTimeout> | null = null;
 let rankLookupSeq = 0;
 let recommendationPreviewTimer: ReturnType<typeof setTimeout> | null = null;
 let recommendationPreviewSeq = 0;
 let preferredMajorTimer: ReturnType<typeof setTimeout> | null = null;
 let avoidMajorTimer: ReturnType<typeof setTimeout> | null = null;
+let tutorialAutoAdvanceTimer: ReturnType<typeof setTimeout> | null = null;
 let preferredMajorSeq = 0;
 let avoidMajorSeq = 0;
 let lastSubjectRequiredToastAt = 0;
@@ -618,6 +761,12 @@ const engagementState = computed(() => {
   if (!userStore.isLogin) return 'guest';
   return userStore.pointsBalance >= reportCost.value ? 'ready' : 'low-points';
 });
+
+const currentTutorialStep = computed(() => tutorialSteps[tutorialStep.value] || tutorialSteps[0]);
+
+const tutorialProgressText = computed(() => `${tutorialStep.value + 1}/${tutorialSteps.length}`);
+
+const submitTutorialHint = computed(() => '点击开启智能推荐');
 
 const pointsPillText = computed(() => userStore.isLogin ? `${userStore.pointsBalance} 点` : `登录即送${publicFreeGift.value}点`);
 
@@ -890,6 +1039,159 @@ function riskPreferenceLabel(value?: string) {
   return '稳中带冲';
 }
 
+function tutorialTargetClass(key: typeof tutorialSteps[number]['key']) {
+  return {
+    'tutorial-target': tutorialFocusVisible(key),
+  };
+}
+
+function tutorialTapTargetClass(key: typeof tutorialSteps[number]['key']) {
+  return {
+    'tutorial-tap-target': tutorialFocusVisible(key),
+  };
+}
+
+function tutorialFocusVisible(key: typeof tutorialSteps[number]['key']) {
+  if (!tutorialOpen.value) return false;
+  return currentTutorialStep.value.key === key;
+}
+
+function openTutorial(manual = false) {
+  tutorialStep.value = 0;
+  tutorialOpen.value = true;
+  advancedOpen.value = false;
+  tutorialCardStyle.value = '';
+  if (manual) tutorialAutoChecked.value = true;
+  scrollToCurrentTutorialStep();
+}
+
+function maybeOpenTutorial() {
+  if (tutorialAutoChecked.value) return;
+  tutorialAutoChecked.value = true;
+  if (uni.getStorageSync(tutorialStorageKey)) return;
+  setTimeout(() => {
+    openTutorial();
+  }, 420);
+}
+
+function finishTutorial() {
+  tutorialOpen.value = false;
+  tutorialCardStyle.value = '';
+  if (tutorialAutoAdvanceTimer) {
+    clearTimeout(tutorialAutoAdvanceTimer);
+    tutorialAutoAdvanceTimer = null;
+  }
+  uni.setStorageSync(tutorialStorageKey, '1');
+}
+
+function advanceTutorialFrom(key: typeof tutorialSteps[number]['key']) {
+  if (!tutorialOpen.value || currentTutorialStep.value.key !== key) return;
+  if (tutorialAutoAdvanceTimer) clearTimeout(tutorialAutoAdvanceTimer);
+  tutorialAutoAdvanceTimer = setTimeout(() => {
+    const shouldAdvance = tutorialOpen.value && currentTutorialStep.value.key === key;
+    tutorialAutoAdvanceTimer = null;
+    if (!shouldAdvance) return;
+    nextTutorialStep();
+  }, 180);
+}
+
+function scheduleTutorialAdvanceFrom(key: typeof tutorialSteps[number]['key'], delay = 520) {
+  if (!tutorialOpen.value || currentTutorialStep.value.key !== key) return;
+  if (tutorialAutoAdvanceTimer) clearTimeout(tutorialAutoAdvanceTimer);
+  tutorialAutoAdvanceTimer = setTimeout(() => {
+    const shouldAdvance = tutorialOpen.value && currentTutorialStep.value.key === key;
+    tutorialAutoAdvanceTimer = null;
+    if (!shouldAdvance) return;
+    nextTutorialStep();
+  }, delay);
+}
+
+function nextTutorialStep() {
+  if (tutorialStep.value >= tutorialSteps.length - 1) {
+    finishTutorial();
+    return;
+  }
+  tutorialStep.value += 1;
+  scrollToCurrentTutorialStep();
+}
+
+function prevTutorialStep() {
+  if (tutorialStep.value <= 0) return;
+  tutorialStep.value -= 1;
+  scrollToCurrentTutorialStep();
+}
+
+function scrollToCurrentTutorialStep() {
+  nextTick(() => {
+    setTimeout(() => {
+      const selector = `#${currentTutorialStep.value.anchor}`;
+      uni.createSelectorQuery()
+        .select(selector)
+        .boundingClientRect()
+        .select('#guide-submit-target')
+        .boundingClientRect()
+        .selectViewport()
+        .scrollOffset()
+        .exec((res: any[]) => {
+          const rect = res?.[0];
+          const submitRect = res?.[1];
+          const viewport = res?.[2];
+          if (!rect || !viewport) {
+            tutorialCardPlacement.value = preferredTutorialCardPlacement();
+            uni.pageScrollTo({ selector, duration: 260 } as any);
+            return;
+          }
+
+          const windowHeight = uni.getSystemInfoSync().windowHeight || 667;
+          const currentScrollTop = Number(viewport.scrollTop || 0);
+          const focusRect = tutorialScrollFocusRect(rect, submitRect);
+          const placement = resolveTutorialCardPlacement(focusRect, windowHeight);
+          tutorialCardPlacement.value = placement;
+
+          const targetTop = currentScrollTop + Number(focusRect.top || 0);
+          const targetHeight = Number(focusRect.height || 0);
+          const topSafe = placement === 'top' ? 286 : 92;
+          const bottomSafe = placement === 'bottom' ? 286 : 116;
+          const focusPadding = 68;
+          const availableHeight = Math.max(160, windowHeight - topSafe - bottomSafe);
+          const paddedHeight = targetHeight + focusPadding;
+          const desiredTop = topSafe + Math.max(0, (availableHeight - paddedHeight) / 2);
+          const nextScrollTop = Math.max(0, Math.round(targetTop - desiredTop));
+          const focusTopAfterScroll = targetTop - nextScrollTop;
+          tutorialCardStyle.value = currentTutorialStep.value.key === 'submit'
+            ? `top: ${Math.max(16, Math.round(focusTopAfterScroll - 152))}px; bottom: auto;`
+            : '';
+
+          uni.pageScrollTo({
+            scrollTop: nextScrollTop,
+            duration: 260,
+          });
+        });
+    }, 60);
+  });
+}
+
+function preferredTutorialCardPlacement() {
+  return 'bottom';
+}
+
+function tutorialScrollFocusRect(rect: any, submitRect: any) {
+  return rect;
+}
+
+function resolveTutorialCardPlacement(rect: any, windowHeight: number) {
+  const preferred = preferredTutorialCardPlacement();
+  if (preferred === 'top') return 'top';
+  const middle = Number(rect.top || 0) + Number(rect.height || 0) / 2;
+  return middle > windowHeight * 0.64 ? 'top' : 'bottom';
+}
+
+function setExamCategory(category: ExamCategory) {
+  examCategory.value = category;
+  scheduleRecommendationPreview();
+  advanceTutorialFrom('category');
+}
+
 function focusPreferenceInput(type: 'city' | 'preferredMajor' | 'avoidMajor') {
   focusedPreferenceInput.value = '';
   nextTick(() => {
@@ -1084,7 +1386,6 @@ const provinceCentroids: Record<string, { lat: number; lng: number }> = {
   香港: { lat: 22.3193, lng: 114.1694 },
   澳门: { lat: 22.1987, lng: 113.5439 },
 };
-
 function provinceKey(name: string) {
   return String(name || '')
     .trim()
@@ -1101,7 +1402,7 @@ function normalizeProvinceName(name?: string) {
   return provinceOptions.value.find(item => provinceKey(item) === key) || '';
 }
 
-function resolveProvinceFromLocationText(values: unknown[]) {
+function resolveProvinceFromText(values: unknown[]) {
   const options = provinceOptions.value;
   for (const value of values) {
     const text = String(value || '').trim();
@@ -1168,7 +1469,7 @@ function extractProvinceFromLocationResult(result: any) {
     address?.city,
     address?.district,
   ];
-  return resolveProvinceFromLocationText(candidates) || resolveProvinceFromCoordinates(result?.latitude, result?.longitude);
+  return resolveProvinceFromText(candidates) || resolveProvinceFromCoordinates(result?.latitude, result?.longitude);
 }
 
 function locationUnavailableBySystemSetting() {
@@ -1186,7 +1487,14 @@ function locationUnavailableBySystemSetting() {
 }
 
 function fallbackProvinceAfterLocationFail(message = '定位未开启，请手动选择高考省份') {
-  if (provinceTouched.value || form.province) return;
+  if (provinceTouched.value || form.province || !provinceOptions.value.length) return;
+  const current = userStore.userInfo || {};
+  const profileProvince = resolveProvinceFromText([current.province, current.city]);
+  if (profileProvince && applyProvince(profileProvince, { autoLocated: true })) {
+    locationStatus.value = `定位未开启，已默认使用账号省份 ${profileProvince}`;
+    locationStatusTone.value = 'warning';
+    return;
+  }
   const cached = normalizeProvinceName(uni.getStorageSync(locatedProvinceStorageKey));
   if (cached && applyProvince(cached, { autoLocated: true })) {
     locationStatus.value = `定位未开启，已默认使用上次省份 ${cached}`;
@@ -1201,7 +1509,7 @@ async function autoSelectProvinceByLocation() {
   if (provinceLocationTried.value || provinceTouched.value || form.province || !provinceOptions.value.length) return;
 
   provinceLocationTried.value = true;
-  locationStatus.value = '正在根据定位识别省份...';
+  locationStatus.value = '正在根据授权定位识别省份...';
   locationStatusTone.value = 'muted';
 
   if (locationUnavailableBySystemSetting()) {
@@ -1218,8 +1526,7 @@ async function autoSelectProvinceByLocation() {
       if (province && applyProvince(province, { autoLocated: true })) {
         uni.setStorageSync(locatedProvinceStorageKey, province);
       } else {
-        locationStatus.value = '未能识别当前省份，请手动选择';
-        locationStatusTone.value = 'warning';
+        fallbackProvinceAfterLocationFail('未能识别当前省份，请手动选择');
       }
     },
     fail: () => {
@@ -1229,7 +1536,9 @@ async function autoSelectProvinceByLocation() {
 }
 
 function selectProvince(province: string) {
-  applyProvince(province, { manual: true });
+  if (applyProvince(province, { manual: true })) {
+    advanceTutorialFrom('province');
+  }
 }
 
 function syncUserLocation(province: string, city = '') {
@@ -1267,6 +1576,13 @@ function setAdmissionLevel(level: '本科' | '专科') {
   admissionLevel.value = level;
   form.targetBatch = defaultBatchForLevel(level);
   scheduleRecommendationPreview();
+  maybeAdvanceSubjectTutorial();
+}
+
+function setArtLevel(level: '本科' | '专科') {
+  artLevel.value = level;
+  scheduleRecommendationPreview();
+  maybeAdvanceSubjectTutorial();
 }
 
 function toggleComprehensiveSubject(subject: string) {
@@ -1276,12 +1592,14 @@ function toggleComprehensiveSubject(subject: string) {
   }
   if (comprehensiveSubjects.value.length >= 3) return;
   comprehensiveSubjects.value = [...comprehensiveSubjects.value, subject];
+  maybeAdvanceSubjectTutorial();
 }
 
 function selectFirstSubject(subject: '物理' | '历史') {
   firstSubject.value = subject;
   form.subjectType = subject === '物理' ? '物理类' : '历史类';
   scheduleRecommendationPreview();
+  maybeAdvanceSubjectTutorial();
 }
 
 function toggleSecondarySubject(subject: string) {
@@ -1291,6 +1609,7 @@ function toggleSecondarySubject(subject: string) {
   }
   if (secondarySubjects.value.length >= 2) return;
   secondarySubjects.value = [...secondarySubjects.value, subject];
+  maybeAdvanceSubjectTutorial();
 }
 
 function selectArtMajor(event: any) {
@@ -1301,6 +1620,23 @@ function selectArtMajorByIndex(index: number) {
   artMajorIndex.value = index;
   artMajorPanelOpen.value = false;
   scheduleRecommendationPreview();
+  maybeAdvanceSubjectTutorial();
+}
+
+function selectSubjectType(type: string) {
+  form.subjectType = type;
+  scheduleRecommendationPreview();
+  maybeAdvanceSubjectTutorial();
+}
+
+function maybeAdvanceSubjectTutorial() {
+  if (examCategory.value === 'art') {
+    advanceTutorialFrom('subjects');
+    return;
+  }
+  nextTick(() => {
+    if (subjectSelectionValid.value) advanceTutorialFrom('subjects');
+  });
 }
 
 function selectSubjectCombo(event: any) {
@@ -1381,6 +1717,17 @@ function handleRankInput() {
   rankLookupTried.value = false;
   rankLookupMessage.value = form.rank ? '已手动填写位次，将按此生成报告' : '填写分数后自动匹配一分一段位次';
   scheduleRecommendationPreview();
+  maybeAdvanceScoreTutorial();
+}
+
+function maybeAdvanceScoreTutorial() {
+  const score = Number(form.score);
+  const rank = Number(form.rank);
+  if (!Number.isFinite(score) || score <= 0 || !Number.isFinite(rank) || rank <= 0) return;
+  if (!validateCultureScore({ toast: false })) return;
+  if (rankLookupLoading.value) return;
+  if (!rankAutoFilled.value && !rankManuallyEdited.value) return;
+  scheduleTutorialAdvanceFrom('score', 620);
 }
 
 function ensureSubjectOption() {
@@ -1497,7 +1844,10 @@ async function lookupScoreRank() {
     rankLookupMessage.value = '位次自动查询失败，请手动填写';
     scheduleRecommendationPreview();
   } finally {
-    if (seq === rankLookupSeq) rankLookupLoading.value = false;
+    if (seq === rankLookupSeq) {
+      rankLookupLoading.value = false;
+      maybeAdvanceScoreTutorial();
+    }
   }
 }
 
@@ -1576,9 +1926,24 @@ function goRecharge() {
   uni.navigateTo({ url: '/pages/recharge/index' });
 }
 
+function openAdvancedPreference() {
+  advancedOpen.value = true;
+}
+
+function closeAdvancedPreference() {
+  advancedOpen.value = false;
+  if (tutorialOpen.value && currentTutorialStep.value.key === 'submit') {
+    scrollToCurrentTutorialStep();
+  }
+}
+
 async function submit() {
   if (loading.value) return;
+  if (tutorialOpen.value && currentTutorialStep.value.key === 'submit') {
+    finishTutorial();
+  }
   if (!userStore.isLogin) {
+    uni.setStorageSync(pendingSubmitAfterLoginStorageKey, { at: Date.now() });
     await userStore.loginWithWechatProfile();
     return;
   }
@@ -1640,10 +2005,14 @@ async function submit() {
       familyExpectation: expectation,
     });
     const res = await api.volunteer.analyze(analysisInput);
+    const reportId = (res.data as any).reportId;
     uni.setStorageSync('latest_volunteer_report', Object.assign({}, res.data, {
       input: (res.data as any)?.input || analysisInput,
     }));
-    uni.navigateTo({ url: `/pages/volunteer/report?id=${(res.data as any).reportId}` });
+    if (reportId) {
+      uni.setStorageSync('volunteer_report_tutorial_pending', { reportId, at: Date.now() });
+    }
+    uni.navigateTo({ url: `/pages/volunteer/report?id=${reportId}` });
   } catch (err: any) {
     const message = String(err?.errMsg || err?.message || '');
     const title = /timeout|time out|超时/i.test(message)
@@ -1687,7 +2056,24 @@ onShow(() => {
   loadArtSupport();
   loadRegions();
   loadReports();
+  maybeOpenTutorial();
+  continueSubmitAfterLogin();
 });
+
+function continueSubmitAfterLogin() {
+  const pending = uni.getStorageSync(pendingSubmitAfterLoginStorageKey);
+  if (!pending) return;
+  const createdAt = Number((pending as any)?.at || 0);
+  const expired = createdAt > 0 && Date.now() - createdAt > 10 * 60 * 1000;
+  if (!userStore.isLogin || expired) {
+    uni.removeStorageSync(pendingSubmitAfterLoginStorageKey);
+    return;
+  }
+  uni.removeStorageSync(pendingSubmitAfterLoginStorageKey);
+  setTimeout(() => {
+    if (!loading.value && userStore.isLogin) submit();
+  }, 520);
+}
 
 onPullDownRefresh(async () => {
   try {
@@ -1806,6 +2192,33 @@ watch(
   line-height: 1.45;
 }
 
+.guide-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 20rpx;
+  padding: 16rpx 18rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1rpx solid rgba(20, 184, 166, 0.18);
+}
+
+.guide-entry-main {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.guide-entry-action {
+  flex-shrink: 0;
+  color: #0f766e;
+  font-size: 24rpx;
+  font-weight: 900;
+}
+
 .points-pill {
   display: flex;
   align-items: center;
@@ -1837,24 +2250,81 @@ watch(
   box-shadow: 0 14rpx 34rpx rgba(15, 23, 42, 0.05);
 }
 
-.mock-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: $spacing-md;
-  margin-bottom: 28rpx;
+.form-step {
+  position: relative;
+  padding: 16rpx 0 18rpx;
 }
 
-.mock-title {
-  color: $text-primary;
-  font-size: 38rpx;
+.form-step::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1rpx;
+  background: rgba(226, 232, 240, 0.86);
+}
+
+.form-step.final-step::after {
+  display: none;
+}
+
+.step-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 10rpx;
+  min-height: 58rpx;
+}
+
+.form-step > .step-row {
+  margin-bottom: 12rpx;
+}
+
+.form-step > .step-row:last-child {
+  margin-bottom: 0;
+}
+
+.step-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32rpx;
+  height: 32rpx;
+  box-sizing: border-box;
+  border-radius: $radius-full;
+  background: #eef4e8;
+  color: #60723f;
+  border: 1rpx solid rgba(96, 114, 63, 0.16);
+  font-size: 20rpx;
   font-weight: 800;
+  line-height: 32rpx;
+}
+
+.step-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-title {
+  display: block;
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 23rpx;
+  font-weight: 700;
+  line-height: 1.24;
+}
+
+.step-spacer {
+  flex: 1;
+  min-width: 8rpx;
 }
 
 .category-switch {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 18rpx;
 }
 
@@ -1895,6 +2365,10 @@ watch(
   margin-bottom: 22rpx;
 }
 
+.province-step-row {
+  gap: 12rpx;
+}
+
 .meta-pill {
   display: flex;
   align-items: center;
@@ -1923,6 +2397,7 @@ watch(
   color: #64748b;
   font-size: 23rpx;
   line-height: 1.45;
+  text-align: right;
 }
 
 .location-status.success {
@@ -1942,6 +2417,12 @@ watch(
   border-radius: 22rpx;
   background: #f8fafc;
   border: 1rpx solid rgba(148, 163, 184, 0.14);
+}
+
+.province-tags.tutorial-floating-options {
+  position: relative;
+  z-index: 8891;
+  box-shadow: 0 18rpx 46rpx rgba(15, 23, 42, 0.20);
 }
 
 .province-tag {
@@ -1994,15 +2475,85 @@ watch(
 
 .subject-area,
 .art-area {
-  margin-top: 6rpx;
+  margin-top: 0;
 }
 
-.level-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-sm;
-  margin-bottom: 18rpx;
+.tutorial-target {
+  position: relative;
+  z-index: 8890;
+  border-radius: 20rpx;
+}
+
+.meta-row.tutorial-target,
+.subject-area.tutorial-target,
+.art-area.tutorial-target,
+.score-section.tutorial-target,
+.preference-entry.tutorial-target,
+.submit-main.tutorial-target {
+  padding: 10rpx;
+  margin-left: -10rpx;
+  margin-right: -10rpx;
+}
+
+.score-section {
+  border-radius: 20rpx;
+}
+
+.tutorial-tap-target {
+  position: relative;
+  z-index: 8891;
+  border-radius: 18rpx;
+  background: #fff;
+  box-shadow: 0 0 0 6rpx rgba(20, 184, 166, 0.28), 0 0 0 16rpx rgba(20, 184, 166, 0.10), 0 24rpx 48rpx rgba(15, 23, 42, 0.24);
+  animation: tutorialGlowFlash 1.05s ease-in-out infinite;
+}
+
+.tutorial-tap-target::before {
+  content: '';
+  position: absolute;
+  inset: -10rpx;
+  border: 3rpx solid rgba(20, 184, 166, 0.82);
+  border-radius: 22rpx;
+  box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.46);
+  animation: tutorialBorderFlash 1.05s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.tutorial-hit-label {
+  position: absolute;
+  right: 0;
+  bottom: -54rpx;
+  min-width: 112rpx;
+  height: 42rpx;
+  padding: 0 18rpx;
+  box-sizing: border-box;
+  border-radius: 999rpx;
+  background: #0f766e;
+  color: #fff;
+  font-size: 23rpx;
+  font-weight: 900;
+  line-height: 42rpx;
+  text-align: center;
+  box-shadow: 0 12rpx 24rpx rgba(15, 118, 110, 0.24);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.input-grid.tutorial-tap-target,
+.field-label-row.tutorial-tap-target,
+.subject-block.tutorial-tap-target {
+  padding: 12rpx;
+  margin: -12rpx;
+}
+
+.score-input.tutorial-tap-target {
+  margin-left: -10rpx;
+  margin-right: -10rpx;
+}
+
+.submit-main .tutorial-hit-label {
+  bottom: auto;
+  top: -58rpx;
 }
 
 .subject-block {
@@ -2012,13 +2563,18 @@ watch(
 .subject-block.split {
   display: flex;
   flex-direction: column;
-  gap: 22rpx;
+  gap: 12rpx;
 }
 
 .subject-line {
   display: flex;
-  align-items: flex-start;
-  gap: 18rpx;
+  align-items: center;
+  gap: 14rpx;
+  padding: 14rpx;
+  box-sizing: border-box;
+  border-radius: 16rpx;
+  background: #f8fafc;
+  border: 1rpx solid rgba(148, 163, 184, 0.18);
 }
 
 .field-label-row {
@@ -2029,10 +2585,10 @@ watch(
 }
 
 .field-label-row.compact {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
-  width: 82rpx;
+  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 8rpx;
+  width: 144rpx;
   margin-bottom: 0;
 }
 
@@ -2048,6 +2604,21 @@ watch(
   font-weight: 700;
 }
 
+.field-label-row.compact .field-label {
+  font-size: 26rpx;
+  font-weight: 900;
+}
+
+.field-label-row.compact .field-hint {
+  padding: 4rpx 8rpx;
+  border-radius: $radius-full;
+  background: #eef2ff;
+  color: #7c3aed;
+  font-size: 19rpx;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
 .choice-grid {
   display: grid;
   gap: 16rpx;
@@ -2059,6 +2630,7 @@ watch(
 
 .choice-row {
   display: flex;
+  justify-content: flex-end;
   gap: 12rpx;
   flex: 1;
 }
@@ -2084,8 +2656,9 @@ watch(
 }
 
 .choice-chip.small {
-  min-width: 104rpx;
+  min-width: 96rpx;
   height: 62rpx;
+  padding: 0 16rpx;
 }
 
 .choice-chip.active {
@@ -2100,7 +2673,7 @@ watch(
 }
 
 .score-title {
-  margin: 30rpx 0 16rpx;
+  margin: 0 0 16rpx;
   color: $text-primary;
   font-size: 30rpx;
   font-weight: 700;
@@ -2125,7 +2698,7 @@ watch(
 }
 
 .score-input.full {
-  margin-top: 20rpx;
+  margin-top: 0;
 }
 
 .score-input input {
@@ -2163,14 +2736,6 @@ watch(
   color: #d97706;
 }
 
-.art-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-sm;
-  margin: 34rpx 0 18rpx;
-}
-
 .select-field {
   display: flex;
   align-items: center;
@@ -2192,7 +2757,7 @@ watch(
 }
 
 .chart-card {
-  margin-top: 30rpx;
+  margin-top: 22rpx;
   padding: 18rpx 16rpx 16rpx;
   border-radius: 18rpx;
   background: linear-gradient(180deg, #fff7ed 0%, #ffffff 100%);
@@ -2333,11 +2898,16 @@ watch(
 
 .preference-entry {
   align-items: center;
-  margin-top: 28rpx;
+  margin-top: 0;
   padding: 18rpx 20rpx;
   border-radius: 16rpx;
   background: #fdf2f8;
   border: 1rpx solid #fbcfe8;
+}
+
+.preference-copy {
+  flex: 1;
+  min-width: 0;
 }
 
 .preference-title {
@@ -2345,6 +2915,13 @@ watch(
   color: $text-primary;
   font-size: $font-sm;
   font-weight: 800;
+}
+
+.optional-mark {
+  margin-left: 8rpx;
+  color: #0f766e;
+  font-size: 22rpx;
+  font-weight: 900;
 }
 
 .preference-desc {
@@ -2365,14 +2942,19 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 12rpx;
   height: 88rpx;
-  margin-top: 18rpx;
+  margin-top: 0;
   border-radius: 16rpx;
-  background: linear-gradient(135deg, #0f766e 0%, #7c3aed 54%, #d97706 100%);
+  background: linear-gradient(135deg, #7c3aed 0%, #0f766e 54%, #d97706 100%);
   color: #fff;
   font-size: $font-md;
   font-weight: 800;
   box-shadow: 0 12rpx 24rpx rgba(20, 184, 166, 0.16);
+}
+
+.submit-main .step-badge {
+  box-shadow: 0 0 0 2rpx rgba(255, 255, 255, 0.72);
 }
 
 .submit-main.disabled {
@@ -2793,6 +3375,151 @@ watch(
   word-break: break-all;
 }
 
+.tutorial-focus-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 8888;
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.tutorial-card {
+  position: fixed;
+  left: 24rpx;
+  right: 24rpx;
+  bottom: calc(24rpx + env(safe-area-inset-bottom));
+  z-index: 8892;
+  box-sizing: border-box;
+  max-height: 238rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1rpx solid rgba(15, 118, 110, 0.18);
+  box-shadow: 0 28rpx 72rpx rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+}
+
+.tutorial-card.top {
+  top: calc(24rpx + env(safe-area-inset-top));
+  bottom: auto;
+}
+
+.tutorial-card.bottom {
+  top: auto;
+  bottom: calc(24rpx + env(safe-area-inset-bottom));
+}
+
+.tutorial-card.near-target {
+  max-height: none;
+  padding: 20rpx 22rpx;
+}
+
+.tutorial-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+
+.tutorial-step-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: $radius-full;
+  background: #0f766e;
+  color: #fff;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.tutorial-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.tutorial-progress {
+  display: block;
+  color: #0f766e;
+  font-size: 21rpx;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.tutorial-title {
+  display: block;
+  margin-top: 4rpx;
+  color: $text-primary;
+  font-size: 32rpx;
+  font-weight: 900;
+  line-height: 1.24;
+}
+
+.tutorial-desc {
+  display: block;
+  margin-top: 8rpx;
+  color: $text-secondary;
+  font-size: 25rpx;
+  line-height: 1.38;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.tutorial-close {
+  flex-shrink: 0;
+  width: 48rpx;
+  height: 48rpx;
+  color: #94a3b8;
+  font-size: 44rpx;
+  line-height: 42rpx;
+  text-align: center;
+}
+
+.tutorial-dots {
+  display: flex;
+  gap: 8rpx;
+  margin-top: 14rpx;
+}
+
+.tutorial-dots text {
+  width: 32rpx;
+  height: 7rpx;
+  border-radius: $radius-full;
+  background: #e2e8f0;
+}
+
+.tutorial-dots text.active {
+  width: 54rpx;
+  background: #0f766e;
+}
+
+.tutorial-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  margin-top: 14rpx;
+}
+
+.tutorial-skip {
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 25rpx;
+  font-weight: 800;
+}
+
+.tutorial-auto-note {
+  min-width: 0;
+  color: #0f766e;
+  font-size: 25rpx;
+  font-weight: 900;
+  line-height: 1.35;
+  text-align: right;
+}
+
 .analysis-overlay {
   position: fixed;
   inset: 0;
@@ -2938,6 +3665,32 @@ watch(
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes tutorialGlowFlash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 5rpx rgba(20, 184, 166, 0.22), 0 0 0 14rpx rgba(20, 184, 166, 0.08), 0 24rpx 48rpx rgba(15, 23, 42, 0.22);
+  }
+  50% {
+    box-shadow: 0 0 0 8rpx rgba(250, 204, 21, 0.52), 0 0 0 20rpx rgba(20, 184, 166, 0.16), 0 28rpx 54rpx rgba(15, 23, 42, 0.28);
+  }
+}
+
+@keyframes tutorialBorderFlash {
+  0%,
+  100% {
+    border-color: rgba(20, 184, 166, 0.70);
+    box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.22);
+    opacity: 0.72;
+    transform: scale(1);
+  }
+  50% {
+    border-color: rgba(250, 204, 21, 0.98);
+    box-shadow: 0 0 0 10rpx rgba(250, 204, 21, 0.22);
+    opacity: 1;
+    transform: scale(1.025);
   }
 }
 

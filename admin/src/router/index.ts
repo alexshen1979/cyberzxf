@@ -14,10 +14,11 @@ const routes = [
     redirect: '/dashboard',
     children: [
       { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/dashboard/index.vue'), meta: { title: '数据大盘' } },
-      { path: 'users', name: 'Users', component: () => import('@/views/users/index.vue'), meta: { title: '用户管理' } },
-      { path: 'users/:id', name: 'UserDetail', component: () => import('@/views/users/detail.vue'), meta: { title: '用户详情', hidden: true } },
+      { path: 'users', name: 'Users', component: () => import('@/views/users/index.vue'), meta: { title: '用户管理', editorAllowed: true } },
+      { path: 'users/:id', name: 'UserDetail', component: () => import('@/views/users/detail.vue'), meta: { title: '用户详情', hidden: true, editorAllowed: true } },
       { path: 'points', name: 'Points', component: () => import('@/views/points/index.vue'), meta: { title: '点数管理' } },
       { path: 'orders', name: 'Orders', component: () => import('@/views/orders/index.vue'), meta: { title: '订单管理' } },
+      { path: 'tencent-ad-conversion', name: 'TencentAdConversion', component: () => import('@/views/tencent-ad-conversion/index.vue'), meta: { title: '腾讯广告回传' } },
       { path: 'distribution', redirect: '/distribution/overview' },
       { path: 'distribution/overview', name: 'DistributionOverview', component: () => import('@/views/distribution/index.vue'), meta: { title: '推荐合作', distributionSection: 'overview' } },
       { path: 'distribution/distributors', name: 'DistributionDistributors', component: () => import('@/views/distribution/index.vue'), meta: { title: '合作人员', distributionSection: 'distributors', editorAllowed: true } },
@@ -60,7 +61,7 @@ router.beforeEach((to, _from, next) => {
   } else if (to.path === '/distribution' && store.isEditor) {
     next('/distribution/distributors');
   } else if (store.isEditor && !to.meta.editorAllowed) {
-    next('/content/quick-questions');
+    next('/users');
   } else {
     next();
   }

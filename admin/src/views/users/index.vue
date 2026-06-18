@@ -2,10 +2,10 @@
   <div class="users-page">
     <h2>用户管理</h2>
     <div class="search-bar">
-      <el-input v-model="keyword" placeholder="搜索昵称/手机号/OpenID/邀请码/用户ID" style="width: 360px" clearable @change="load" />
+      <el-input v-model="keyword" placeholder="搜索昵称/手机号/注册IP/OpenID/邀请码/用户ID" style="width: 420px" clearable @change="load" />
     </div>
     <el-table :data="users" style="width: 100%" v-loading="loading">
-      <el-table-column label="用户" min-width="220">
+      <el-table-column label="用户" min-width="310">
         <template #default="{ row }">
           <div class="user-cell">
             <el-avatar :src="row.avatar || ''" :size="38">
@@ -14,25 +14,33 @@
             <div class="main-cell">
               <strong>{{ userLabel(row) }}</strong>
               <span>{{ row.id }}</span>
+              <div class="tag-row">
+                <el-tag size="small" type="info">邀请码 {{ row.shareCode || '--' }}</el-tag>
+                <el-tag v-if="row.distributorProfile" :type="distributorTagType(row.distributorProfile)" size="small">
+                  {{ distributorIdentityLabel(row.distributorProfile) }}
+                </el-tag>
+                <el-tag v-else size="small" type="info">普通用户</el-tag>
+              </div>
             </div>
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="phone" label="手机号" min-width="120">
-        <template #default="{ row }">{{ row.phone || '--' }}</template>
-      </el-table-column>
-      <el-table-column label="省份城市" min-width="130">
-        <template #default="{ row }">{{ locationLabel(row) }}</template>
-      </el-table-column>
-      <el-table-column prop="shareCode" label="邀请码" width="130">
-        <template #default="{ row }">{{ row.shareCode || '--' }}</template>
-      </el-table-column>
-      <el-table-column label="合作身份" width="150">
+      <el-table-column label="联系方式/地区" min-width="200">
         <template #default="{ row }">
-          <el-tag v-if="row.distributorProfile" :type="distributorTagType(row.distributorProfile)" size="small">
-            {{ distributorIdentityLabel(row.distributorProfile) }}
-          </el-tag>
-          <span v-else>普通用户</span>
+          <div class="meta-stack">
+            <div class="meta-row">
+              <span class="meta-label">手机号</span>
+              <span>{{ row.phone || '--' }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">省份城市</span>
+              <span>{{ locationLabel(row) }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">注册IP</span>
+              <span>{{ row.registerIp || '--' }}</span>
+            </div>
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="邀请人" min-width="180">
@@ -43,20 +51,15 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="小程序绑定" width="100">
+      <el-table-column label="账户" min-width="170">
         <template #default="{ row }">
-          <el-tag :type="row.miniOpenId ? 'success' : 'info'" size="small">{{ row.miniOpenId ? '已绑定' : '未绑定' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="公众号绑定" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.mpOpenId ? 'success' : 'info'" size="small">{{ row.mpOpenId ? '已绑定' : '未绑定' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="pointsAccount.balance" label="点数余额" width="100" />
-      <el-table-column label="状态" width="80">
-        <template #default="{ row }">
-          <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{ row.status === 1 ? '正常' : '禁用' }}</el-tag>
+          <div class="account-cell">
+            <div class="tag-row">
+              <el-tag :type="row.miniOpenId ? 'success' : 'info'" size="small">{{ row.miniOpenId ? '小程序已绑定' : '小程序未绑定' }}</el-tag>
+              <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{ row.status === 1 ? '正常' : '禁用' }}</el-tag>
+            </div>
+            <span class="points-line">点数余额：{{ pointsBalance(row) }}</span>
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="注册时间" width="170">
@@ -66,8 +69,8 @@
         <template #default="{ row }">
           <el-button type="primary" link @click="$router.push(`/users/${row.id}`)">详情</el-button>
           <el-button type="primary" link @click="openEditDialog(row)">编辑</el-button>
-          <el-button type="primary" link @click="openRoleDialog(row)">改身份</el-button>
-          <el-button type="danger" link :loading="purgingId === row.id" @click="purgeUser(row)">一键清除</el-button>
+          <el-button v-if="adminStore.isFullAdmin" type="primary" link @click="openRoleDialog(row)">改身份</el-button>
+          <el-button v-if="adminStore.isFullAdmin" type="danger" link :loading="purgingId === row.id" @click="purgeUser(row)">一键清除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -163,8 +166,10 @@
 import { computed, reactive, ref, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '@/api';
+import { useAdminStore } from '@/store/admin';
 
 const users = ref([]);
+const adminStore = useAdminStore();
 const loading = ref(false);
 const page = ref(1);
 const total = ref(0);
@@ -224,6 +229,10 @@ function locationLabel(row: any) {
 
 function avatarText(row: any) {
   return String(row.nickname || row.phone || row.shareCode || row.id || '用').slice(0, 1).toUpperCase();
+}
+
+function pointsBalance(row: any) {
+  return row.pointsAccount?.balance ?? 0;
 }
 
 function distributorIdentityLabel(profile: any) {
@@ -407,5 +416,30 @@ h2 { margin-bottom: 20px; }
     color: var(--el-text-color-secondary);
     font-size: 12px;
   }
+}
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.meta-stack,
+.account-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--el-text-color-primary);
+}
+.meta-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.meta-label,
+.points-line {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 </style>

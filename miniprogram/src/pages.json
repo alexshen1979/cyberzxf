@@ -9,7 +9,7 @@
     {
       "path": "pages/volunteer/index",
       "style": {
-        "navigationBarTitleText": "AI 志愿分析",
+        "navigationBarTitleText": "模拟报志愿",
         "navigationBarBackgroundColor": "#ffffff",
         "navigationBarTextStyle": "black",
         "enablePullDownRefresh": true

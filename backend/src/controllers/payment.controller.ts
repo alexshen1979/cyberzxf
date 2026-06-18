@@ -15,6 +15,7 @@ import {
   getUserOrders,
   getUserOrderDetail,
   recordRechargeEvent,
+  syncPaymentOrderStatusForAdmin,
   syncWechatVirtualPaymentSettlements,
   updateWechatVirtualSettlementSyncSettings,
   verifyWechatVirtualPayPushSignature,
@@ -71,6 +72,11 @@ export async function adminVirtualSettlementOverview(ctx: Context) {
 export async function adminSyncVirtualSettlements(ctx: Context) {
   const input = Object.assign({}, ctx.query || {}, ctx.request.body || {});
   ctx.body = { success: true, data: await syncWechatVirtualPaymentSettlements(input as Record<string, any>) };
+}
+
+export async function adminSyncPaymentOrder(ctx: Context) {
+  const input = Object.assign({}, ctx.params || {}, ctx.request.body || {});
+  ctx.body = { success: true, data: await syncPaymentOrderStatusForAdmin(String(input.orderNo || '')) };
 }
 
 export async function adminVirtualSettlementSyncSettings(ctx: Context) {
@@ -147,6 +153,12 @@ async function normalizeWechatCallbackBody(body: any) {
   if (typeof body === 'string' && body.trim().startsWith('<')) {
     const parsed = await parseStringPromise(body);
     return flattenXmlObject(parsed.xml || parsed);
+  }
+  if (typeof body === 'string') {
+    const text = body.trim();
+    if (text.startsWith('{') || text.startsWith('[')) {
+      return flattenXmlObject(JSON.parse(text));
+    }
   }
   if (body?.xml) return flattenXmlObject(body.xml);
   return flattenXmlObject(body || {});

@@ -136,8 +136,17 @@
       <span>普通微信支付 {{ formatMoney(deviceAmount(orderStats.paymentDeviceBreakdown, 'wechatPay')) }}</span>
     </div>
     <el-table :data="orders" style="width: 100%" v-loading="loading">
-      <el-table-column prop="orderNo" label="订单号" width="180" />
-      <el-table-column prop="transactionId" label="微信交易号" min-width="220" show-overflow-tooltip />
+      <el-table-column label="订单信息" min-width="280">
+        <template #default="{ row }">
+          <div class="order-info-cell">
+            <div class="order-info-main">
+              <strong>{{ row.orderNo || '-' }}</strong>
+              <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
+            </div>
+            <span>微信交易号：{{ row.transactionId || '-' }}</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="充值账户" min-width="240">
         <template #default="{ row }">
           <div class="user-cell">
@@ -183,11 +192,21 @@
           <span v-else class="muted">无</span>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="80">
-        <template #default="{ row }"><el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag></template>
-      </el-table-column>
       <el-table-column label="时间" width="170">
         <template #default="{ row }">{{ new Date(row.createdAt).toLocaleString() }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="130" fixed="right">
+        <template #default="{ row }">
+          <el-button
+            v-if="row.status === 'pending'"
+            type="primary"
+            link
+            :loading="syncingOrderNo === row.orderNo"
+            @click="syncPaymentOrder(row)"
+          >
+            同步支付状态
+          </el-button>
+        </template>
       </el-table-column>
     </el-table>
 
@@ -281,6 +300,7 @@ const paymentConfig = ref<{ ready: boolean; missing: string[] } | null>(null);
 const settlementOverview = ref<any>({});
 const settlementLoading = ref(false);
 const syncingSettlements = ref(false);
+const syncingOrderNo = ref('');
 const syncOrderNo = ref('');
 const savingSyncSettings = ref(false);
 const syncSettings = reactive({
@@ -531,6 +551,28 @@ async function syncSettlements() {
   }
 }
 
+async function syncPaymentOrder(row: any) {
+  const orderNo = String(row?.orderNo || '').trim();
+  if (!orderNo || syncingOrderNo.value) return;
+  syncingOrderNo.value = orderNo;
+  try {
+    const res = await api.orders.syncPayment(orderNo) as any;
+    const order = res.data || {};
+    if (order.status === 'paid') {
+      ElMessage.success('订单已支付，点数已补到账');
+    } else if (order.status === 'failed') {
+      ElMessage.warning('微信返回未支付成功，订单已标记失败');
+    } else {
+      ElMessage.info('订单仍未支付成功');
+    }
+    await Promise.all([load(), loadSettlementOverview(), loadAnalytics()]);
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.message || e.message || '同步失败');
+  } finally {
+    syncingOrderNo.value = '';
+  }
+}
+
 async function openPaymentConfig() {
   const res = await api.orders.paymentConfig() as any;
   Object.assign(paymentConfigForm, {
@@ -704,6 +746,38 @@ h2 { margin-bottom: 20px; }
   span {
     color: #6b7280;
     font-size: 12px;
+  }
+}
+.order-info-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+
+  span {
+    color: #6b7280;
+    font-size: 12px;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+}
+.order-info-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+
+  strong {
+    min-width: 0;
+    color: #111827;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+
+  .el-tag {
+    flex: 0 0 auto;
   }
 }
 .analytics-item {

@@ -61,10 +61,17 @@ export const api = {
     syncVirtualSettlements: (data?: any) => http.post('/admin/orders/virtual-settlements/sync', data || {}),
     virtualSettlementSyncSettings: () => http.get('/admin/orders/virtual-settlements/sync-settings'),
     updateVirtualSettlementSyncSettings: (data: any) => http.put('/admin/orders/virtual-settlements/sync-settings', data),
+    syncPayment: (orderNo: string) => http.post(`/admin/orders/${encodeURIComponent(orderNo)}/sync-payment`),
     detail: (id: string) => http.get(`/admin/orders/${id}`),
     paymentConfigStatus: () => http.get('/admin/payment-config/status'),
     paymentConfig: () => http.get('/admin/payment-config'),
     updatePaymentConfig: (data: any) => http.put('/admin/payment-config', data),
+  },
+  tencentAdConversion: {
+    config: () => http.get('/admin/tencent-ad-conversion/config'),
+    updateConfig: (data: any) => http.put('/admin/tencent-ad-conversion/config', data),
+    events: (params?: any) => http.get('/admin/tencent-ad-conversion/events', { params }),
+    retry: (id: string) => http.post(`/admin/tencent-ad-conversion/events/${id}/retry`),
   },
   distribution: {
     settings: () => http.get('/admin/distribution/settings'),

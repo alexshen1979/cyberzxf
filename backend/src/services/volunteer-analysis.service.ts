@@ -15,6 +15,13 @@ const logger = createLogger('volunteer');
 const RECOMMENDATION_DISPLAY_LIMIT = 12;
 const MAX_RECOMMENDATION_DISPLAY_LIMIT = 300;
 const VOLUNTEER_REPORT_AI_TIMEOUT_MS = 8000;
+const MIN_RECOMMENDATIONS_PER_BUCKET = 12;
+const RECOMMENDATION_BUCKETS: RecommendationBucket[] = ['rush', 'stable', 'safe'];
+const BUCKET_LABELS: Record<RecommendationBucket, string> = {
+  rush: '冲刺',
+  stable: '稳妥',
+  safe: '保底',
+};
 const DEFAULT_RANK_BANDS = {
   rushMin: 0.85,
   rushMax: 0.98,
@@ -167,6 +174,13 @@ interface VolunteerResult {
   cityAdvice: string[];
   risks: string[];
   references: Array<{ type: string; title: string; id?: string; source?: string }>;
+}
+
+interface RecommendationClassificationResult {
+  recommendations: VolunteerResult['recommendations'];
+  recommendationStats?: never;
+  stats: VolunteerResult['recommendationStats'];
+  references: Array<{ type: string; title: string; source?: string }>;
 }
 
 type ArtRule = {
@@ -450,19 +464,7 @@ async function retrieveVolunteerContext(input: VolunteerAnalyzeInput) {
       })
     : [];
 
-  let fallbackUniversities: any[] = [];
-  if (admissionScores.length === 0) {
-    const preferredLocationWhere = buildUniversityLocationPreferenceWhere(input);
-    fallbackUniversities = await prisma.university.findMany({
-      where: {
-        OR: preferredLocationWhere.length
-          ? preferredLocationWhere
-          : [{ province: input.province }],
-      },
-      orderBy: [{ is985: 'desc' }, { is211: 'desc' }, { isDoubleFirst: 'desc' }, { name: 'asc' }],
-      take: 36,
-    });
-  }
+  const fallbackUniversities = await retrieveNormalFallbackUniversities(input);
 
   return { admissionScores, knowledge, majors, universityMajors, fallbackUniversities };
 }
@@ -645,49 +647,22 @@ function uniqueAdmissionScores(scores: any[]) {
 
 function buildStructuredResult(input: VolunteerAnalyzeInput, retrieval: any): VolunteerResult {
   const classified = classifyCandidates(input, retrieval.admissionScores);
-  const candidates = classified.recommendations;
-  const recommendationStats = classified.stats;
-  const usedFallback = retrieval.admissionScores.length === 0;
-
-  if (usedFallback) {
-    const fallback = retrieval.fallbackUniversities
-      .map((u: any): RankedCandidate => {
-        const preference = matchScorePreferences(input, { universityName: u.name, university: u });
-        return {
-          preferenceScore: preference.score,
-          distance: 0,
-          year: 0,
-          candidate: {
-            universityId: u.id,
-            universityName: u.name,
-            province: u.province,
-            city: u.city,
-            type: u.type,
-            level: u.level,
-            tags: buildUniversityTags(u),
-            year: null,
-            batch: null,
-            subjectType: null,
-            majorName: null,
-            minScore: null,
-            minRank: null,
-            avgScore: null,
-            planCount: null,
-            preferenceTags: buildPreferenceTags(preference),
-            warningTags: buildWarningTags(input, preference),
-            reason: buildFallbackCandidateReason(input, preference),
-          },
-        };
-      })
-      .sort(sortRankedCandidates)
-      .map((item: RankedCandidate) => item.candidate);
-    candidates.stable = fallback.slice(0, 8);
-    recommendationStats.stable = fallback.length;
-    recommendationStats.preferenceMatched = fallback.filter((item: Candidate) => item.preferenceTags.length > 0).length;
-  }
+  const initialTotal = countRecommendations(classified.recommendations);
+  const completed = completeNormalClassificationWithFallback(
+    input,
+    { ...classified, references: [] },
+    retrieval.fallbackUniversities || [],
+  );
+  const candidates = completed.recommendations;
+  const recommendationStats = completed.stats;
+  const usedFallback = hasFallbackRecommendation(candidates);
 
   const rankText = input.rank ? `，位次约 ${input.rank}` : '，暂未提供位次';
-  const dataText = usedFallback ? '当前匹配录取数据不足，建议先补充位次和历年录取数据。' : '已结合历年录取数据做初步分档。';
+  const dataText = initialTotal && usedFallback
+    ? '已结合历年录取数据做初步分档，并用院校库补足数据不足的档位。'
+    : initialTotal
+      ? '已结合历年录取数据做初步分档。'
+      : '当前匹配录取数据不足，已先用院校库生成冲稳保方向候选。';
   const preferenceText = buildPreferenceExecutionSummary(input, recommendationStats);
 
   return {
@@ -720,8 +695,362 @@ function buildStructuredResult(input: VolunteerAnalyzeInput, retrieval: any): Vo
         title: `${um.university?.name || '院校'} - ${um.majorName}`,
         source: '院校专业库',
       })),
-      ...(usedFallback ? [{ type: 'university', title: '院校库基础信息' }] : [{ type: 'admission_score', title: '历年录取分数/位次数据' }]),
+      ...(initialTotal ? [{ type: 'admission_score', title: '历年录取分数/位次数据' }] : []),
+      ...(usedFallback ? [{ type: 'university', title: '院校库方向候选', source: '院校库' }] : []),
     ],
+  };
+}
+
+function completeNormalClassificationWithFallback(
+  input: VolunteerAnalyzeInput,
+  classified: RecommendationClassificationResult,
+  fallbackUniversities: any[],
+): RecommendationClassificationResult {
+  const displayLimit = normalizeRecommendationLimit(input.recommendationLimit);
+  const minimum = MIN_RECOMMENDATIONS_PER_BUCKET;
+  if (RECOMMENDATION_BUCKETS.every(bucket => classified.recommendations[bucket].length >= minimum)) {
+    return classified;
+  }
+
+  const recommendations = cloneRecommendationGroups(classified.recommendations);
+  const existingKeys = new Set(
+    RECOMMENDATION_BUCKETS
+      .flatMap(bucket => recommendations[bucket])
+      .map(item => item.universityId || item.universityName)
+      .filter(Boolean),
+  );
+  const fallback = buildNormalFallbackClassification(input, fallbackUniversities, existingKeys);
+
+  for (const bucket of RECOMMENDATION_BUCKETS) {
+    const needed = Math.max(0, minimum - recommendations[bucket].length);
+    if (!needed) continue;
+    const additions: Candidate[] = [];
+    const usedKeys = new Set(
+      recommendations[bucket]
+        .map(item => item.universityId || item.universityName)
+        .filter(Boolean),
+    );
+    for (const item of fallback.recommendations[bucket]) {
+      if (additions.length >= needed) break;
+      const key = item.universityId || item.universityName;
+      if (!key || usedKeys.has(key)) continue;
+      usedKeys.add(key);
+      additions.push(item);
+    }
+    recommendations[bucket].push(...additions);
+  }
+
+  const allItems = RECOMMENDATION_BUCKETS.flatMap(bucket => recommendations[bucket]);
+  return {
+    recommendations,
+    stats: {
+      rush: recommendations.rush.length,
+      stable: recommendations.stable.length,
+      safe: recommendations.safe.length,
+      displayLimit,
+      preferenceMatched: allItems.filter(item => hasPreferenceMatch(item)).length,
+      avoidMajorExcluded: classified.stats.avoidMajorExcluded + fallback.stats.avoidMajorExcluded,
+    },
+    references: mergeReferences(classified.references || [], fallback.references || []),
+  };
+}
+
+function buildNormalFallbackClassification(
+  input: VolunteerAnalyzeInput,
+  universities: any[],
+  existingKeys: Set<string>,
+): RecommendationClassificationResult {
+  const displayLimit = Math.max(normalizeRecommendationLimit(input.recommendationLimit), MIN_RECOMMENDATIONS_PER_BUCKET);
+  const targetPerBucket = displayLimit;
+  const buckets = distributeNormalFallbackUniversities(input, universities, existingKeys, targetPerBucket);
+  const recommendations = Object.fromEntries(
+    RECOMMENDATION_BUCKETS.map(bucket => [
+      bucket,
+      buckets[bucket].slice(0, displayLimit).map((university, index) => (
+        buildNormalFallbackCandidate(input, university, bucket, index)
+      )),
+    ]),
+  ) as VolunteerResult['recommendations'];
+  const allItems = RECOMMENDATION_BUCKETS.flatMap(bucket => recommendations[bucket]);
+
+  return {
+    recommendations,
+    stats: {
+      rush: recommendations.rush.length,
+      stable: recommendations.stable.length,
+      safe: recommendations.safe.length,
+      displayLimit,
+      preferenceMatched: allItems.filter(item => hasPreferenceMatch(item)).length,
+      avoidMajorExcluded: 0,
+    },
+    references: allItems.length ? [{ type: 'university', title: '院校库方向候选', source: '院校库' }] : [],
+  };
+}
+
+async function retrieveNormalFallbackUniversities(input: VolunteerAnalyzeInput) {
+  const preferredLocationWhere = buildUniversityLocationPreferenceWhere(input);
+  const levelWhere = buildNormalUniversityLevelWhere(input);
+  const preferredMajors = normalizeKeywords(input.preferredMajors);
+  const majorWhere = preferredMajors.length
+    ? {
+        status: 'enabled',
+        university: { is: levelWhere },
+        OR: preferredMajors.flatMap(major => keywordVariants(major).flatMap(variant => [
+          { majorName: { contains: variant } },
+          { featureTags: { contains: variant } },
+          { employmentNote: { contains: variant } },
+          { major: { is: { name: { contains: variant } } } },
+          { major: { is: { category: { contains: variant } } } },
+        ])),
+      }
+    : null;
+
+  const [majorMatches, preferredSchools, localSchools, broadSchools] = await Promise.all([
+    majorWhere
+      ? prisma.universityMajor.findMany({
+          where: majorWhere,
+          include: { university: true },
+          take: 220,
+          orderBy: [{ updatedAt: 'desc' }],
+        })
+      : Promise.resolve([]),
+    preferredLocationWhere.length
+      ? prisma.university.findMany({
+          where: { AND: [levelWhere, { OR: preferredLocationWhere }] },
+          take: 100,
+          orderBy: [{ is985: 'desc' }, { is211: 'desc' }, { isDoubleFirst: 'desc' }, { name: 'asc' }],
+        })
+      : Promise.resolve([]),
+    prisma.university.findMany({
+      where: { AND: [levelWhere, { province: input.province }] },
+      take: 100,
+      orderBy: [{ is985: 'desc' }, { is211: 'desc' }, { isDoubleFirst: 'desc' }, { name: 'asc' }],
+    }),
+    prisma.university.findMany({
+      where: levelWhere,
+      take: 160,
+      orderBy: [{ is985: 'desc' }, { is211: 'desc' }, { isDoubleFirst: 'desc' }, { name: 'asc' }],
+    }),
+  ]);
+
+  return uniqueUniversities([
+    ...buildMajorMatchUniversities(majorMatches),
+    ...preferredSchools,
+    ...localSchools,
+    ...broadSchools,
+    ...staticNormalFallbackUniversities(input),
+  ]);
+}
+
+function staticNormalFallbackUniversities(input: VolunteerAnalyzeInput) {
+  const isVocational = normalFallbackBatch(input) === '专科';
+  const items = isVocational
+    ? [
+        ['南京信息职业技术学院', '江苏', '南京', '理工', '高职专科', '信息技术 智能制造'],
+        ['无锡职业技术大学', '江苏', '无锡', '理工', '本科', '智能制造 装备制造'],
+        ['江苏农林职业技术学院', '江苏', '镇江', '农林', '高职专科', '现代农业 生态技术'],
+        ['常州信息职业技术学院', '江苏', '常州', '理工', '高职专科', '软件 信息技术'],
+        ['江苏经贸职业技术学院', '江苏', '南京', '财经', '高职专科', '财经 商贸'],
+        ['苏州工艺美术职业技术学院', '江苏', '苏州', '艺术', '高职专科', '艺术 设计'],
+        ['金华职业技术大学', '浙江', '金华', '综合', '本科', '综合应用技术'],
+        ['浙江金融职业学院', '浙江', '杭州', '财经', '高职专科', '金融 财经'],
+        ['宁波职业技术大学', '浙江', '宁波', '综合', '本科', '港口 制造 商贸'],
+        ['杭州职业技术大学', '浙江', '杭州', '综合', '本科', '智能制造 商贸'],
+        ['北京科技职业大学', '北京', '北京', '理工', '本科', '电子 信息技术'],
+        ['天津职业大学', '天津', '天津', '综合', '本科', '综合应用技术'],
+        ['山东商业职业技术学院', '山东', '济南', '财经', '高职专科', '商贸 财经'],
+        ['淄博职业技术大学', '山东', '淄博', '综合', '本科', '智能制造 医护'],
+        ['青岛职业技术学院', '山东', '青岛', '综合', '高职专科', '商贸 旅游'],
+        ['广州职业技术大学', '广东', '广州', '综合', '本科', '商贸 设计'],
+        ['广东轻工职业技术大学', '广东', '广州', '理工', '本科', '轻工 设计'],
+        ['顺德职业技术大学', '广东', '佛山', '综合', '本科', '智能制造 商贸'],
+        ['深圳信息职业技术大学', '广东', '深圳', '理工', '本科', '软件 信息技术'],
+        ['重庆电子科技职业大学', '重庆', '重庆', '理工', '本科', '电子 信息技术'],
+        ['成都航空职业技术大学', '四川', '成都', '理工', '本科', '航空 装备制造'],
+        ['四川工程职业技术大学', '四川', '德阳', '理工', '本科', '智能制造 机械'],
+        ['陕西工业职业技术大学', '陕西', '咸阳', '理工', '本科', '装备制造'],
+        ['黄河水利职业技术大学', '河南', '开封', '理工', '本科', '水利 土木'],
+        ['武汉职业技术大学', '湖北', '武汉', '综合', '本科', '电子 商贸'],
+        ['长沙民政职业技术学院', '湖南', '长沙', '综合', '高职专科', '民政 服务管理'],
+        ['湖南铁道职业技术学院', '湖南', '株洲', '理工', '高职专科', '轨道交通'],
+        ['福建船政交通职业学院', '福建', '福州', '理工', '高职专科', '交通 船舶'],
+        ['厦门海洋职业技术学院', '福建', '厦门', '农林', '高职专科', '海洋 食品'],
+        ['安徽职业技术大学', '安徽', '合肥', '综合', '本科', '智能制造 商贸'],
+        ['芜湖职业技术大学', '安徽', '芜湖', '理工', '本科', '装备制造'],
+        ['江西应用技术职业学院', '江西', '赣州', '理工', '高职专科', '资源 环境'],
+        ['南宁职业技术大学', '广西', '南宁', '综合', '本科', '商贸 信息技术'],
+        ['海南经贸职业技术学院', '海南', '海口', '财经', '高职专科', '经贸 旅游'],
+        ['昆明冶金职业大学', '云南', '昆明', '理工', '本科', '冶金 建筑'],
+        ['贵州交通职业大学', '贵州', '贵阳', '理工', '本科', '交通 土木'],
+        ['新疆农业职业技术大学', '新疆', '昌吉', '农林', '本科', '现代农业'],
+      ]
+    : [
+        ['南京大学', '江苏', '南京', '综合', '本科', '综合研究型', true, true, true],
+        ['东南大学', '江苏', '南京', '综合', '本科', '工科 建筑 信息', true, true, true],
+        ['南京师范大学', '江苏', '南京', '师范', '本科', '师范 文科 教育', false, true, true],
+        ['苏州大学', '江苏', '苏州', '综合', '本科', '综合 医学 材料', false, true, true],
+        ['南京航空航天大学', '江苏', '南京', '理工', '本科', '航空航天 工科', false, true, true],
+        ['南京理工大学', '江苏', '南京', '理工', '本科', '工科 智能制造', false, true, true],
+        ['河海大学', '江苏', '南京', '理工', '本科', '水利 土木 环境', false, true, true],
+        ['江南大学', '江苏', '无锡', '综合', '本科', '食品 设计 轻工', false, true, true],
+        ['南京邮电大学', '江苏', '南京', '理工', '本科', '通信 计算机'],
+        ['南京信息工程大学', '江苏', '南京', '理工', '本科', '气象 计算机'],
+        ['南京工业大学', '江苏', '南京', '理工', '本科', '化工 材料'],
+        ['南京财经大学', '江苏', '南京', '财经', '本科', '财经 管理'],
+        ['江苏大学', '江苏', '镇江', '综合', '本科', '机械 医学 农机'],
+        ['扬州大学', '江苏', '扬州', '综合', '本科', '综合 师范 农学'],
+        ['南通大学', '江苏', '南通', '综合', '本科', '医学 师范 工科'],
+        ['常州大学', '江苏', '常州', '理工', '本科', '化工 材料'],
+        ['江苏师范大学', '江苏', '徐州', '师范', '本科', '师范 文科'],
+        ['南京工程学院', '江苏', '南京', '理工', '本科', '电力 机械'],
+        ['南京晓庄学院', '江苏', '南京', '师范', '本科', '师范 应用'],
+        ['金陵科技学院', '江苏', '南京', '理工', '本科', '应用技术'],
+        ['盐城工学院', '江苏', '盐城', '理工', '本科', '工科 应用'],
+        ['淮阴师范学院', '江苏', '淮安', '师范', '本科', '师范 应用'],
+        ['江苏海洋大学', '江苏', '连云港', '综合', '本科', '海洋 工科'],
+        ['宿迁学院', '江苏', '宿迁', '综合', '本科', '应用型本科'],
+        ['上海大学', '上海', '上海', '综合', '本科', '综合 工科', false, true, true],
+        ['华东理工大学', '上海', '上海', '理工', '本科', '化工 材料', false, true, true],
+        ['浙江工业大学', '浙江', '杭州', '理工', '本科', '工科 计算机'],
+        ['杭州电子科技大学', '浙江', '杭州', '理工', '本科', '电子 信息'],
+        ['宁波大学', '浙江', '宁波', '综合', '本科', '综合 海洋', false, false, true],
+        ['安徽大学', '安徽', '合肥', '综合', '本科', '综合 文科', false, true, true],
+        ['合肥工业大学', '安徽', '合肥', '理工', '本科', '车辆 机械', false, true, true],
+        ['山东大学', '山东', '济南', '综合', '本科', '综合 医学', true, true, true],
+        ['青岛大学', '山东', '青岛', '综合', '本科', '医学 纺织'],
+        ['河南大学', '河南', '开封', '综合', '本科', '综合 师范', false, false, true],
+        ['武汉科技大学', '湖北', '武汉', '理工', '本科', '材料 工科'],
+        ['湖北大学', '湖北', '武汉', '综合', '本科', '综合 师范'],
+        ['湖南师范大学', '湖南', '长沙', '师范', '本科', '师范 文科', false, true, true],
+        ['深圳大学', '广东', '深圳', '综合', '本科', '计算机 建筑'],
+        ['广东工业大学', '广东', '广州', '理工', '本科', '工科 设计'],
+        ['成都理工大学', '四川', '成都', '理工', '本科', '地质 工科'],
+        ['西南石油大学', '四川', '成都', '理工', '本科', '石油 工科', false, false, true],
+        ['重庆邮电大学', '重庆', '重庆', '理工', '本科', '通信 计算机'],
+        ['西安理工大学', '陕西', '西安', '理工', '本科', '水利 工科'],
+        ['西北大学', '陕西', '西安', '综合', '本科', '综合 文理', false, true, true],
+      ];
+
+  return items.map(([name, province, city, type, level, featureTags, is985, is211, isDoubleFirst]) => ({
+    id: null,
+    name,
+    province,
+    city,
+    type,
+    level,
+    featureTags,
+    properties: featureTags,
+    is985: Boolean(is985),
+    is211: Boolean(is211),
+    isDoubleFirst: Boolean(isDoubleFirst),
+  }));
+}
+
+function distributeNormalFallbackUniversities(
+  input: VolunteerAnalyzeInput,
+  universities: any[],
+  excluded: Set<string>,
+  targetPerBucket: number,
+) {
+  const available = universities.filter((university: any) => {
+    const key = university?.id || university?.name;
+    return key && !excluded.has(key) && normalLevelFitsUniversity(input, university);
+  });
+  const ranked = available
+    .map((university: any) => ({
+      university,
+      preferenceScore: matchScorePreferences(input, normalFallbackPreferenceSource(input, university)).score,
+      majorScore: normalMajorRelevanceScore(input, university),
+      qualityScore: universityQualityScore(university),
+    }))
+    .sort((a, b) =>
+      (b.preferenceScore + b.majorScore + b.qualityScore) -
+      (a.preferenceScore + a.majorScore + a.qualityScore) ||
+      String(a.university.name || '').localeCompare(String(b.university.name || ''), 'zh-Hans-CN')
+    );
+
+  const result: Record<RecommendationBucket, any[]> = { rush: [], stable: [], safe: [] };
+  const used = new Set<string>();
+  const takeFor = (bucket: RecommendationBucket, sorted: typeof ranked) => {
+    for (const item of sorted) {
+      if (result[bucket].length >= targetPerBucket) break;
+      const key = item.university.id || item.university.name;
+      if (!key || used.has(key)) continue;
+      used.add(key);
+      result[bucket].push(item.university);
+    }
+  };
+
+  takeFor('rush', [...ranked].sort((a, b) =>
+    (b.qualityScore + b.preferenceScore * 0.8 + b.majorScore * 0.7) -
+    (a.qualityScore + a.preferenceScore * 0.8 + a.majorScore * 0.7)
+  ));
+  takeFor('stable', [...ranked].sort((a, b) =>
+    (b.preferenceScore + b.majorScore + b.qualityScore * 0.75) -
+    (a.preferenceScore + a.majorScore + a.qualityScore * 0.75)
+  ));
+  takeFor('safe', [...ranked].sort((a, b) =>
+    (normalSafetyScore(input, b.university) + b.preferenceScore * 0.8 + b.majorScore * 0.7) -
+    (normalSafetyScore(input, a.university) + a.preferenceScore * 0.8 + a.majorScore * 0.7)
+  ));
+
+  for (const bucket of RECOMMENDATION_BUCKETS) {
+    takeFor(bucket, ranked);
+  }
+  return result;
+}
+
+function buildNormalFallbackCandidate(
+  input: VolunteerAnalyzeInput,
+  university: any,
+  bucket: RecommendationBucket,
+  index: number,
+): Candidate {
+  const preference = matchScorePreferences(input, normalFallbackPreferenceSource(input, university));
+  const preferenceTags = buildPreferenceTags(preference);
+  const warningTags = ['资料候选', '需核对录取线', ...buildWarningTags(input, preference)];
+  const relatedMajorNames = Array.isArray(university.__majorNames) ? university.__majorNames.slice(0, 3) : [];
+  const majorName = relatedMajorNames[0] || null;
+  const reason = buildNormalFallbackCandidateReason(input, university, bucket);
+
+  return {
+    universityId: university.id,
+    universityName: university.name,
+    province: university.province || null,
+    city: university.city || null,
+    type: university.type || null,
+    level: university.level || null,
+    tags: buildUniversityTags(university),
+    year: input.year || null,
+    batch: input.targetBatch || normalFallbackBatch(input),
+    subjectType: input.subjectType,
+    majorName,
+    minScore: null,
+    minRank: null,
+    avgScore: null,
+    planCount: null,
+    preferenceTags,
+    warningTags: [...new Set(warningTags)],
+    reason,
+    optionLines: [{
+      title: relatedMajorNames.length ? `相关方向：${relatedMajorNames.join('、')}` : `院校库资料候选 ${index + 1}`,
+      bucket,
+      lineType: 'normal_fallback',
+      groupCode: null,
+      groupName: null,
+      subjectRequirement: input.subjectType,
+      year: input.year || null,
+      batch: input.targetBatch || normalFallbackBatch(input),
+      subjectType: input.subjectType,
+      majorName,
+      minScore: null,
+      minRank: null,
+      avgScore: null,
+      planCount: null,
+      preferenceTags,
+      warningTags: [...new Set(warningTags)],
+      reason,
+    }],
   };
 }
 
@@ -733,7 +1062,8 @@ async function buildArtStructuredResult(input: VolunteerAnalyzeInput): Promise<V
   const level = input.artLevel || (input.targetBatch?.includes('专科') ? '专科' : '本科');
 
   if (!rule) {
-    return buildUnsupportedArtResult(input, '暂未配置该省份/类别的官方艺术类折算规则。');
+    const fallback = await buildArtFallbackClassification(input);
+    return buildUnsupportedArtResult(input, '暂未配置该省份/类别的官方艺术类折算规则。', fallback);
   }
 
   const compositeScore = calculateArtCompositeScore(rule, cultureScore, professionalScore);
@@ -747,12 +1077,19 @@ async function buildArtStructuredResult(input: VolunteerAnalyzeInput): Promise<V
   ].filter(Boolean);
 
   const scores = await retrieveArtAdmissionScores(input, rule, compositeScore);
-  const classified = classifyArtCandidates(input, scores, compositeScore);
-  const total = classified.stats.rush + classified.stats.stable + classified.stats.safe;
+  const initialClassified = classifyArtCandidates(input, scores, compositeScore);
+  const initialTotal = countRecommendations(initialClassified.recommendations);
+  const classified = await completeArtClassificationWithFallback(input, initialClassified, rule, compositeScore);
+  const total = countRecommendations(classified.recommendations);
+  const usedFallback = hasFallbackRecommendation(classified.recommendations);
   const sourceText = rule.sourceName ? `规则来源：${rule.sourceName}。` : '';
-  const supportText = total
+  const supportText = initialTotal && usedFallback
+    ? `已按${input.province}${rule.year}年${artCategory}${level}艺术类投档线做初步分档，并用院校库补足数据不足的档位。`
+    : initialTotal
     ? `已按${input.province}${rule.year}年${artCategory}${level}艺术类投档线做初步分档。`
-    : `当前已能计算综合分，但${input.province}${artCategory}${level}的院校投档线还未补齐，暂不生成院校清单。`;
+    : total
+      ? `当前已能计算综合分，但${input.province}${artCategory}${level}的院校投档线还未补齐，已先用院校库生成冲稳保方向候选。`
+      : `当前已能计算综合分，但${input.province}${artCategory}${level}的院校投档线和院校库候选都不足，请先补充基础数据。`;
 
   return {
     summary: `${input.province}${artCategory}${level}，文化 ${cultureScore} 分、专业 ${professionalScore} 分，折算综合分约 ${formatScore(compositeScore)}。${supportText}${sourceText}`,
@@ -771,7 +1108,9 @@ async function buildArtStructuredResult(input: VolunteerAnalyzeInput): Promise<V
     risks: [
       '艺术类各省折算公式不同，且同一省不同类别也可能不同，不能跨省直接比较综合分。',
       '校考、顺序志愿和特殊章程专业不适合用平行志愿投档线直接预测。',
-      '当前艺术类功能优先支持省统考平行志愿，缺官方投档线的省份会明确提示，不会强行编造推荐。',
+      usedFallback
+        ? '带“资料候选”的院校用于避免空报告，只代表可进一步核对的方向，不能当作投档概率结论。'
+        : '当前艺术类功能优先支持省统考平行志愿，缺官方投档线的省份会明确提示，不会强行编造投档结论。',
     ],
     references: [
       {
@@ -1022,14 +1361,740 @@ function classifyArtCandidates(input: VolunteerAnalyzeInput, rows: any[], compos
   };
 }
 
-function buildUnsupportedArtResult(input: VolunteerAnalyzeInput, message: string): VolunteerResult {
-  const category = input.artCategory || '艺术类';
+async function completeArtClassificationWithFallback(
+  input: VolunteerAnalyzeInput,
+  classified: RecommendationClassificationResult,
+  rule: ArtRule,
+  compositeScore: number,
+): Promise<RecommendationClassificationResult> {
+  const displayLimit = normalizeRecommendationLimit(input.recommendationLimit);
+  const minimum = MIN_RECOMMENDATIONS_PER_BUCKET;
+  if (RECOMMENDATION_BUCKETS.every(bucket => classified.recommendations[bucket].length >= minimum)) {
+    return classified;
+  }
+
+  const fallback = await buildArtFallbackClassification(input, {
+    existing: classified.recommendations,
+    rule,
+    compositeScore,
+  });
+  const recommendations = cloneRecommendationGroups(classified.recommendations);
+  const usedNames = new Set(
+    RECOMMENDATION_BUCKETS
+      .flatMap(bucket => recommendations[bucket])
+      .map(item => item.universityId || item.universityName)
+      .filter(Boolean),
+  );
+
+  for (const bucket of RECOMMENDATION_BUCKETS) {
+    const needed = Math.max(0, minimum - recommendations[bucket].length);
+    if (!needed) continue;
+    const additions: Candidate[] = [];
+    for (const item of fallback.recommendations[bucket]) {
+      if (additions.length >= needed) break;
+      const key = item.universityId || item.universityName;
+      if (!key || usedNames.has(key)) continue;
+      usedNames.add(key);
+      additions.push(item);
+    }
+    recommendations[bucket].push(...additions);
+  }
+
+  const allItems = RECOMMENDATION_BUCKETS.flatMap(bucket => recommendations[bucket]);
   return {
-    summary: `${input.province}${category}暂不能生成院校推荐：${message}`,
-    scorePosition: '艺术类必须按本省当年官方折算规则和同类别投档线判断，普通类分数/位次不能直接套用。',
+    recommendations,
+    stats: {
+      rush: recommendations.rush.length,
+      stable: recommendations.stable.length,
+      safe: recommendations.safe.length,
+      displayLimit,
+      preferenceMatched: allItems.filter(item => hasPreferenceMatch(item)).length,
+      avoidMajorExcluded: classified.stats.avoidMajorExcluded + fallback.stats.avoidMajorExcluded,
+    },
+    references: mergeReferences(classified.references, fallback.references),
+  };
+}
+
+async function buildArtFallbackClassification(
+  input: VolunteerAnalyzeInput,
+  options: {
+    existing?: VolunteerResult['recommendations'];
+    rule?: ArtRule;
+    compositeScore?: number;
+  } = {},
+): Promise<RecommendationClassificationResult> {
+  const displayLimit = Math.max(normalizeRecommendationLimit(input.recommendationLimit), MIN_RECOMMENDATIONS_PER_BUCKET);
+  const targetPerBucket = displayLimit;
+  const excluded = new Set(
+    RECOMMENDATION_BUCKETS
+      .flatMap(bucket => options.existing?.[bucket] || [])
+      .map(item => item.universityId || item.universityName)
+      .filter(Boolean),
+  );
+  const universities = await retrieveArtFallbackUniversities(input);
+  const buckets = distributeArtFallbackUniversities(input, universities, excluded, targetPerBucket);
+  const recommendations = Object.fromEntries(
+    RECOMMENDATION_BUCKETS.map(bucket => [
+      bucket,
+      buckets[bucket].slice(0, displayLimit).map((university, index) => (
+        buildArtFallbackCandidate(input, university, bucket, index, options)
+      )),
+    ]),
+  ) as VolunteerResult['recommendations'];
+  const allItems = RECOMMENDATION_BUCKETS.flatMap(bucket => recommendations[bucket]);
+
+  return {
+    recommendations,
+    stats: {
+      rush: recommendations.rush.length,
+      stable: recommendations.stable.length,
+      safe: recommendations.safe.length,
+      displayLimit,
+      preferenceMatched: allItems.filter(item => hasPreferenceMatch(item)).length,
+      avoidMajorExcluded: 0,
+    },
+    references: allItems.length ? [{ type: 'university', title: '院校库艺术类方向候选', source: '院校库' }] : [],
+  };
+}
+
+async function retrieveArtFallbackUniversities(input: VolunteerAnalyzeInput) {
+  const artKeywords = artCategoryKeywords(input);
+  const preferredLocationWhere = buildUniversityLocationPreferenceWhere(input);
+  const levelWhere = buildUniversityLevelWhere(input);
+  const artSchoolWhere = {
+    OR: [
+      { type: { contains: '艺术' } },
+      { name: { contains: '艺术' } },
+      { name: { contains: '美术' } },
+      { name: { contains: '音乐' } },
+      { name: { contains: '戏剧' } },
+      { name: { contains: '电影' } },
+      { name: { contains: '传媒' } },
+      { featureTags: { contains: '艺术' } },
+    ],
+  };
+  const majorWhere = artKeywords.length
+    ? {
+        status: 'enabled',
+        university: { is: levelWhere },
+        OR: artKeywords.flatMap(keyword => [
+          { majorName: { contains: keyword } },
+          { featureTags: { contains: keyword } },
+          { employmentNote: { contains: keyword } },
+        ]),
+      }
+    : { status: 'enabled', university: { is: levelWhere } };
+
+  const [majorMatches, preferredArtSchools, artSchools, localSchools, broadSchools] = await Promise.all([
+    prisma.universityMajor.findMany({
+      where: majorWhere,
+      include: { university: true },
+      take: 240,
+      orderBy: [{ updatedAt: 'desc' }],
+    }),
+    preferredLocationWhere.length
+      ? prisma.university.findMany({
+          where: { AND: [levelWhere, artSchoolWhere, { OR: preferredLocationWhere }] },
+          take: 80,
+          orderBy: [{ is985: 'desc' }, { is211: 'desc' }, { isDoubleFirst: 'desc' }, { name: 'asc' }],
+        })
+      : Promise.resolve([]),
+    prisma.university.findMany({
+      where: { AND: [levelWhere, artSchoolWhere] },
+      take: 120,
+      orderBy: [{ is985: 'desc' }, { is211: 'desc' }, { isDoubleFirst: 'desc' }, { name: 'asc' }],
+    }),
+    prisma.university.findMany({
+      where: { AND: [levelWhere, { province: input.province }] },
+      take: 80,
+      orderBy: [{ is985: 'desc' }, { is211: 'desc' }, { isDoubleFirst: 'desc' }, { name: 'asc' }],
+    }),
+    prisma.university.findMany({
+      where: levelWhere,
+      take: 120,
+      orderBy: [{ is985: 'desc' }, { is211: 'desc' }, { isDoubleFirst: 'desc' }, { name: 'asc' }],
+    }),
+  ]);
+
+  const staticFallback = await resolveStaticArtFallbackUniversities(input, staticArtFallbackUniversities(input));
+
+  return uniqueUniversities([
+    ...buildArtMajorMatchUniversities(majorMatches),
+    ...preferredArtSchools,
+    ...artSchools,
+    ...localSchools,
+    ...broadSchools,
+    ...staticFallback,
+  ]);
+}
+
+async function resolveStaticArtFallbackUniversities(input: VolunteerAnalyzeInput, items: any[]) {
+  if (!items.length) return [];
+  const names = items.map(item => item?.name).filter(Boolean);
+  const matched = await prisma.university.findMany({
+    where: { name: { in: names } },
+  });
+  const byName = new Map(matched.map(item => [item.name, item]));
+  return items
+    .map(item => {
+      const university = byName.get(item.name);
+      if (!university) return item;
+      return {
+        ...university,
+        __artMajorNames: item.__artMajorNames,
+        __staticArtFallback: true,
+      };
+    })
+    .filter(item => artLevelFitsUniversity(input, item));
+}
+
+function staticArtFallbackUniversities(input: VolunteerAnalyzeInput) {
+  const level = artBatch(input);
+  const base =
+    level === '专科'
+      ? [
+          ['苏州工艺美术职业技术学院', '江苏', '苏州', '艺术', '高职专科', '视觉传达 环境艺术 产品艺术'],
+          ['南京视觉艺术职业学院', '江苏', '南京', '艺术', '高职专科', '视觉传达 影视动画'],
+          ['上海工艺美术职业学院', '上海', '上海', '艺术', '高职专科', '工艺美术 视觉设计'],
+          ['浙江艺术职业学院', '浙江', '杭州', '艺术', '高职专科', '表演 音乐 舞蹈'],
+          ['浙江横店影视职业学院', '浙江', '金华', '艺术', '高职专科', '表演 影视 编导'],
+          ['安徽广播影视职业技术学院', '安徽', '合肥', '艺术', '高职专科', '播音 编导 影视'],
+          ['山东传媒职业学院', '山东', '济南', '艺术', '高职专科', '播音 影视 编导'],
+          ['山东艺术设计职业学院', '山东', '济南', '艺术', '高职专科', '艺术设计 视觉传达'],
+          ['北京戏曲艺术职业学院', '北京', '北京', '艺术', '高职专科', '戏曲 表演 音乐'],
+          ['天津艺术职业学院', '天津', '天津', '艺术', '高职专科', '表演 音乐 舞蹈'],
+          ['河北艺术职业学院', '河北', '石家庄', '艺术', '高职专科', '表演 音乐 舞蹈'],
+          ['山西文化旅游职业大学', '山西', '太原', '综合', '本科', '表演 音乐 舞蹈 旅游'],
+          ['内蒙古艺术学院', '内蒙古', '呼和浩特', '艺术', '本科', '音乐 舞蹈 表演'],
+          ['辽宁广告职业学院', '辽宁', '沈阳', '艺术', '高职专科', '广告 视觉传达'],
+          ['黑龙江艺术职业学院', '黑龙江', '哈尔滨', '艺术', '高职专科', '音乐 舞蹈 表演'],
+          ['江西陶瓷工艺美术职业技术学院', '江西', '景德镇', '艺术', '高职专科', '陶瓷 设计 美术'],
+          ['湖南大众传媒职业技术学院', '湖南', '长沙', '艺术', '高职专科', '播音 影视 编导'],
+          ['广东文艺职业学院', '广东', '广州', '艺术', '高职专科', '音乐 舞蹈 艺术设计'],
+          ['广东艺术职业学院', '广东', '广州', '艺术', '高职专科', '舞蹈 戏剧 表演'],
+          ['珠海艺术职业学院', '广东', '珠海', '艺术', '高职专科', '艺术设计 表演'],
+          ['广西演艺职业学院', '广西', '南宁', '艺术', '高职专科', '表演 音乐 舞蹈'],
+          ['四川艺术职业学院', '四川', '成都', '艺术', '高职专科', '表演 音乐 舞蹈'],
+          ['四川文化传媒职业学院', '四川', '成都', '艺术', '高职专科', '播音 表演 影视'],
+          ['云南文化艺术职业学院', '云南', '昆明', '艺术', '高职专科', '音乐 舞蹈 表演'],
+          ['陕西艺术职业学院', '陕西', '西安', '艺术', '高职专科', '表演 音乐 舞蹈'],
+        ]
+      : [
+          ['南京艺术学院', '江苏', '南京', '艺术', '本科', '美术 音乐 表演 设计'],
+          ['上海戏剧学院', '上海', '上海', '艺术', '本科', '表演 导演 戏剧 影视'],
+          ['上海音乐学院', '上海', '上海', '艺术', '本科', '音乐 声乐 器乐', false, false, true],
+          ['中国传媒大学', '北京', '北京', '艺术', '本科', '播音 编导 表演 影视', false, true, true],
+          ['北京电影学院', '北京', '北京', '艺术', '本科', '电影 表演 导演 影视'],
+          ['中央戏剧学院', '北京', '北京', '艺术', '本科', '戏剧 表演 导演', false, false, true],
+          ['中央音乐学院', '北京', '北京', '艺术', '本科', '音乐 作曲 声乐 器乐', false, true, true],
+          ['中国音乐学院', '北京', '北京', '艺术', '本科', '音乐 声乐 器乐', false, false, true],
+          ['北京舞蹈学院', '北京', '北京', '艺术', '本科', '舞蹈 表演 编导'],
+          ['鲁迅美术学院', '辽宁', '沈阳', '艺术', '本科', '美术 设计'],
+          ['沈阳音乐学院', '辽宁', '沈阳', '艺术', '本科', '音乐 舞蹈 表演'],
+          ['吉林艺术学院', '吉林', '长春', '艺术', '本科', '美术 音乐 表演 设计'],
+          ['哈尔滨音乐学院', '黑龙江', '哈尔滨', '艺术', '本科', '音乐 声乐 器乐'],
+          ['天津美术学院', '天津', '天津', '艺术', '本科', '美术 设计'],
+          ['天津音乐学院', '天津', '天津', '艺术', '本科', '音乐 表演 舞蹈'],
+          ['河北传媒学院', '河北', '石家庄', '艺术', '本科', '播音 编导 表演 影视'],
+          ['山东艺术学院', '山东', '济南', '艺术', '本科', '美术 音乐 表演 设计'],
+          ['山东工艺美术学院', '山东', '济南', '艺术', '本科', '美术 设计 工艺'],
+          ['景德镇陶瓷大学', '江西', '景德镇', '艺术', '本科', '陶瓷 美术 设计'],
+          ['广州美术学院', '广东', '广州', '艺术', '本科', '美术 设计'],
+          ['星海音乐学院', '广东', '广州', '艺术', '本科', '音乐 表演 作曲'],
+          ['广西艺术学院', '广西', '南宁', '艺术', '本科', '美术 音乐 舞蹈 表演'],
+          ['四川美术学院', '重庆', '重庆', '艺术', '本科', '美术 设计'],
+          ['四川音乐学院', '四川', '成都', '艺术', '本科', '音乐 舞蹈 表演'],
+          ['云南艺术学院', '云南', '昆明', '艺术', '本科', '美术 音乐 舞蹈 表演'],
+          ['西安美术学院', '陕西', '西安', '艺术', '本科', '美术 设计'],
+          ['西安音乐学院', '陕西', '西安', '艺术', '本科', '音乐 舞蹈 表演'],
+          ['新疆艺术学院', '新疆', '乌鲁木齐', '艺术', '本科', '美术 音乐 舞蹈 表演'],
+          ['内蒙古艺术学院', '内蒙古', '呼和浩特', '艺术', '本科', '音乐 舞蹈 表演 美术'],
+          ['浙江传媒学院', '浙江', '杭州', '艺术', '本科', '播音 编导 影视 表演'],
+          ['山西传媒学院', '山西', '太原', '艺术', '本科', '播音 编导 影视'],
+          ['四川传媒学院', '四川', '成都', '艺术', '本科', '播音 编导 表演 影视'],
+          ['武汉传媒学院', '湖北', '武汉', '艺术', '本科', '播音 编导 影视 表演'],
+          ['成都文理学院', '四川', '成都', '综合', '本科', '广播电视编导 播音'],
+          ['南京传媒学院', '江苏', '南京', '艺术', '本科', '播音 编导 表演 影视'],
+          ['首都师范大学科德学院', '北京', '北京', '艺术', '本科', '表演 播音 设计'],
+          ['大连艺术学院', '辽宁', '大连', '艺术', '本科', '音乐 舞蹈 表演 美术'],
+        ];
+
+  const keywords = artCategoryKeywords(input);
+  return base.map(([name, province, city, type, universityLevel, featureTags, is985, is211, isDoubleFirst]) => ({
+    id: null,
+    name,
+    province,
+    city,
+    type,
+    level: universityLevel,
+    featureTags,
+    properties: featureTags,
+    is985: Boolean(is985),
+    is211: Boolean(is211),
+    isDoubleFirst: Boolean(isDoubleFirst),
+    __staticArtFallback: true,
+    __artMajorNames: pickRelatedStaticArtMajors(String(featureTags || ''), keywords),
+  }));
+}
+
+function pickRelatedStaticArtMajors(featureTags: string, keywords: string[]) {
+  const majors = [
+    ['表演', '表演'],
+    ['导演', '戏剧影视导演'],
+    ['戏剧', '戏剧影视文学'],
+    ['影视', '广播电视编导'],
+    ['播音', '播音与主持艺术'],
+    ['主持', '播音与主持艺术'],
+    ['音乐', '音乐表演'],
+    ['声乐', '音乐表演'],
+    ['器乐', '音乐表演'],
+    ['舞蹈', '舞蹈表演'],
+    ['美术', '美术学'],
+    ['设计', '视觉传达设计'],
+    ['动画', '动画'],
+    ['书法', '书法学'],
+  ];
+  const featureText = joinSearchText(featureTags);
+  const categoryText = joinSearchText(...keywords);
+  const picked = majors
+    .filter(([keyword]) => featureText.includes(keyword) && (!categoryText || categoryText.includes(keyword)))
+    .map(([, major]) => major);
+  return [...new Set(picked)];
+}
+
+function buildArtMajorMatchUniversities(majorMatches: any[]) {
+  const map = new Map<string, any>();
+  for (const item of majorMatches || []) {
+    const university = item?.university;
+    const key = university?.id || university?.name;
+    if (!key) continue;
+    const existing = map.get(key) || {
+      ...university,
+      __artMajorNames: [],
+      __artMajorMatchCount: 0,
+    };
+    const majorName = String(item.majorName || '').trim();
+    if (majorName && !existing.__artMajorNames.includes(majorName)) {
+      existing.__artMajorNames.push(majorName);
+    }
+    existing.__artMajorMatchCount += 1;
+    map.set(key, existing);
+  }
+  return [...map.values()];
+}
+
+function distributeArtFallbackUniversities(
+  input: VolunteerAnalyzeInput,
+  universities: any[],
+  excluded: Set<string>,
+  targetPerBucket: number,
+) {
+  const filtered = universities.filter((university: any) => {
+    const key = university?.id || university?.name;
+    return key && !excluded.has(key) && artLevelFitsUniversity(input, university) && isPlausibleArtFallbackUniversity(input, university);
+  });
+  const available = filtered.length ? filtered : universities.filter((university: any) => {
+    const key = university?.id || university?.name;
+    return key && !excluded.has(key) && artLevelFitsUniversity(input, university);
+  });
+  const ranked = available
+    .map((university: any) => ({
+      university,
+      preferenceScore: matchScorePreferences(input, artFallbackPreferenceSource(input, university)).score,
+      relevanceScore: artUniversityRelevanceScore(input, university),
+      qualityScore: universityQualityScore(university),
+      detailScore: university.id ? 2400 : 0,
+      staticPenalty: university.__staticArtFallback ? 450 : 0,
+      specialPenalty: specialArtFallbackPenalty(input, university),
+      localScore: university.province === input.province ? 600 : 0,
+    }))
+    .sort((a, b) =>
+      artFallbackRankScore(b, 'stable') -
+      artFallbackRankScore(a, 'stable') ||
+      String(a.university.name || '').localeCompare(String(b.university.name || ''), 'zh-Hans-CN')
+    );
+  const relevantRanked = ranked.filter(item => item.relevanceScore > 0 || item.preferenceScore > 0);
+  const primaryRanked = relevantRanked.length ? relevantRanked : ranked;
+
+  const result: Record<RecommendationBucket, any[]> = { rush: [], stable: [], safe: [] };
+  const used = new Set<string>();
+  const takeFor = (bucket: RecommendationBucket, sorted: typeof ranked) => {
+    for (const item of sorted) {
+      if (result[bucket].length >= targetPerBucket) break;
+      const key = item.university.id || item.university.name;
+      if (!key || used.has(key)) continue;
+      used.add(key);
+      result[bucket].push(item.university);
+    }
+  };
+
+  takeFor('rush', [...primaryRanked].sort((a, b) =>
+    artFallbackRankScore(b, 'rush') - artFallbackRankScore(a, 'rush')
+  ));
+  takeFor('stable', [...primaryRanked].sort((a, b) =>
+    artFallbackRankScore(b, 'stable') - artFallbackRankScore(a, 'stable')
+  ));
+  takeFor('safe', [...primaryRanked].sort((a, b) =>
+    artFallbackRankScore(b, 'safe', input) - artFallbackRankScore(a, 'safe', input)
+  ));
+
+  for (const bucket of RECOMMENDATION_BUCKETS) {
+    takeFor(bucket, ranked);
+  }
+  return result;
+}
+
+function artFallbackRankScore(
+  item: {
+    university: any;
+    preferenceScore: number;
+    relevanceScore: number;
+    qualityScore: number;
+    detailScore: number;
+    staticPenalty: number;
+    specialPenalty: number;
+    localScore: number;
+  },
+  bucket: RecommendationBucket,
+  input?: VolunteerAnalyzeInput,
+) {
+  const safeScore = input ? artSafetyScore(input, item.university) : 0;
+  const qualityWeight = bucket === 'rush' ? 0.35 : bucket === 'stable' ? 0.25 : 0.1;
+  const safetyWeight = bucket === 'safe' ? 1 : 0;
+  return (
+    item.detailScore +
+    item.relevanceScore * 3.2 +
+    item.preferenceScore * 0.9 +
+    item.localScore +
+    item.qualityScore * qualityWeight +
+    safeScore * safetyWeight -
+    item.staticPenalty -
+    item.specialPenalty
+  );
+}
+
+function specialArtFallbackPenalty(input: VolunteerAnalyzeInput, university: any) {
+  const name = String(university?.name || '');
+  const category = String(input.artCategory || '');
+  let penalty = 0;
+  if (/清华大学美术学院|清华大学|中央美术学院|中国美术学院/u.test(name) && !category.includes('美术') && !category.includes('设计')) {
+    penalty += 5000;
+  }
+  if (/美术学院/u.test(name) && !category.includes('美术') && !category.includes('设计')) {
+    penalty += 2600;
+  }
+  if (/音乐学院/u.test(name) && !category.includes('音乐')) {
+    penalty += 1800;
+  }
+  if (/舞蹈学院/u.test(name) && !category.includes('舞蹈')) {
+    penalty += 1800;
+  }
+  return penalty;
+}
+
+function buildArtFallbackCandidate(
+  input: VolunteerAnalyzeInput,
+  university: any,
+  bucket: RecommendationBucket,
+  index: number,
+  options: {
+    rule?: ArtRule;
+    compositeScore?: number;
+  } = {},
+): Candidate {
+  const preference = matchScorePreferences(input, artFallbackPreferenceSource(input, university));
+  const preferenceTags = buildPreferenceTags(preference);
+  const warningTags = ['资料候选', '需核对投档线', ...buildWarningTags(input, preference)];
+  const reason = buildArtFallbackCandidateReason(input, university, bucket, options);
+  const year = options.rule?.year || input.year || null;
+  const relatedMajorNames = Array.isArray(university.__artMajorNames) ? university.__artMajorNames.slice(0, 3) : [];
+  const majorName = relatedMajorNames[0] || null;
+
+  return {
+    universityId: university.id,
+    universityName: university.name,
+    province: university.province || null,
+    city: university.city || null,
+    type: university.type || null,
+    level: university.level || null,
+    tags: buildUniversityTags(university),
+    year,
+    batch: artBatch(input),
+    subjectType: normalizeArtSubjectType(input.subjectType),
+    majorName,
+    minScore: null,
+    minRank: null,
+    avgScore: null,
+    planCount: null,
+    compositeScore: null,
+    cultureScore: null,
+    professionalScore: null,
+    artCategory: input.artCategory || null,
+    admissionMethod: null,
+    preferenceTags,
+    warningTags: [...new Set(warningTags)],
+    reason,
+    optionLines: [{
+      title: relatedMajorNames.length ? `相关方向：${relatedMajorNames.join('、')}` : `${input.artCategory || '艺术类'}资料候选 ${index + 1}`,
+      bucket,
+      lineType: 'art_fallback',
+      groupCode: null,
+      groupName: null,
+      subjectRequirement: normalizeArtSubjectType(input.subjectType),
+      year,
+      batch: artBatch(input),
+      subjectType: normalizeArtSubjectType(input.subjectType),
+      majorName,
+      minScore: null,
+      minRank: null,
+      avgScore: null,
+      planCount: null,
+      compositeScore: null,
+      cultureScore: null,
+      professionalScore: null,
+      artCategory: input.artCategory || null,
+      admissionMethod: null,
+      preferenceTags,
+      warningTags: [...new Set(warningTags)],
+      reason,
+    }],
+  };
+}
+
+function buildArtFallbackCandidateReason(
+  input: VolunteerAnalyzeInput,
+  university: any,
+  bucket: RecommendationBucket,
+  options: {
+    rule?: ArtRule;
+    compositeScore?: number;
+  } = {},
+) {
+  const category = input.artCategory || '艺术类';
+  const location = [university.city, university.province].filter(Boolean).join(' · ');
+  const basis = options.rule && Number.isFinite(Number(options.compositeScore))
+    ? `你的折算综合分约 ${formatScore(options.compositeScore)}，但该档可用投档线不足。`
+    : '当前缺少可直接折算比较的官方艺术类规则或投档线。';
+  const tags = [university.type, university.level, ...(buildUniversityTags(university) || [])]
+    .filter(Boolean)
+    .slice(0, 3)
+    .join('、');
+  return `${basis}先把${university.name}${location ? `（${location}）` : ''}作为${BUCKET_LABELS[bucket]}方向的${category}资料候选；${tags ? `院校属性：${tags}。` : ''}填报前必须核对本省艺术类招生计划、承认统考/校考要求、专业方向和近年投档线。`;
+}
+
+function artFallbackPreferenceSource(input: VolunteerAnalyzeInput, university: any) {
+  return {
+    universityName: university.name,
+    university,
+    rawData: [
+      university.type,
+      university.level,
+      university.properties,
+      university.featureTags,
+      ...(Array.isArray(university.__artMajorNames) ? university.__artMajorNames : []),
+      input.artCategory,
+      ...artCategoryKeywords(input),
+    ].filter(Boolean).join(' '),
+  };
+}
+
+function buildUniversityLevelWhere(input: VolunteerAnalyzeInput) {
+  const level = artBatch(input);
+  if (level === '专科') {
+    return {
+      OR: [
+        { level: { contains: '专科' } },
+        { level: { contains: '高职' } },
+      ],
+    };
+  }
+  return {
+    OR: [
+      { level: { contains: '本科' } },
+      { level: null },
+    ],
+  };
+}
+
+function artCategoryKeywords(input: VolunteerAnalyzeInput) {
+  const category = String(input.artCategory || '').trim();
+  const keywords = new Set<string>([
+    category,
+    category.replace(/[（）()]/g, ''),
+    ...normalizeKeywords(input.preferredMajors),
+  ].filter(Boolean));
+  if (category.includes('美术') || category.includes('设计')) {
+    ['美术', '设计', '绘画', '视觉传达', '环境设计', '产品设计', '动画', '数字媒体艺术'].forEach(item => keywords.add(item));
+  }
+  if (category.includes('音乐')) {
+    ['音乐', '声乐', '器乐', '作曲', '音乐表演', '音乐学'].forEach(item => keywords.add(item));
+  }
+  if (category.includes('舞蹈')) {
+    ['舞蹈', '舞蹈表演', '舞蹈学', '舞蹈编导'].forEach(item => keywords.add(item));
+  }
+  if (category.includes('表') || category.includes('导') || category.includes('演')) {
+    ['表演', '导演', '戏剧', '影视', '戏剧影视导演', '戏剧影视文学'].forEach(item => keywords.add(item));
+  }
+  if (category.includes('播音') || category.includes('主持')) {
+    ['播音', '主持', '播音与主持艺术'].forEach(item => keywords.add(item));
+  }
+  if (category.includes('书法')) {
+    ['书法', '书法学'].forEach(item => keywords.add(item));
+  }
+  return [...keywords].filter(Boolean);
+}
+
+function artUniversityRelevanceScore(input: VolunteerAnalyzeInput, university: any) {
+  const majorNames = Array.isArray(university.__artMajorNames) ? university.__artMajorNames : [];
+  const text = joinSearchText(university.name, university.type, university.featureTags, university.properties, ...majorNames);
+  let score = 0;
+  if (majorNames.length) score += 1400 + Math.min(majorNames.length, 6) * 120;
+  if (text.includes('艺术')) score += 900;
+  if (text.includes('美术') || text.includes('音乐') || text.includes('戏剧') || text.includes('电影') || text.includes('传媒')) score += 700;
+  for (const keyword of artCategoryKeywords(input)) {
+    if (keyword && text.includes(keyword)) score += 260;
+  }
+  return score;
+}
+
+function isPlausibleArtFallbackUniversity(input: VolunteerAnalyzeInput, university: any) {
+  if (artUniversityRelevanceScore(input, university) > 0) return true;
+  const text = joinSearchText(university.name, university.type, university.properties);
+  if (/医药|医学|中医|药科|公安|警察|司法|军事|军医|海关|消防/u.test(text)) return false;
+  if (/艺术|传媒|戏剧|电影|美术|音乐|舞蹈|体育|师范|综合|语言|民族/u.test(text)) return true;
+  return false;
+}
+
+function artLevelFitsUniversity(input: VolunteerAnalyzeInput, university: any) {
+  const level = String(university?.level || '');
+  if (!level) return true;
+  if (artBatch(input) === '专科') return level.includes('专科') || level.includes('高职');
+  return level.includes('本科') || (!level.includes('专科') && !level.includes('高职'));
+}
+
+function universityQualityScore(university: any) {
+  return (
+    (university?.is985 ? 1800 : 0) +
+    (university?.is211 ? 1200 : 0) +
+    (university?.isDoubleFirst ? 900 : 0) +
+    (String(university?.level || '').includes('本科') ? 260 : 0) +
+    (String(university?.type || '').includes('艺术') ? 220 : 0)
+  );
+}
+
+function artSafetyScore(input: VolunteerAnalyzeInput, university: any) {
+  const sameProvince = university?.province && university.province === input.province ? 900 : 0;
+  const nonElite = university?.is985 || university?.is211 || university?.isDoubleFirst ? 0 : 320;
+  const level = String(university?.level || '');
+  const levelFit = artBatch(input) === '专科'
+    ? (level.includes('专科') || level.includes('高职') ? 500 : 0)
+    : (level.includes('本科') ? 260 : 0);
+  return sameProvince + nonElite + levelFit + artUniversityRelevanceScore(input, university);
+}
+
+function uniqueUniversities(items: any[]) {
+  const result: any[] = [];
+  const byKey = new Map<string, any>();
+  for (const item of items || []) {
+    const key = universityMergeKey(item);
+    if (!key) continue;
+    const existing = byKey.get(key);
+    if (existing) {
+      mergeUniversityCandidateMetadata(existing, item);
+      if (!existing.id && item.id) {
+        Object.assign(existing, item, {
+          __artMajorNames: existing.__artMajorNames,
+          __majorNames: existing.__majorNames,
+          __artMajorMatchCount: existing.__artMajorMatchCount,
+          __majorMatchCount: existing.__majorMatchCount,
+        });
+      }
+      continue;
+    }
+    byKey.set(key, item);
+    result.push(item);
+  }
+  return result;
+}
+
+function universityMergeKey(item: any) {
+  const name = String(item?.name || '').trim().replace(/\s+/g, '');
+  if (name) return `name:${name}`;
+  return item?.id ? `id:${item.id}` : '';
+}
+
+function mergeUniversityCandidateMetadata(target: any, source: any) {
+  const artMajors = [
+    ...(Array.isArray(target.__artMajorNames) ? target.__artMajorNames : []),
+    ...(Array.isArray(source.__artMajorNames) ? source.__artMajorNames : []),
+  ];
+  target.__artMajorNames = [...new Set(artMajors)];
+  const normalMajors = [
+    ...(Array.isArray(target.__majorNames) ? target.__majorNames : []),
+    ...(Array.isArray(source.__majorNames) ? source.__majorNames : []),
+  ];
+  target.__majorNames = [...new Set(normalMajors)];
+  target.__artMajorMatchCount = Math.max(
+    Number(target.__artMajorMatchCount || 0),
+    Number(source.__artMajorMatchCount || 0),
+  );
+  target.__majorMatchCount = Math.max(
+    Number(target.__majorMatchCount || 0),
+    Number(source.__majorMatchCount || 0),
+  );
+}
+
+function cloneRecommendationGroups(groups: VolunteerResult['recommendations']) {
+  return {
+    rush: [...(groups.rush || [])],
+    stable: [...(groups.stable || [])],
+    safe: [...(groups.safe || [])],
+  };
+}
+
+function countRecommendations(groups: VolunteerResult['recommendations']) {
+  return RECOMMENDATION_BUCKETS.reduce((total, bucket) => total + (groups[bucket]?.length || 0), 0);
+}
+
+function hasFallbackRecommendation(groups: VolunteerResult['recommendations']) {
+  return RECOMMENDATION_BUCKETS.some(bucket =>
+    groups[bucket]?.some(item => item.optionLines?.some(line => ['art_fallback', 'normal_fallback'].includes(String(line.lineType || '')))),
+  );
+}
+
+function mergeReferences(
+  left: Array<{ type: string; title: string; source?: string }>,
+  right: Array<{ type: string; title: string; source?: string }>,
+) {
+  const seen = new Set<string>();
+  const result: Array<{ type: string; title: string; source?: string }> = [];
+  for (const item of [...left, ...right]) {
+    const key = [item.type, item.title, item.source].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result.slice(0, 10);
+}
+
+function buildUnsupportedArtResult(
+  input: VolunteerAnalyzeInput,
+  message: string,
+  fallback?: RecommendationClassificationResult,
+): VolunteerResult {
+  const category = input.artCategory || '艺术类';
+  const recommendations = fallback?.recommendations || { rush: [], stable: [], safe: [] };
+  const total = countRecommendations(recommendations);
+  return {
+    summary: total
+      ? `${input.province}${category}暂未配置可直接折算的官方规则，已先按院校库生成冲稳保方向候选。${message}`
+      : `${input.province}${category}暂不能生成院校推荐：${message}`,
+    scorePosition: total
+      ? '当前缺少可直接套用的官方艺术类折算规则，以下院校只作为资料候选，不能当作录取概率结论。'
+      : '艺术类必须按本省当年官方折算规则和同类别投档线判断，普通类分数/位次不能直接套用。',
     strategy: strategyLabel(input.riskPreference),
-    recommendations: { rush: [], stable: [], safe: [] },
-    recommendationStats: {
+    recommendations,
+    recommendationStats: fallback?.stats || {
       rush: 0,
       stable: 0,
       safe: 0,
@@ -1039,21 +2104,23 @@ function buildUnsupportedArtResult(input: VolunteerAnalyzeInput, message: string
     },
     majorAdvice: [
       '建议先确认所在省份艺术类综合分公式、文化控制线和专业统考合格线。',
-      '涨识会优先补齐官方省统考平行志愿投档线；缺数据时不会强行给院校清单。',
+      total
+        ? '当前列表中的“资料候选”用于先把方向列出来，后续必须逐所核对招生章程、承认统考/校考和近年投档线。'
+        : '涨识会优先补齐官方省统考平行志愿投档线；缺数据时不会强行给院校清单。',
     ],
     cityAdvice: buildCityAdvice(input),
     risks: [
       '艺术类规则省份差异很大，不能拿其他省公式套用。',
       '校考和顺序志愿通常需要单独看院校章程，不适合直接用平行志愿模型预测。',
+      ...(total ? ['带“资料候选”的学校不能替代官方投档线，正式填报前必须回到考试院和院校招生章程核对。'] : []),
     ],
-    references: [],
+    references: fallback?.references || [],
   };
 }
 
 function buildArtCandidateReason(input: VolunteerAnalyzeInput, row: any, compositeScore: number, bucket: RecommendationBucket, preference: PreferenceMatch) {
-  const bucketText: Record<string, string> = { rush: '冲刺', stable: '稳妥', safe: '保底' };
   const diff = Number(row.minCompositeScore) - compositeScore;
-  const base = `${row.year}年艺术类投档综合分约 ${formatScore(row.minCompositeScore)}，与你的折算分差 ${diff > 0 ? '+' : ''}${formatScore(diff)}，归为${bucketText[bucket]}档。`;
+  const base = `${row.year}年艺术类投档综合分约 ${formatScore(row.minCompositeScore)}，与你的折算分差 ${diff > 0 ? '+' : ''}${formatScore(diff)}，归为${BUCKET_LABELS[bucket]}档。`;
   return [base, ...buildPreferenceReasonParts(input, preference)].join('');
 }
 
@@ -1438,6 +2505,97 @@ function buildCandidateReason(input: VolunteerAnalyzeInput, score: any, bucket: 
 function buildFallbackCandidateReason(input: VolunteerAnalyzeInput, preference: PreferenceMatch) {
   const base = '当前缺少匹配的历年录取数据，仅基于院校库和偏好做资料候选。';
   return [base, ...buildPreferenceReasonParts(input, preference)].join('');
+}
+
+function buildNormalFallbackCandidateReason(input: VolunteerAnalyzeInput, university: any, bucket: RecommendationBucket) {
+  const location = [university.city, university.province].filter(Boolean).join(' · ');
+  const relatedMajors = Array.isArray(university.__majorNames) && university.__majorNames.length
+    ? `相关方向：${university.__majorNames.slice(0, 3).join('、')}。`
+    : '';
+  const base = `当前该档可用录取线不足，先把${university.name}${location ? `（${location}）` : ''}作为${BUCKET_LABELS[bucket]}方向的资料候选。`;
+  return `${base}${relatedMajors}填报前必须核对近三年录取分/位次、专业组、选科要求和招生计划。`;
+}
+
+function buildMajorMatchUniversities(majorMatches: any[]) {
+  const map = new Map<string, any>();
+  for (const item of majorMatches || []) {
+    const university = item?.university;
+    const key = university?.id || university?.name;
+    if (!key) continue;
+    const existing = map.get(key) || {
+      ...university,
+      __majorNames: [],
+      __majorMatchCount: 0,
+    };
+    const majorName = String(item.majorName || '').trim();
+    if (majorName && !existing.__majorNames.includes(majorName)) {
+      existing.__majorNames.push(majorName);
+    }
+    existing.__majorMatchCount += 1;
+    map.set(key, existing);
+  }
+  return [...map.values()];
+}
+
+function normalFallbackPreferenceSource(input: VolunteerAnalyzeInput, university: any) {
+  return {
+    universityName: university.name,
+    university,
+    rawData: [
+      university.type,
+      university.level,
+      university.properties,
+      university.featureTags,
+      ...(Array.isArray(university.__majorNames) ? university.__majorNames : []),
+      ...normalizeKeywords(input.preferredMajors),
+    ].filter(Boolean).join(' '),
+  };
+}
+
+function normalMajorRelevanceScore(input: VolunteerAnalyzeInput, university: any) {
+  const majorNames = Array.isArray(university.__majorNames) ? university.__majorNames : [];
+  let score = majorNames.length ? 1000 + Math.min(majorNames.length, 8) * 100 : 0;
+  const text = joinSearchText(university.name, university.type, university.featureTags, ...majorNames);
+  for (const keyword of normalizeKeywords(input.preferredMajors)) {
+    if (keyword && text.includes(keyword)) score += 260;
+  }
+  return score;
+}
+
+function normalSafetyScore(input: VolunteerAnalyzeInput, university: any) {
+  const sameProvince = university?.province && university.province === input.province ? 900 : 0;
+  const nonElite = university?.is985 || university?.is211 || university?.isDoubleFirst ? 0 : 300;
+  const levelFit = normalLevelFitsUniversity(input, university) ? 260 : 0;
+  return sameProvince + nonElite + levelFit + normalMajorRelevanceScore(input, university);
+}
+
+function buildNormalUniversityLevelWhere(input: VolunteerAnalyzeInput) {
+  const batch = input.targetBatch || '';
+  if (batch.includes('专科')) {
+    return {
+      OR: [
+        { level: { contains: '专科' } },
+        { level: { contains: '高职' } },
+      ],
+    };
+  }
+  return {
+    OR: [
+      { level: { contains: '本科' } },
+      { level: null },
+    ],
+  };
+}
+
+function normalLevelFitsUniversity(input: VolunteerAnalyzeInput, university: any) {
+  const level = String(university?.level || '');
+  if (!level) return true;
+  if ((input.targetBatch || '').includes('专科')) return level.includes('专科') || level.includes('高职');
+  return level.includes('本科') || (!level.includes('专科') && !level.includes('高职'));
+}
+
+function normalFallbackBatch(input: VolunteerAnalyzeInput) {
+  return (input.targetBatch || '').includes('专科') ? '专科' : '本科';
 }
 
 function buildPreferenceReasonParts(input: VolunteerAnalyzeInput, preference: PreferenceMatch) {

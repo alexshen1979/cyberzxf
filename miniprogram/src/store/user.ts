@@ -39,15 +39,17 @@ export const useUserStore = defineStore('user', () => {
     return false;
   }
 
-  async function completeWechatLogin(profile: { nickName?: string; avatarUrl?: string; phoneCode: string }) {
+  async function completeWechatLogin(profile: { nickName?: string; avatarUrl?: string; phoneCode?: string; phoneEncryptedData?: string; phoneIv?: string }) {
     try {
       const { code } = await uni.login();
       const referralCode = uni.getStorageSync('distribution_referral_code') || '';
-      const res = await api.auth.miniLogin(code, profile, referralCode);
+      const adAttribution = getStoredTencentAdAttribution();
+      const res = await api.auth.miniLogin(code, profile, referralCode, adAttribution);
       token.value = res.data.token;
       userInfo.value = res.data.user;
       uni.setStorageSync('token', res.data.token);
       if (referralCode) uni.removeStorageSync('distribution_referral_code');
+      if (adAttribution) uni.removeStorageSync('tencent_ad_attribution');
       await fetchBalance();
       return true;
     } catch (e) {
@@ -129,3 +131,15 @@ export const useUserStore = defineStore('user', () => {
     logout,
   };
 });
+
+function getStoredTencentAdAttribution() {
+  const data = uni.getStorageSync('tencent_ad_attribution');
+  if (!data || typeof data !== 'object') return null;
+  const capturedAt = new Date((data as any).capturedAt || 0).getTime();
+  const maxAgeMs = 30 * 24 * 60 * 60 * 1000;
+  if (!capturedAt || Date.now() - capturedAt > maxAgeMs) {
+    uni.removeStorageSync('tencent_ad_attribution');
+    return null;
+  }
+  return data;
+}

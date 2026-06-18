@@ -57,6 +57,13 @@ export const config = {
     apiKey: process.env.BAILIAN_API_KEY || process.env.DASHSCOPE_API_KEY || '',
     baseUrl: process.env.BAILIAN_BASE_URL || process.env.DASHSCOPE_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   },
+  tencentAd: {
+    accountId: process.env.TENCENT_AD_ACCOUNT_ID || '',
+    userActionSetId: process.env.TENCENT_AD_USER_ACTION_SET_ID || '',
+    accessToken: process.env.TENCENT_AD_ACCESS_TOKEN || '',
+    miniAppId: process.env.TENCENT_AD_MINI_APPID || process.env.WECHAT_MINI_APPID || '',
+    conversionId: process.env.TENCENT_AD_CONVERSION_ID || '82945824',
+  },
   oss: {
     endpoint: process.env.OSS_ENDPOINT,
     bucket: process.env.OSS_BUCKET,

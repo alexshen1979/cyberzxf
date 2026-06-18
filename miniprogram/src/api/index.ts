@@ -81,8 +81,8 @@ export async function request<T = any>(options: RequestOptions): Promise<{ succe
 export const api = {
   // 认证
   auth: {
-    miniLogin: (code: string, userInfo?: any, referralCode?: string) =>
-      request<{ token: string; user: any }>({ url: '/auth/miniprogram-login', method: 'POST', data: { code, userInfo, referralCode } }),
+    miniLogin: (code: string, userInfo?: any, referralCode?: string, adAttribution?: any) =>
+      request<{ token: string; user: any }>({ url: '/auth/miniprogram-login', method: 'POST', data: { code, userInfo, referralCode, adAttribution } }),
     getProfile: () =>
       request<{ id: string; nickname: string; avatar: string; phone: string; province?: string; city?: string }>({ url: '/auth/profile' }),
     uploadAvatar: (image: string) =>

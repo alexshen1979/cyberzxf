@@ -1,5 +1,5 @@
 import Router from '@koa/router';
-import { auth, optionalAuth, adminAuth, adminContentAuth, adminDistributionAuth } from '../middleware/auth';
+import { auth, optionalAuth, adminAuth, adminContentAuth, adminDistributionAuth, adminUserAuth } from '../middleware/auth';
 import * as authCtrl from '../controllers/auth.controller';
 import * as aiCtrl from '../controllers/ai.controller';
 import * as pointsCtrl from '../controllers/points.controller';
@@ -15,6 +15,7 @@ import * as uniCtrl from '../controllers/university.controller';
 import * as volunteerCtrl from '../controllers/volunteer.controller';
 import * as regionCtrl from '../controllers/region.controller';
 import * as distributionCtrl from '../controllers/distribution.controller';
+import * as tencentAdCtrl from '../controllers/tencent-ad.controller';
 
 const router = new Router({ prefix: '/api/v1' });
 
@@ -123,10 +124,10 @@ router.post('/distribution/transfer-callback', distributionCtrl.transferCallback
 const admin = new Router({ prefix: '/admin' });
 
 // 用户管理
-admin.get('/users/menu-stats', adminAuth, adminCtrl.getUserMenuStats);
-admin.get('/users', adminAuth, adminCtrl.getUsers);
-admin.get('/users/:id', adminAuth, adminCtrl.getUserDetail);
-admin.put('/users/:id', adminAuth, adminCtrl.updateUser);
+admin.get('/users/menu-stats', adminUserAuth, adminCtrl.getUserMenuStats);
+admin.get('/users', adminUserAuth, adminCtrl.getUsers);
+admin.get('/users/:id', adminUserAuth, adminCtrl.getUserDetail);
+admin.put('/users/:id', adminUserAuth, adminCtrl.updateUser);
 admin.delete('/users/:id/purge', adminAuth, adminCtrl.purgeUserForAdmin);
 
 // 点数管理
@@ -146,11 +147,18 @@ admin.get('/orders/virtual-settlements', adminAuth, paymentCtrl.adminVirtualSett
 admin.post('/orders/virtual-settlements/sync', adminAuth, paymentCtrl.adminSyncVirtualSettlements);
 admin.get('/orders/virtual-settlements/sync-settings', adminAuth, paymentCtrl.adminVirtualSettlementSyncSettings);
 admin.put('/orders/virtual-settlements/sync-settings', adminAuth, paymentCtrl.adminUpdateVirtualSettlementSyncSettings);
+admin.post('/orders/:orderNo/sync-payment', adminAuth, paymentCtrl.adminSyncPaymentOrder);
 admin.get('/orders', adminAuth, adminCtrl.getAllOrders);
 admin.get('/orders/:id', adminAuth, adminCtrl.getOrderDetail);
 admin.get('/payment-config/status', adminAuth, paymentCtrl.getConfigStatus);
 admin.get('/payment-config', adminAuth, paymentCtrl.getAdminPaymentConfig);
 admin.put('/payment-config', adminAuth, paymentCtrl.updateAdminPaymentConfig);
+
+// 腾讯广告转化回传
+admin.get('/tencent-ad-conversion/config', adminAuth, tencentAdCtrl.adminGetTencentAdConfig);
+admin.put('/tencent-ad-conversion/config', adminAuth, tencentAdCtrl.adminUpdateTencentAdConfig);
+admin.get('/tencent-ad-conversion/events', adminAuth, tencentAdCtrl.adminListTencentAdEvents);
+admin.post('/tencent-ad-conversion/events/:id/retry', adminAuth, tencentAdCtrl.adminRetryTencentAdEvent);
 
 // 分销管理
 admin.get('/distribution/settings', adminAuth, distributionCtrl.adminSettings);
@@ -163,11 +171,11 @@ admin.get('/distribution/level-one', adminDistributionAuth, distributionCtrl.adm
 admin.get('/distribution/general-agents', adminAuth, distributionCtrl.adminGeneralAgents);
 admin.post('/distribution/distributors', adminDistributionAuth, distributionCtrl.adminCreateDistributor);
 admin.put('/distribution/distributors/:id', adminDistributionAuth, distributionCtrl.adminUpdateDistributor);
-admin.get('/distribution/commissions', adminAuth, distributionCtrl.adminCommissions);
+admin.get('/distribution/commissions', adminDistributionAuth, distributionCtrl.adminCommissions);
 admin.get('/distribution/general-agent-commissions', adminAuth, distributionCtrl.adminGeneralAgentCommissions);
 admin.get('/distribution/general-agents/:id/stats', adminAuth, distributionCtrl.adminGeneralAgentStats);
 admin.put('/distribution/general-agent-commissions/:id', adminAuth, distributionCtrl.adminMarkGeneralAgentCommission);
-admin.get('/distribution/withdrawals', adminAuth, distributionCtrl.adminWithdrawals);
+admin.get('/distribution/withdrawals', adminDistributionAuth, distributionCtrl.adminWithdrawals);
 admin.put('/distribution/withdrawals/:id', adminAuth, distributionCtrl.adminReviewWithdrawal);
 admin.post('/distribution/withdrawals/:id/wechat-transfer', adminAuth, distributionCtrl.adminStartWechatTransfer);
 admin.post('/distribution/withdrawals/:id/query-transfer', adminAuth, distributionCtrl.adminQueryWechatTransfer);
