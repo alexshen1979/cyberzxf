@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { api } from '@/api';
 
+let wechatLoginInFlight: Promise<boolean> | null = null;
+
 export const useUserStore = defineStore('user', () => {
   const token = ref<string>('');
   const userInfo = ref<any>(null);
@@ -40,32 +42,31 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function completeWechatLogin(profile: { nickName?: string; avatarUrl?: string; phoneCode?: string; phoneEncryptedData?: string; phoneIv?: string }) {
-    try {
-      const { code } = await uni.login();
-      const referralCode = uni.getStorageSync('distribution_referral_code') || '';
-      const adAttribution = getStoredTencentAdAttribution();
-      const res = await api.auth.miniLogin(code, profile, referralCode, adAttribution);
-      token.value = res.data.token;
-      userInfo.value = res.data.user;
-      uni.setStorageSync('token', res.data.token);
-      if (referralCode) uni.removeStorageSync('distribution_referral_code');
-      if (adAttribution) uni.removeStorageSync('tencent_ad_attribution');
-      await fetchBalance();
-      return true;
-    } catch (e) {
-      console.error('微信授权登录失败:', e);
-      const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
-      if (errMsg.includes('cancel')) {
-        uni.showToast({ title: '已取消微信授权', icon: 'none' });
-      } else if (errMsg.includes('timeout')) {
-        uni.showToast({ title: '微信授权超时，请重试', icon: 'none' });
-      } else if (errMsg.includes('未配置')) {
-        uni.showToast({ title: '微信登录参数未配置', icon: 'none' });
-      } else {
-        uni.showToast({ title: '微信登录失败，请重试', icon: 'none' });
+    if (wechatLoginInFlight) return wechatLoginInFlight;
+
+    wechatLoginInFlight = (async () => {
+      try {
+        const { code } = await uni.login();
+        const referralCode = uni.getStorageSync('distribution_referral_code') || '';
+        const adAttribution = getStoredTencentAdAttribution();
+        const res = await api.auth.miniLogin(code, profile, referralCode, adAttribution);
+        token.value = res.data.token;
+        userInfo.value = res.data.user;
+        uni.setStorageSync('token', res.data.token);
+        if (referralCode) uni.removeStorageSync('distribution_referral_code');
+        if (adAttribution) uni.removeStorageSync('tencent_ad_attribution');
+        await fetchBalance();
+        return true;
+      } catch (e) {
+        console.error('微信授权登录失败:', e);
+        uni.showToast({ title: getWechatLoginErrorMessage(e), icon: 'none' });
+        return false;
+      } finally {
+        wechatLoginInFlight = null;
       }
-      return false;
-    }
+    })();
+
+    return wechatLoginInFlight;
   }
 
   async function silentLogin() {
@@ -142,4 +143,26 @@ function getStoredTencentAdAttribution() {
     return null;
   }
   return data;
+}
+
+function getWechatLoginErrorMessage(error: any) {
+  const errCode = String(error?.code || error?.data?.code || '');
+  const errMsg = String(error?.errMsg || error?.message || error || '');
+
+  if (errMsg.includes('cancel')) return '已取消微信授权';
+  if (errMsg.includes('timeout')) return '微信授权超时，请重试';
+  if (errMsg.includes('未配置') || errCode === 'WECHAT_MINI_NOT_CONFIGURED') return '微信登录参数未配置';
+  if (errCode === 'WECHAT_LOGIN_UPSTREAM_UNAVAILABLE' || errCode === 'WECHAT_ACCESS_TOKEN_UPSTREAM_UNAVAILABLE' || errCode === 'WECHAT_PHONE_UPSTREAM_UNAVAILABLE') {
+    return '微信服务暂时不稳定，请稍后再试';
+  }
+  if (errCode === 'WECHAT_LOGIN_FAIL' && errMsg.includes('invalid code')) {
+    return '微信登录态已失效，请重试';
+  }
+  if (errCode === 'WECHAT_PHONE_INVALID_CODE') {
+    return '手机号授权已失效，请重新点击登录';
+  }
+  if (errCode === 'WECHAT_PHONE_FAIL') {
+    return '手机号授权失败，请稍后重试';
+  }
+  return '微信登录失败，请重试';
 }

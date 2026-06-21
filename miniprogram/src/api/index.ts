@@ -24,6 +24,12 @@ interface RequestOptions {
   timeout?: number;
 }
 
+type RequestError = Error & {
+  code?: string;
+  statusCode?: number;
+  data?: any;
+};
+
 export async function request<T = any>(options: RequestOptions): Promise<{ success: boolean; data: T; message?: string }> {
   const { url, method = 'GET', data, header = {}, showLoading = false, timeout = 15000 } = options;
   const requestUrl = `${BASE_URL}${url}`;
@@ -50,12 +56,20 @@ export async function request<T = any>(options: RequestOptions): Promise<{ succe
     if (res.statusCode === 401) {
       uni.removeStorageSync('token');
       console.warn('[api] 未登录或登录过期', { method, url: requestUrl, statusCode: res.statusCode, data: res.data });
-      throw new Error('登录已过期，请重新登录');
+      const error: RequestError = new Error('登录已过期，请重新登录');
+      error.code = 'UNAUTHORIZED';
+      error.statusCode = res.statusCode;
+      error.data = res.data;
+      throw error;
     }
 
     if (res.statusCode >= 400) {
       console.error('[api] 请求返回错误', { method, url: requestUrl, statusCode: res.statusCode, data: res.data });
-      throw new Error((res.data as any)?.message || '请求失败');
+      const error: RequestError = new Error((res.data as any)?.message || '请求失败');
+      error.code = (res.data as any)?.code;
+      error.statusCode = res.statusCode;
+      error.data = res.data;
+      throw error;
     }
 
     return res.data as any;
