@@ -19,21 +19,36 @@ async function miniProgramLogin(code: string) {
     throw new AppError(503, '微信小程序登录未配置：WECHAT_MINI_APPID、WECHAT_MINI_SECRET', 'WECHAT_MINI_NOT_CONFIGURED');
   }
 
-  const { data } = await axios.get('https://api.weixin.qq.com/sns/jscode2session', {
-    params: {
-      appid: appId,
-      secret,
-      js_code: code,
-      grant_type: 'authorization_code',
-    },
-    timeout: 10000,
-  });
+  const data = await requestWechatCodeSession(appId, secret, code);
 
   if (data.errcode) {
     throw new AppError(400, `微信登录失败: ${data.errmsg}`, 'WECHAT_LOGIN_FAIL');
   }
 
   return { openId: data.openid, unionId: data.unionid, sessionKey: data.session_key };
+}
+
+async function requestWechatCodeSession(appId: string, secret: string, code: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const { data } = await axios.get('https://api.weixin.qq.com/sns/jscode2session', {
+        params: {
+          appid: appId,
+          secret,
+          js_code: code,
+          grant_type: 'authorization_code',
+        },
+        timeout: 10000,
+      });
+      return data;
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetryWechatRequest(error) || attempt === 1) break;
+    }
+  }
+
+  throw normalizeWechatAxiosError(lastError, '微信登录服务暂时不可用，请稍后重试', 'WECHAT_LOGIN_UPSTREAM_UNAVAILABLE');
 }
 
 // 微信公众号网页授权
@@ -263,15 +278,19 @@ function decryptPhoneNumber(encryptedData: string, iv: string, sessionKey: strin
 }
 
 async function requestPhoneNumber(phoneCode: string, accessToken: string) {
-  const { data } = await axios.post(
-    'https://api.weixin.qq.com/wxa/business/getuserphonenumber',
-    { code: phoneCode },
-    {
-      params: { access_token: accessToken },
-      timeout: 10000,
-    },
-  );
-  return data;
+  try {
+    const { data } = await axios.post(
+      'https://api.weixin.qq.com/wxa/business/getuserphonenumber',
+      { code: phoneCode },
+      {
+        params: { access_token: accessToken },
+        timeout: 10000,
+      },
+    );
+    return data;
+  } catch (error) {
+    throw normalizeWechatAxiosError(error, '微信手机号服务暂时不可用，请稍后重试', 'WECHAT_PHONE_UPSTREAM_UNAVAILABLE');
+  }
 }
 
 function isWechatAccessTokenInvalid(data: any) {
@@ -284,16 +303,22 @@ async function getMiniProgramAccessToken(appId: string, secret: string, forceRef
     return accessTokenCache.token;
   }
 
-  const { data } = await axios.post(
-    'https://api.weixin.qq.com/cgi-bin/stable_token',
-    {
-      grant_type: 'client_credential',
-      appid: appId,
-      secret,
-      force_refresh: forceRefresh,
-    },
-    { timeout: 10000 },
-  );
+  let data: any;
+  try {
+    const response = await axios.post(
+      'https://api.weixin.qq.com/cgi-bin/stable_token',
+      {
+        grant_type: 'client_credential',
+        appid: appId,
+        secret,
+        force_refresh: forceRefresh,
+      },
+      { timeout: 10000 },
+    );
+    data = response.data;
+  } catch (error) {
+    throw normalizeWechatAxiosError(error, '微信 access_token 服务暂时不可用，请稍后重试', 'WECHAT_ACCESS_TOKEN_UPSTREAM_UNAVAILABLE');
+  }
 
   if (data.errcode) {
     throw new AppError(400, `微信 access_token 获取失败: ${data.errmsg}`, 'WECHAT_ACCESS_TOKEN_FAIL');
@@ -304,6 +329,25 @@ async function getMiniProgramAccessToken(appId: string, secret: string, forceRef
     expiresAt: now + Math.max(0, Number(data.expires_in || 7200) - 300) * 1000,
   };
   return accessTokenCache.token;
+}
+
+function shouldRetryWechatRequest(error: unknown) {
+  if (!axios.isAxiosError(error)) return false;
+  return error.code === 'ECONNABORTED' || !error.response;
+}
+
+function normalizeWechatAxiosError(error: unknown, message: string, code: string) {
+  if (axios.isAxiosError(error)) {
+    if (error.code === 'ECONNABORTED') {
+      return new AppError(504, message, code, { type: 'timeout' });
+    }
+    if (!error.response) {
+      return new AppError(502, message, code, { type: 'network' });
+    }
+  }
+  return error instanceof AppError
+    ? error
+    : new AppError(502, message, code);
 }
 
 function normalizeWechatProfile(profile?: { nickName?: string; avatarUrl?: string }) {
