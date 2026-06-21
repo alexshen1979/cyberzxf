@@ -68,6 +68,7 @@ export interface VolunteerAnalyzeInput {
   rank?: number;
   targetBatch?: string;
   artCategory?: string;
+  artDirection?: string;
   artProfessionalScore?: number;
   artLevel?: '本科' | '专科';
   preferredCities?: string[];
@@ -187,6 +188,7 @@ type ArtRule = {
   province: string;
   year: number;
   artCategory: string;
+  direction?: string | null;
   batch: string;
   subjectType: string;
   formulaType: string;
@@ -1115,7 +1117,7 @@ async function buildArtStructuredResult(input: VolunteerAnalyzeInput): Promise<V
     references: [
       {
         type: 'art_rule',
-        title: `${rule.province}${rule.year}年${rule.artCategory}艺术类折算规则`,
+        title: `${rule.province}${rule.year}年${rule.artCategory}${rule.direction ? `-${rule.direction}` : ''}艺术类折算规则`,
         source: rule.sourceName || '官方规则',
       },
       ...classified.references,
@@ -1125,6 +1127,7 @@ async function buildArtStructuredResult(input: VolunteerAnalyzeInput): Promise<V
 
 async function findArtAdmissionRule(input: VolunteerAnalyzeInput): Promise<ArtRule | null> {
   const category = input.artCategory || '';
+  const direction = String(input.artDirection || '').trim();
   const batch = artBatch(input);
   const subjectType = normalizeArtSubjectType(input.subjectType);
   const dbRule = await prisma.artAdmissionRule.findFirst({
@@ -1133,9 +1136,14 @@ async function findArtAdmissionRule(input: VolunteerAnalyzeInput): Promise<ArtRu
       year: input.year!,
       artCategory: category,
       batch,
-      OR: [{ subjectType }, { subjectType: '不限' }],
+      OR: [
+        { subjectType, direction },
+        { subjectType, direction: '' },
+        { subjectType: '不限', direction },
+        { subjectType: '不限', direction: '' },
+      ],
     },
-    orderBy: [{ subjectType: 'desc' }],
+    orderBy: [{ direction: 'desc' }, { subjectType: 'desc' }],
   }).catch(() => null);
   if (dbRule) return dbRule as ArtRule;
 
@@ -1144,7 +1152,8 @@ async function findArtAdmissionRule(input: VolunteerAnalyzeInput): Promise<ArtRu
     rule.year === input.year &&
     rule.artCategory === category &&
     rule.batch === batch &&
-    (rule.subjectType === subjectType || rule.subjectType === '不限')
+    (rule.subjectType === subjectType || rule.subjectType === '不限') &&
+    (String(rule.direction || '') === direction || !rule.direction)
   ) || null;
 }
 

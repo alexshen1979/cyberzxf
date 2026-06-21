@@ -791,6 +791,7 @@ model ArtAdmissionRule {
   province              String
   year                  Int
   artCategory           String   @map("art_category")
+  direction             String   @default("")
   batch                 String
   subjectType           String   @default("不限") @map("subject_type")
   formulaType           String   @default("weighted") @map("formula_type")
@@ -808,9 +809,32 @@ model ArtAdmissionRule {
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
 
-  @@unique([province, year, artCategory, batch, subjectType])
+  @@unique([province, year, artCategory, batch, subjectType, direction])
   @@index([province, year, artCategory])
   @@map("art_admission_rules")
+}
+
+model ArtScoreRank {
+  id               String   @id @default(uuid())
+  province         String
+  year             Int
+  artCategory      String   @map("art_category")
+  score            Int
+  sameScoreCount   Int?     @map("same_score_count")
+  cumulativeCount  Int      @map("cumulative_count")
+  batch            String? 
+  subjectType      String   @default("不限") @map("subject_type")
+  direction        String   @default("")
+  sourceName       String?  @map("source_name")
+  sourceUrl        String?  @map("source_url")
+  sourceType       String?  @map("source_type")
+  rawData          String?  @map("raw_data")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([province, year, artCategory, subjectType, direction, score])
+  @@index([province, year, artCategory, subjectType])
+  @@map("art_score_ranks")
 }
 
 model ArtAdmissionScore {

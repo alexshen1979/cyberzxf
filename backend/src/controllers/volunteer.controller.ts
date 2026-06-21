@@ -452,6 +452,96 @@ export async function deleteScoreRank(ctx: Context) {
   ctx.body = { success: true, message: '删除成功' };
 }
 
+export async function adminArtScoreRanks(ctx: Context) {
+  const {
+    province, year, artCategory, subjectType, direction, score,
+    page: p, pageSize: ps,
+  } = ctx.query as Record<string, string>;
+  const page = Math.max(1, parseInt(p || '1', 10));
+  const pageSize = Math.min(500, Math.max(1, parseInt(ps || '20', 10)));
+
+  const where: any = {};
+  if (province) where.province = province;
+  if (year) where.year = Number(year);
+  if (artCategory) where.artCategory = artCategory;
+  if (subjectType) where.subjectType = subjectType;
+  if (direction) where.direction = direction;
+  if (score) where.score = Number(score);
+
+  const [list, total] = await Promise.all([
+    prisma.artScoreRank.findMany({
+      where,
+      orderBy: [{ year: 'desc' }, { province: 'asc' }, { artCategory: 'asc' }, { direction: 'asc' }, { score: 'desc' }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.artScoreRank.count({ where }),
+  ]);
+
+  ctx.body = { success: true, data: { list, total, page, pageSize } };
+}
+
+export async function createArtScoreRank(ctx: Context) {
+  const data = normalizeArtScoreRank(ctx.request.body as any);
+  const item = await prisma.artScoreRank.upsert({
+    where: {
+      province_year_artCategory_subjectType_direction_score: {
+        province: data.province,
+        year: data.year,
+        artCategory: data.artCategory,
+        subjectType: data.subjectType,
+        direction: data.direction ?? '',
+        score: data.score,
+      },
+    },
+    update: data,
+    create: data,
+  });
+  ctx.body = { success: true, data: item };
+}
+
+export async function updateArtScoreRank(ctx: Context) {
+  const data = normalizeArtScoreRank(ctx.request.body as any, true);
+  const item = await prisma.artScoreRank.update({ where: { id: ctx.params.id }, data });
+  ctx.body = { success: true, data: item };
+}
+
+export async function deleteArtScoreRank(ctx: Context) {
+  await prisma.artScoreRank.delete({ where: { id: ctx.params.id } });
+  ctx.body = { success: true, message: '删除成功' };
+}
+
+export async function importArtScoreRanks(ctx: Context) {
+  const { items } = ctx.request.body as any;
+  if (!Array.isArray(items) || items.length === 0) {
+    ctx.status = 422;
+    ctx.body = { success: false, message: 'items 必须是非空数组' };
+    return;
+  }
+
+  let count = 0;
+  for (const item of items.slice(0, 20000)) {
+    const data = normalizeArtScoreRank(item);
+    await prisma.artScoreRank.upsert({
+      where: {
+        province_year_artCategory_subjectType_direction_score: {
+          province: data.province,
+          year: data.year,
+          artCategory: data.artCategory,
+          subjectType: data.subjectType,
+          direction: data.direction ?? '',
+          score: data.score,
+        },
+      },
+      update: data,
+      create: data,
+    });
+    count++;
+  }
+
+  ctx.body = { success: true, data: { count } };
+}
+
 export async function adminAdmissionScores(ctx: Context) {
   const {
     province, subjectType, year, universityId, universityName, majorName,
@@ -555,12 +645,13 @@ export async function createArtAdmissionRule(ctx: Context) {
   const data = normalizeArtAdmissionRule(ctx.request.body as any);
   const item = await prisma.artAdmissionRule.upsert({
     where: {
-      province_year_artCategory_batch_subjectType: {
+      province_year_artCategory_batch_subjectType_direction: {
         province: data.province,
         year: data.year,
         artCategory: data.artCategory,
         batch: data.batch,
         subjectType: data.subjectType,
+        direction: data.direction ?? null,
       },
     },
     update: data,
@@ -593,12 +684,13 @@ export async function importArtAdmissionRules(ctx: Context) {
     const data = normalizeArtAdmissionRule(item);
     await prisma.artAdmissionRule.upsert({
       where: {
-        province_year_artCategory_batch_subjectType: {
+        province_year_artCategory_batch_subjectType_direction: {
           province: data.province,
           year: data.year,
           artCategory: data.artCategory,
           batch: data.batch,
           subjectType: data.subjectType,
+          direction: data.direction ?? '',
         },
       },
       update: data,
@@ -913,6 +1005,7 @@ function normalizeArtAdmissionRule(body: any, partial = false) {
   if (body.province !== undefined) data.province = String(body.province).trim();
   if (body.year !== undefined) data.year = Number(body.year);
   if (body.artCategory !== undefined) data.artCategory = String(body.artCategory).trim();
+  if (body.direction !== undefined) data.direction = body.direction ? String(body.direction).trim() : '';
   if (body.batch !== undefined) data.batch = String(body.batch || '本科').trim();
   if (body.subjectType !== undefined) data.subjectType = String(body.subjectType || '不限').trim();
   if (body.subjectType === undefined && !partial) data.subjectType = '不限';
@@ -1076,6 +1169,43 @@ function normalizeScoreRank(body: any, partial = false) {
   if (data.year !== undefined && (!Number.isInteger(data.year) || data.year < 2000 || data.year > 2100)) throw new Error('年份无效');
   if (data.score !== undefined && (!Number.isInteger(data.score) || data.score < 0 || data.score > 750)) throw new Error('分数无效');
   if (data.rank !== undefined && (!Number.isInteger(data.rank) || data.rank <= 0)) throw new Error('位次无效');
+
+  return data;
+}
+
+function normalizeArtScoreRank(body: any, partial = false) {
+  const required = ['province', 'year', 'artCategory', 'score', 'cumulativeCount'];
+  if (!partial) {
+    for (const key of required) {
+      if (body[key] === undefined || body[key] === '') {
+        throw new Error(`缺少字段 ${key}`);
+      }
+    }
+  }
+
+  const data: any = {};
+  if (body.province !== undefined) data.province = String(body.province).trim();
+  if (body.year !== undefined) data.year = Number(body.year);
+  if (body.artCategory !== undefined) data.artCategory = String(body.artCategory).trim();
+  if (body.score !== undefined) data.score = Number(body.score);
+  if (body.sameScoreCount !== undefined || body.sameCount !== undefined || body.count !== undefined) {
+    data.sameScoreCount = nullableInteger(body.sameScoreCount ?? body.sameCount ?? body.count);
+  }
+  if (body.cumulativeCount !== undefined || body.rank !== undefined || body.total !== undefined) {
+    data.cumulativeCount = Number(body.cumulativeCount ?? body.rank ?? body.total);
+  }
+  if (body.batch !== undefined) data.batch = body.batch ? String(body.batch).trim() : null;
+  if (body.subjectType !== undefined) data.subjectType = String(body.subjectType || '不限').trim();
+  if (body.subjectType === undefined && !partial) data.subjectType = '不限';
+  if (body.direction !== undefined) data.direction = body.direction ? String(body.direction).trim() : '';
+  if (body.sourceName !== undefined) data.sourceName = body.sourceName || null;
+  if (body.sourceUrl !== undefined) data.sourceUrl = body.sourceUrl || null;
+  if (body.sourceType !== undefined) data.sourceType = body.sourceType || null;
+  if (body.rawData !== undefined) data.rawData = typeof body.rawData === 'string' ? body.rawData : JSON.stringify(body.rawData);
+
+  if (data.year !== undefined && (!Number.isInteger(data.year) || data.year < 2000 || data.year > 2100)) throw new Error('年份无效');
+  if (data.score !== undefined && (!Number.isInteger(data.score) || data.score < 0 || data.score > 300)) throw new Error('专业分无效');
+  if (data.cumulativeCount !== undefined && (!Number.isInteger(data.cumulativeCount) || data.cumulativeCount <= 0)) throw new Error('累计人数无效');
 
   return data;
 }

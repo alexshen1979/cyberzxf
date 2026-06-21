@@ -275,6 +275,11 @@ admin.post('/art-admission-rules', adminAuth, volunteerCtrl.createArtAdmissionRu
 admin.post('/art-admission-rules/import', adminAuth, volunteerCtrl.importArtAdmissionRules);
 admin.put('/art-admission-rules/:id', adminAuth, volunteerCtrl.updateArtAdmissionRule);
 admin.delete('/art-admission-rules/:id', adminAuth, volunteerCtrl.deleteArtAdmissionRule);
+admin.get('/art-score-ranks', adminAuth, volunteerCtrl.adminArtScoreRanks);
+admin.post('/art-score-ranks', adminAuth, volunteerCtrl.createArtScoreRank);
+admin.post('/art-score-ranks/import', adminAuth, volunteerCtrl.importArtScoreRanks);
+admin.put('/art-score-ranks/:id', adminAuth, volunteerCtrl.updateArtScoreRank);
+admin.delete('/art-score-ranks/:id', adminAuth, volunteerCtrl.deleteArtScoreRank);
 admin.get('/art-admission-scores', adminAuth, volunteerCtrl.adminArtAdmissionScores);
 admin.post('/art-admission-scores', adminAuth, volunteerCtrl.createArtAdmissionScore);
 admin.post('/art-admission-scores/import', adminAuth, volunteerCtrl.importArtAdmissionScores);
