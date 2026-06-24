@@ -755,6 +755,7 @@ const tutorialStep = ref(0);
 const tutorialAutoChecked = ref(false);
 const tutorialCardPlacement = ref<'top' | 'bottom'>('bottom');
 const tutorialCardStyle = ref('');
+const autoBatchSwitched = ref(false);
 let rankLookupTimer: ReturnType<typeof setTimeout> | null = null;
 let rankLookupSeq = 0;
 let recommendationPreviewTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1592,6 +1593,7 @@ function defaultBatchForLevel(level: '本科' | '专科') {
 function setAdmissionLevel(level: '本科' | '专科') {
   admissionLevel.value = level;
   form.targetBatch = defaultBatchForLevel(level);
+  autoBatchSwitched.value = false;
   scheduleRecommendationPreview();
   maybeAdvanceSubjectTutorial();
 }
@@ -1914,6 +1916,13 @@ async function loadRecommendationPreview() {
     });
     if (seq === recommendationPreviewSeq) {
       recommendationPreview.value = res.data;
+      if (shouldAutoSwitchToJuniorCollege(res.data)) {
+        autoBatchSwitched.value = true;
+        admissionLevel.value = '专科';
+        form.targetBatch = defaultBatchForLevel('专科');
+        uni.showToast({ title: '已自动切到专科方案', icon: 'none' });
+        scheduleRecommendationPreview();
+      }
     }
   } catch {
     if (seq === recommendationPreviewSeq) {
@@ -1940,8 +1949,17 @@ function handlePointsPill() {
 }
 
 function switchToJuniorCollege() {
+  autoBatchSwitched.value = true;
   setAdmissionLevel('专科');
   uni.showToast({ title: '已切到专科批次', icon: 'none' });
+}
+
+function shouldAutoSwitchToJuniorCollege(preview: any) {
+  if (examCategory.value !== 'normal') return false;
+  if (admissionLevel.value !== '本科') return false;
+  if (autoBatchSwitched.value) return false;
+  const summary = String(preview?.summary || '');
+  return summary.includes('本次不再强行补本科冲稳保候选');
 }
 
 function goRecharge() {
