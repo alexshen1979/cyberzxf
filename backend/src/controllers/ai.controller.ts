@@ -3,6 +3,8 @@ import {
   consult as aiConsult,
   streamConsult as aiStreamConsult,
   localFallbackConsult,
+  alignVolunteerFollowupAnswer,
+  isVolunteerReportFollowup,
   sanitizeAiOutput,
   getUserHistory,
   getSessionHistory,
@@ -33,6 +35,8 @@ export async function consult(ctx: Context) {
     context,
     isAnonymous,
   });
+
+  result.answer = alignVolunteerFollowupAnswer(result.answer, question, context, (type || 'normal') as any);
 
   ctx.body = { success: true, data: result };
 }
@@ -66,6 +70,7 @@ export async function streamConsult(ctx: Context) {
   let actualCost = 0;
   const startedAt = Date.now();
   let firstTokenAt = 0;
+  const shouldBufferVolunteerFollowup = isVolunteerReportFollowup(question, context);
 
   try {
     const result = await aiStreamConsult({
@@ -102,7 +107,9 @@ export async function streamConsult(ctx: Context) {
             if (delta) {
               fullAnswer += delta;
               if (!firstTokenAt) firstTokenAt = Date.now();
-              res.write(`data: ${JSON.stringify({ content: delta })}\n\n`);
+              if (!shouldBufferVolunteerFollowup) {
+                res.write(`data: ${JSON.stringify({ content: delta })}\n\n`);
+              }
             }
           } catch {
             // 非 JSON 行跳过
@@ -120,7 +127,15 @@ export async function streamConsult(ctx: Context) {
     }
     consumeUpstreamChunk(decoder.decode(), true);
 
-    fullAnswer = sanitizeAiOutput(fullAnswer);
+    fullAnswer = shouldBufferVolunteerFollowup
+      ? alignVolunteerFollowupAnswer(fullAnswer, question, context, (type || 'normal') as any)
+      : sanitizeAiOutput(fullAnswer);
+
+    if (shouldBufferVolunteerFollowup) {
+      for (const part of chunkText(fullAnswer)) {
+        res.write(`data: ${JSON.stringify({ content: part })}\n\n`);
+      }
+    }
 
     // 保存咨询记录
     if (!isAnonymous) {

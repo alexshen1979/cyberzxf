@@ -181,6 +181,10 @@ function isVolunteerReportFollowupContext(context?: string, question?: string) {
   );
 }
 
+export function isVolunteerReportFollowup(question?: string, context?: string) {
+  return isVolunteerReportFollowupContext(context, question);
+}
+
 function buildVolunteerReportGuardrail(context?: string, question?: string) {
   if (!isVolunteerReportFollowupContext(context, question)) return '';
   return `
@@ -264,6 +268,55 @@ export function sanitizeAiOutput(content = '') {
     .replace(/仅供参考，不构成[^。！？!?；;\n]*[。！？!?；;]?/g, '')
     .replace(/\n{3,}/g, '\n\n');
   return normalizeAnswerLayout(cleaned).trim();
+}
+
+function hasVolunteerFollowupContradiction(answer = '') {
+  const text = sanitizeAiOutput(answer);
+  const contradictionPatterns = [
+    /彻底推翻重来/,
+    /推翻重来/,
+    /完全搞反/,
+    /系统出大问题/,
+    /整份(?:推荐|方案|报告).{0,8}(?:推翻|否掉|判错)/,
+    /原报告.{0,8}(?:错了|有问题|不对)/,
+    /全部划掉/,
+    /直接删掉/,
+    /坚决不报/,
+    /不是你的战场/,
+    /这是系统在侮辱你的分数/,
+  ];
+  return contradictionPatterns.some(pattern => pattern.test(text));
+}
+
+function buildVolunteerFollowupRepairAnswer(question: string, context?: string, type: ConsultType = 'normal') {
+  const reportSummary = extractContextValue(context, '报告结论');
+  const school = extractSchoolFromQuestion(question) || extractContextValue(context, '关注院校');
+  const lines = [
+    `先沿着原报告继续细化，不整份推翻：${reportSummary || '这次追问默认以原志愿方案为基线。'}`,
+  ];
+
+  if (school) {
+    lines.push(`${school}如果出现在原报告里，先看它是有真实录取位次支撑，还是只是“资料候选/需核对录取线”的补位项，再决定保留、降档还是删除。`);
+  } else {
+    lines.push('如果原报告里混入了明显不合适的学校，正确处理方式是逐个删改或降档，而不是把整份方案直接判错。');
+  }
+
+  lines.push('更合理的做法是三步走：先保留原报告里有真实位次支撑的学校，再把资料候选单独拎出来核验，最后在剩余学校里重排冲稳保顺序。');
+  lines.push('如果某所学校和考生位次、科类、城市偏好或院校定位明显不符，就只调整这所学校或这一档，不要把整个报告全盘否掉。');
+
+  if (type === 'deep') {
+    lines.push('继续比较时，重点看专业组、调剂范围、城市资源和院校层次是否匹配，这些才是报告追问里最该细化的部分。');
+  }
+
+  return lines.join('\n');
+}
+
+export function alignVolunteerFollowupAnswer(answer: string, question: string, context?: string, type: ConsultType = 'normal') {
+  const cleaned = sanitizeAiOutput(answer);
+  if (!isVolunteerReportFollowupContext(context, question)) return cleaned;
+  if (!hasVolunteerFollowupContradiction(cleaned)) return cleaned;
+  logger.warn('志愿报告追问答案出现整份推翻倾向，已切换为基线修正回答');
+  return sanitizeAiOutput(buildVolunteerFollowupRepairAnswer(question, context, type));
 }
 
 function normalizeAnswerLayout(content = '') {
