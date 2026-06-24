@@ -16,6 +16,8 @@ const RECOMMENDATION_DISPLAY_LIMIT = 12;
 const MAX_RECOMMENDATION_DISPLAY_LIMIT = 300;
 const VOLUNTEER_REPORT_AI_TIMEOUT_MS = 8000;
 const MIN_RECOMMENDATIONS_PER_BUCKET = 12;
+const NORMAL_FALLBACK_SUPPRESS_GAP = 40;
+const NORMAL_FALLBACK_ELITE_PENALTY_GAP = 15;
 const RECOMMENDATION_BUCKETS: RecommendationBucket[] = ['rush', 'stable', 'safe'];
 const BUCKET_LABELS: Record<RecommendationBucket, string> = {
   rush: '冲刺',
@@ -58,6 +60,18 @@ const LOCATION_SCORE_BANDS = {
   preferenceBelow: 85,
   preferenceAbove: 30,
 };
+const NORMAL_UNDERGRAD_BATCH_EXCLUDE_KEYWORDS = [
+  '提前',
+  '艺术',
+  '特殊类型',
+  '专项',
+  '乡村教师',
+  '医学定向',
+  '民航招飞',
+  '公安政法',
+  '军队',
+  '航海',
+];
 
 export interface VolunteerAnalyzeInput {
   examCategory?: 'normal' | 'art';
@@ -202,6 +216,12 @@ type ArtRule = {
   sourceName?: string | null;
   sourceUrl?: string | null;
   notes?: string | null;
+};
+
+type NormalBatchBaseline = {
+  year: number;
+  batch: string | null;
+  minScore: number | null;
 };
 
 export async function analyzeVolunteer(userId: string, input: VolunteerAnalyzeInput) {
@@ -417,10 +437,11 @@ async function retrieveVolunteerContext(input: VolunteerAnalyzeInput) {
     subjectType: { in: subjectTypeAliases(input.subjectType) },
     year: { in: years },
   };
+  const batchFilter = buildBatchFilter(input.targetBatch);
   const admissionScores = await retrieveCandidateAdmissionScores(
     input,
     baseWhere,
-    buildBatchFilter(input.targetBatch),
+    batchFilter,
   );
 
   const keywords = [
@@ -467,8 +488,9 @@ async function retrieveVolunteerContext(input: VolunteerAnalyzeInput) {
     : [];
 
   const fallbackUniversities = await retrieveNormalFallbackUniversities(input);
+  const normalBatchBaseline = await findNormalBatchBaseline(input, years);
 
-  return { admissionScores, knowledge, majors, universityMajors, fallbackUniversities };
+  return { admissionScores, knowledge, majors, universityMajors, fallbackUniversities, normalBatchBaseline };
 }
 
 function buildUniversityLocationPreferenceWhere(input: VolunteerAnalyzeInput) {
@@ -615,11 +637,19 @@ function buildBatchFilter(targetBatch?: string) {
 
   if (['本科', '本科批', '本科普通批'].includes(batch)) {
     return {
-      OR: [
-        { batch: { contains: batch } },
-        { batch: '本科' },
-        { batch: { contains: '普通类本科' } },
-        { batch: { contains: '本科批' } },
+      AND: [
+        {
+          OR: [
+            { batch: { contains: batch } },
+            { batch: '本科' },
+            { batch: { contains: '普通类本科' } },
+            { batch: { contains: '本科批' } },
+            { batch: { contains: '平行志愿' } },
+          ],
+        },
+        {
+          NOT: NORMAL_UNDERGRAD_BATCH_EXCLUDE_KEYWORDS.map(keyword => ({ batch: { contains: keyword } })),
+        },
       ],
     };
   }
@@ -650,34 +680,48 @@ function uniqueAdmissionScores(scores: any[]) {
 function buildStructuredResult(input: VolunteerAnalyzeInput, retrieval: any): VolunteerResult {
   const classified = classifyCandidates(input, retrieval.admissionScores);
   const initialTotal = countRecommendations(classified.recommendations);
-  const completed = completeNormalClassificationWithFallback(
-    input,
-    { ...classified, references: [] },
-    retrieval.fallbackUniversities || [],
-  );
+  const fallbackSuppressed = shouldSuppressNormalFallback(input, retrieval.normalBatchBaseline);
+  const completed = fallbackSuppressed
+    ? {
+        recommendations: classified.recommendations,
+        stats: classified.stats,
+        references: [] as Array<{ type: string; title: string; source?: string }>,
+      }
+    : completeNormalClassificationWithFallback(
+        input,
+        { ...classified, references: [] },
+        retrieval.fallbackUniversities || [],
+        retrieval.normalBatchBaseline || null,
+      );
   const candidates = completed.recommendations;
   const recommendationStats = completed.stats;
-  const usedFallback = hasFallbackRecommendation(candidates);
+  const usedFallback = !fallbackSuppressed && hasFallbackRecommendation(candidates);
+  const baselineWarning = buildNormalBatchBaselineWarning(input, retrieval.normalBatchBaseline);
 
   const rankText = input.rank ? `，位次约 ${input.rank}` : '，暂未提供位次';
-  const dataText = initialTotal && usedFallback
-    ? '已结合历年录取数据做初步分档，并用院校库补足数据不足的档位。'
-    : initialTotal
-      ? '已结合历年录取数据做初步分档。'
-      : '当前匹配录取数据不足，已先用院校库生成冲稳保方向候选。';
+  const dataText = fallbackSuppressed
+    ? `${baselineWarning || '当前分数明显低于本科主数据带。'} 为避免把名校资料误当成“冲刺”，本次不再强行补本科冲稳保候选。`
+    : initialTotal && usedFallback
+      ? '已结合历年录取数据做初步分档，并用院校库补足数据不足的档位。'
+      : initialTotal
+        ? '已结合历年录取数据做初步分档。'
+        : '当前匹配录取数据不足，已先用院校库生成冲稳保方向候选。';
   const preferenceText = buildPreferenceExecutionSummary(input, recommendationStats);
+  const scorePosition = fallbackSuppressed
+    ? `${baselineWarning || '当前分数与本科参考线存在明显差距。'} 建议先切换到专科/高职批次，或重新评估本科目标。`
+    : input.rank
+      ? `以位次 ${input.rank} 为核心参考，优先看近三年最低位次波动。`
+      : '未提供位次时只能用分差粗筛，准确度会明显下降，建议补充一分一段位次。';
 
   return {
     summary: `${input.province}${input.subjectType}${input.score}分${rankText}，适合采用${strategyLabel(input.riskPreference)}。${dataText}${preferenceText}`,
-    scorePosition: input.rank
-      ? `以位次 ${input.rank} 为核心参考，优先看近三年最低位次波动。`
-      : '未提供位次时只能用分差粗筛，准确度会明显下降，建议补充一分一段位次。',
+    scorePosition,
     strategy: strategyLabel(input.riskPreference),
     recommendations: candidates,
     recommendationStats,
     majorAdvice: buildMajorAdvice(input, retrieval.majors, retrieval.universityMajors),
     cityAdvice: buildCityAdvice(input),
-    risks: buildRisks(input, usedFallback),
+    risks: buildRisks(input, usedFallback, baselineWarning),
     references: [
       ...retrieval.knowledge.map((k: any) => ({
         type: 'knowledge',
@@ -707,6 +751,7 @@ function completeNormalClassificationWithFallback(
   input: VolunteerAnalyzeInput,
   classified: RecommendationClassificationResult,
   fallbackUniversities: any[],
+  baseline: NormalBatchBaseline | null,
 ): RecommendationClassificationResult {
   const displayLimit = normalizeRecommendationLimit(input.recommendationLimit);
   const minimum = MIN_RECOMMENDATIONS_PER_BUCKET;
@@ -721,7 +766,7 @@ function completeNormalClassificationWithFallback(
       .map(item => item.universityId || item.universityName)
       .filter(Boolean),
   );
-  const fallback = buildNormalFallbackClassification(input, fallbackUniversities, existingKeys);
+  const fallback = buildNormalFallbackClassification(input, fallbackUniversities, existingKeys, baseline);
 
   for (const bucket of RECOMMENDATION_BUCKETS) {
     const needed = Math.max(0, minimum - recommendations[bucket].length);
@@ -761,10 +806,11 @@ function buildNormalFallbackClassification(
   input: VolunteerAnalyzeInput,
   universities: any[],
   existingKeys: Set<string>,
+  baseline: NormalBatchBaseline | null,
 ): RecommendationClassificationResult {
   const displayLimit = Math.max(normalizeRecommendationLimit(input.recommendationLimit), MIN_RECOMMENDATIONS_PER_BUCKET);
   const targetPerBucket = displayLimit;
-  const buckets = distributeNormalFallbackUniversities(input, universities, existingKeys, targetPerBucket);
+  const buckets = distributeNormalFallbackUniversities(input, universities, existingKeys, targetPerBucket, baseline);
   const recommendations = Object.fromEntries(
     RECOMMENDATION_BUCKETS.map(bucket => [
       bucket,
@@ -842,6 +888,59 @@ async function retrieveNormalFallbackUniversities(input: VolunteerAnalyzeInput) 
     ...broadSchools,
     ...staticNormalFallbackUniversities(input),
   ]);
+}
+
+async function findNormalBatchBaseline(input: VolunteerAnalyzeInput, years: number[]): Promise<NormalBatchBaseline | null> {
+  if (normalFallbackBatch(input) !== '本科') return null;
+  const rows = await prisma.admissionScore.findMany({
+    where: {
+      province: input.province,
+      year: { in: years },
+      subjectType: { in: subjectTypeAliases(input.subjectType) },
+      minScore: { not: null },
+      ...buildBatchFilter('本科'),
+    },
+    select: {
+      year: true,
+      batch: true,
+      minScore: true,
+    },
+    orderBy: [{ year: 'desc' }, { minScore: 'asc' }],
+    take: 12,
+  });
+  const first = rows.find(row => Number.isFinite(Number(row.minScore)));
+  if (!first) return null;
+  return {
+    year: first.year,
+    batch: first.batch,
+    minScore: Number(first.minScore),
+  };
+}
+
+function normalBatchFloorGap(input: VolunteerAnalyzeInput, baseline: NormalBatchBaseline | null) {
+  if (!baseline || !Number.isFinite(Number(baseline.minScore))) return 0;
+  return Number(baseline.minScore) - Number(input.score || 0);
+}
+
+function shouldSuppressNormalFallback(input: VolunteerAnalyzeInput, baseline: NormalBatchBaseline | null) {
+  if (normalFallbackBatch(input) !== '本科') return false;
+  return normalBatchFloorGap(input, baseline) >= NORMAL_FALLBACK_SUPPRESS_GAP;
+}
+
+function buildNormalBatchBaselineWarning(input: VolunteerAnalyzeInput, baseline: NormalBatchBaseline | null) {
+  const gap = normalBatchFloorGap(input, baseline);
+  if (!baseline || gap <= 0) return '';
+  const batchLabel = baseline.batch || '本科参考批次';
+  return `参考 ${input.province}${baseline.year} 年 ${batchLabel} 主数据，最低分约 ${baseline.minScore}，当前分数低了 ${gap} 分。`;
+}
+
+function normalFallbackElitePenalty(gap: number, university: any) {
+  if (gap < NORMAL_FALLBACK_ELITE_PENALTY_GAP) return 0;
+  let penalty = 0;
+  if (university?.is985) penalty += 3600;
+  if (university?.is211) penalty += 2400;
+  if (university?.isDoubleFirst) penalty += 1800;
+  return penalty;
 }
 
 function staticNormalFallbackUniversities(input: VolunteerAnalyzeInput) {
@@ -953,7 +1052,9 @@ function distributeNormalFallbackUniversities(
   universities: any[],
   excluded: Set<string>,
   targetPerBucket: number,
+  baseline: NormalBatchBaseline | null,
 ) {
+  const floorGap = normalBatchFloorGap(input, baseline);
   const available = universities.filter((university: any) => {
     const key = university?.id || university?.name;
     return key && !excluded.has(key) && normalLevelFitsUniversity(input, university);
@@ -964,10 +1065,11 @@ function distributeNormalFallbackUniversities(
       preferenceScore: matchScorePreferences(input, normalFallbackPreferenceSource(input, university)).score,
       majorScore: normalMajorRelevanceScore(input, university),
       qualityScore: universityQualityScore(university),
+      elitePenalty: normalFallbackElitePenalty(floorGap, university),
     }))
     .sort((a, b) =>
-      (b.preferenceScore + b.majorScore + b.qualityScore) -
-      (a.preferenceScore + a.majorScore + a.qualityScore) ||
+      (b.preferenceScore + b.majorScore + b.qualityScore - b.elitePenalty) -
+      (a.preferenceScore + a.majorScore + a.qualityScore - a.elitePenalty) ||
       String(a.university.name || '').localeCompare(String(b.university.name || ''), 'zh-Hans-CN')
     );
 
@@ -984,12 +1086,12 @@ function distributeNormalFallbackUniversities(
   };
 
   takeFor('rush', [...ranked].sort((a, b) =>
-    (b.qualityScore + b.preferenceScore * 0.8 + b.majorScore * 0.7) -
-    (a.qualityScore + a.preferenceScore * 0.8 + a.majorScore * 0.7)
+    (b.qualityScore + b.preferenceScore * 0.8 + b.majorScore * 0.7 - b.elitePenalty) -
+    (a.qualityScore + a.preferenceScore * 0.8 + a.majorScore * 0.7 - a.elitePenalty)
   ));
   takeFor('stable', [...ranked].sort((a, b) =>
-    (b.preferenceScore + b.majorScore + b.qualityScore * 0.75) -
-    (a.preferenceScore + a.majorScore + a.qualityScore * 0.75)
+    (b.preferenceScore + b.majorScore + b.qualityScore * 0.75 - b.elitePenalty) -
+    (a.preferenceScore + a.majorScore + a.qualityScore * 0.75 - a.elitePenalty)
   ));
   takeFor('safe', [...ranked].sort((a, b) =>
     (normalSafetyScore(input, b.university) + b.preferenceScore * 0.8 + b.majorScore * 0.7) -
@@ -2844,12 +2946,13 @@ function buildCityAdvice(input: VolunteerAnalyzeInput): string[] {
   return ['城市/省份偏好未明确时，建议按省会/强产业城市/家庭可接受距离做三档筛选。'];
 }
 
-function buildRisks(input: VolunteerAnalyzeInput, usedFallback: boolean): string[] {
+function buildRisks(input: VolunteerAnalyzeInput, usedFallback: boolean, baselineWarning = ''): string[] {
   const risks = [
     '平行志愿不是完全没有风险，专业组、调剂范围和体检限制都要逐项核对。',
     '冲刺档不要堆太多热门专业，稳妥档要保证专业接受度，保底档要真的能接受去读。',
     '最终填报前必须以本省考试院和高校当年招生章程为准。',
   ];
+  if (baselineWarning) risks.unshift(`${baselineWarning} 当前更适合先评估专科/高职方案，或把本科目标改成明确的试探志愿，而不是按正常本科池理解“冲稳保”。`);
   if (normalizeKeywords(input.avoidMajors).length) risks.unshift('规避专业只会剔除明确命中的专业线；遇到院校线或专业组线，必须再核对组内专业构成。');
   if (!input.rank) risks.unshift('未提供位次会降低判断准确度，分数在不同年份之间不能直接硬比。');
   if (usedFallback) risks.unshift('当前缺少匹配录取数据，报告只能作为方向性参考，不能直接作为填报清单。');
