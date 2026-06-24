@@ -169,8 +169,34 @@ function extractKeywords(question: string): string[] {
   return keywordList.filter(kw => question.includes(kw));
 }
 
+function isVolunteerReportFollowupContext(context?: string, question?: string) {
+  const text = String(context || '');
+  const q = String(question || '');
+  return (
+    text.includes('咨询来源：志愿报告继续追问') ||
+    (text.includes('报告结论：') && (text.includes('报告候选') || text.includes('志愿报告ID：'))) ||
+    q.includes('请基于我的高考志愿分析报告继续帮我细化方案') ||
+    q.includes('请基于这份志愿分析报告') ||
+    q.includes('继续帮我细化这份志愿方案')
+  );
+}
+
+function buildVolunteerReportGuardrail(context?: string, question?: string) {
+  if (!isVolunteerReportFollowupContext(context, question)) return '';
+  return `
+
+志愿报告追问模式：
+1. 当前问题不是重新生成方案，而是基于现有志愿报告做解释、比较、细化和微调
+2. 必须把原报告结论、冲稳保分档、推荐理由、风险标签当作本次回答的基线
+3. 默认不要全盘否定或推翻原报告，不要把整份方案说成“都不合适”
+4. 如果发现明显矛盾，只能表达为“补充校验”或“边界提醒”，并指出该调整哪一所学校、哪一档、哪个专业组
+5. 用户问某个学校时，先解释它为什么会出现在原报告里，再补充说明它更适合冲、稳还是保，以及专业组/调剂/城市风险
+6. 回答重点放在排序优化、风险补充、院校对比、专业组取舍，不要脱离报告上下文重新给一套完全不同的名单
+7. 如果原报告本身候选很少或为空，要明确说明“这是基于当前报告的继续追问”，再建议补充或重做，不要假装原报告错误`;
+}
+
 // 构建 System Prompt
-function buildSystemPrompt(knowledge: string, context?: string, type: ConsultType = 'normal'): string {
+function buildSystemPrompt(knowledge: string, context?: string, type: ConsultType = 'normal', question?: string): string {
   const mode = type === 'deep'
     ? `\n\n回答模式：深度分析。请先给结论，再分层拆解依据、风险、可执行步骤。回答要更完整，适合择校、专业取舍、院校对比和志愿风险判断。`
     : `\n\n回答模式：普通问答。请直接回答核心问题，先给明确结论，再给 3-5 条关键依据。控制在 300-600 字；不要长篇展开，用户继续追问时再补充。`;
@@ -188,6 +214,7 @@ function buildSystemPrompt(knowledge: string, context?: string, type: ConsultTyp
 8. 注意排版：先给结论，再分段说明；每个要点单独换行，长段落不要挤成一整块
 
 ${mode}
+${buildVolunteerReportGuardrail(context, question)}
 ${context ? `用户提供的背景信息：${context}` : ''}
 ${knowledge ? `以下为相关参考知识，请结合回答：${knowledge}` : ''}`;
 
@@ -281,13 +308,15 @@ function splitLongAnswerLine(line: string) {
 }
 
 // 将 Skill 的 systemPrompt 与 knowledge/context 拼接
-function buildSkillPrompt(systemPrompt: string, knowledge: string, context?: string, type: ConsultType = 'normal'): string {
+function buildSkillPrompt(systemPrompt: string, knowledge: string, context?: string, type: ConsultType = 'normal', question?: string) {
   let prompt = hasUnsafeSkillPrompt(systemPrompt) ? sanitizeSkillPrompt(systemPrompt) : systemPrompt;
   prompt += type === 'deep'
     ? '\n\n回答模式：深度分析。请先给结论，再分层拆解依据、风险、可执行步骤。回答要更完整。'
     : '\n\n回答模式：普通问答。请直接回答核心问题，先给明确结论，再给 3-5 条关键依据。控制在 300-600 字；不要长篇展开，用户继续追问时再补充。';
   prompt += '\n\n内容安全要求：你是涨识小程序里的赛博张老师；严禁提及、模仿或暗示任何真实公众人物、教育博主、网红老师及其风格；严禁添加固定免责提示、第三方权利说明、话题标签、营销口号或类似开场标题。';
   prompt += '\n\n背景使用要求：如果用户提供了背景信息，必须优先使用其中的考生省份、科类/选科、分数、位次、目标城市/省份、偏好专业和规避专业；不要再假设这些信息缺失。回答开头要点明你正在按这些背景判断。';
+  const volunteerGuardrail = buildVolunteerReportGuardrail(context, question);
+  if (volunteerGuardrail) prompt += `\n${volunteerGuardrail}`;
   prompt += '\n\n排版要求：先给结论，再分段说明；每个要点单独换行；长段落不要挤成一整块。';
   if (context) prompt += `\n\n用户提供的背景信息：${context}`;
   if (knowledge) prompt += `\n\n以下为相关参考知识，请结合回答：${knowledge}`;
@@ -297,7 +326,11 @@ function buildSkillPrompt(systemPrompt: string, knowledge: string, context?: str
 function buildUserMessage(question: string, context?: string) {
   const cleanedContext = String(context || '').trim();
   if (!cleanedContext) return question;
+  const volunteerReportHeader = isVolunteerReportFollowupContext(cleanedContext, question)
+    ? '这是从志愿分析报告页发起的继续追问，请基于原报告候选和结论继续解释，不要重新推翻整份方案。'
+    : '';
   return [
+    volunteerReportHeader,
     '请严格基于以下用户背景回答，不要忽略其中的省份、分数、位次、目标城市/省份、偏好专业和规避专业。',
     '',
     '【用户背景】',
@@ -327,6 +360,9 @@ function resolveMaxTokens(type: ConsultType, aiConfig: any, skillMaxTokens?: num
 }
 
 function localFallbackAnswer(question: string, context?: string, type: ConsultType = 'normal') {
+  const reportFollowup = isVolunteerReportFollowupContext(context, question);
+  const reportSummary = extractContextValue(context, '报告结论');
+  const reportCandidates = extractContextValue(context, '报告候选明细');
   const requestedLocation = extractRequestedLocation(question);
   const schoolFromQuestion = extractSchoolFromQuestion(question);
   const schoolFromContext = extractContextValue(context, '关注院校');
@@ -345,6 +381,30 @@ function localFallbackAnswer(question: string, context?: string, type: ConsultTy
     extractContextValue(context, '目标城市或省份') ||
     extractContextValue(context, '目标城市') ||
     extractContextValue(context, '偏好城市');
+
+  if (reportFollowup) {
+    const lines = [
+      `先按原报告往下讲：${reportSummary || '这次提问来自志愿分析报告的继续追问，默认基于原方案细化，不重新推翻。'}`,
+    ];
+    if (school) {
+      lines.push(`${school}既然出现在原报告里，先看它当时被放进来的原因，再补充判断它更适合冲、稳还是保，以及专业组和调剂风险。`);
+    } else {
+      lines.push('这一步更适合比较原候选院校、微调顺序、补充专业组风险，而不是把整份推荐全部否掉。');
+    }
+    if (reportCandidates) {
+      lines.push('建议优先在原报告给出的候选范围里做取舍，再决定是否补充新的学校。');
+    }
+    if (preferredMajors) {
+      lines.push(`偏好专业是 ${preferredMajors}，细化时优先保证这个方向别被调剂稀释。`);
+    }
+    if (avoidMajors) {
+      lines.push(`规避专业是 ${avoidMajors}，这个约束比单纯学校名次更重要。`);
+    }
+    if (type === 'deep') {
+      lines.push('真正要改，也应该是调某一档、删某几所、换某几个专业组，不应该整份方案一句话推翻。');
+    }
+    return lines.join('\n');
+  }
 
   if (school) {
     const lines = [
@@ -496,8 +556,8 @@ export async function consult(params: ConsultParams): Promise<ConsultResult> {
 
     // 9. 构建 System Prompt：优先用 Skill，fallback 硬编码
     const systemPrompt = skill?.systemPrompt
-      ? buildSkillPrompt(skill.systemPrompt, knowledge, userContext, type)
-      : buildSystemPrompt(knowledge, userContext, type);
+      ? buildSkillPrompt(skill.systemPrompt, knowledge, userContext, type, question)
+      : buildSystemPrompt(knowledge, userContext, type, question);
 
     // 10. 调用 OpenAI 兼容模型
     const response = await axios.post(
@@ -624,8 +684,8 @@ export async function streamConsult(params: ConsultParams): Promise<StreamConsul
 
     // 7. 构建 System Prompt
     const systemPrompt = skill?.systemPrompt
-      ? buildSkillPrompt(skill.systemPrompt, knowledge, userContext, type)
-      : buildSystemPrompt(knowledge, userContext, type);
+      ? buildSkillPrompt(skill.systemPrompt, knowledge, userContext, type, question)
+      : buildSystemPrompt(knowledge, userContext, type, question);
 
     // 8. 调用 OpenAI 兼容 API（stream 模式）
     const response = await fetch(chatCompletionsUrl(runtime.baseUrl), {

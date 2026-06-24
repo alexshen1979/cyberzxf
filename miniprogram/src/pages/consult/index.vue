@@ -1189,9 +1189,24 @@ function hydrateContextFromLatestReport() {
 
 function buildLatestVolunteerContext() {
   const latest = uni.getStorageSync('latest_volunteer_report');
-  const input = latest?.input || latest?.inputSnapshot || latest?.result?.input;
-  if (!input) return '';
+  const input = latest?.input || latest?.inputSnapshot || latest?.result?.input || {};
+  const rec = latest?.result?.recommendations || latest?.recommendations || {};
+  const hasInput = Object.keys(input).length > 0;
+  if (!hasInput && !Object.keys(rec).length) return '';
+  const candidateBlocks = ['rush', 'stable', 'safe']
+    .map(bucket => {
+      const label = bucket === 'rush' ? '冲刺' : bucket === 'safe' ? '保底' : '稳妥';
+      const lines = ((rec[bucket] || []) as any[])
+        .slice(0, 3)
+        .map((item: any) => summarizeVolunteerCandidate(item, bucket))
+        .filter(Boolean);
+      return lines.length ? `${label}候选：\n${lines.join('\n')}` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
   return [
+    '咨询来源：志愿报告继续追问',
+    '回答任务：基于已有志愿方案继续解释和细化，不要直接推翻整份推荐。',
     input.province ? `省份：${input.province}` : '',
     input.subjectType ? `科类/选科：${input.subjectType}` : '',
     input.score ? `分数：${input.score}` : '',
@@ -1202,7 +1217,23 @@ function buildLatestVolunteerContext() {
     Array.isArray(input.avoidMajors) && input.avoidMajors.length ? `规避专业：${input.avoidMajors.join('、')}` : '',
     input.riskPreference ? `风险偏好：${riskPreferenceLabel(input.riskPreference)}` : '',
     input.familyExpectation ? `家庭/个人期待：${String(input.familyExpectation).slice(0, 160)}` : '',
+    latest?.summary || latest?.result?.summary ? `报告结论：${latest?.summary || latest?.result?.summary}` : '',
+    candidateBlocks ? `报告候选明细：\n${candidateBlocks}` : '',
   ].filter(Boolean).join('\n');
+}
+
+function summarizeVolunteerCandidate(item: any, bucket?: string) {
+  const name = item?.universityName || item?.name;
+  if (!name) return '';
+  const tags = [
+    item?.majorName ? `专业${item.majorName}` : '',
+    item?.minScore ? `最低${item.minScore}分` : '',
+    item?.minRank ? `位次${item.minRank}` : '',
+    item?.warningTags?.length ? `风险${item.warningTags.slice(0, 2).join('、')}` : '',
+  ].filter(Boolean).join('，');
+  const reason = String(item?.reason || '').trim().slice(0, 40);
+  const bucketLabelText = bucket === 'rush' ? '冲刺' : bucket === 'safe' ? '保底' : bucket === 'stable' ? '稳妥' : '';
+  return `- ${name}${bucketLabelText ? `｜${bucketLabelText}` : ''}${tags ? `｜${tags}` : ''}${reason ? `｜理由：${reason}` : ''}`;
 }
 
 function riskPreferenceLabel(value: string) {
@@ -1249,6 +1280,9 @@ async function sendMessageRegular(question: string, aiMsgId: string) {
 function buildLocalErrorAnswer(question: string, error: any) {
   const errMsg = String(error?.message || '');
   const school = extractContextLine('关注院校') || extractSchoolFromQuestion(question);
+  const reportSource = extractContextLine('咨询来源');
+  const reportSummary = extractContextLine('报告结论');
+  const reportCandidates = extractContextLine('报告候选明细');
   const province = extractContextLine('考生省份') || extractContextLine('省份');
   const subject = extractContextLine('选科/科类') || extractContextLine('科类/选科');
   const score = extractContextLine('分数');
@@ -1257,6 +1291,17 @@ function buildLocalErrorAnswer(question: string, error: any) {
   const preferredMajors = extractContextLine('偏好专业');
   const avoidMajors = extractContextLine('规避专业');
   const backgroundLine = [province, subject, score ? `${score}分` : '', rank ? `位次${rank}` : ''].filter(Boolean).join('，');
+  if (reportSource.includes('志愿报告继续追问')) {
+    return [
+      `先沿着原报告说，不重新推翻：${reportSummary || '这次继续追问要基于原志愿方案细化。'}`,
+      school
+        ? `${school}要不要放、放在哪一档，优先看它在原报告里为什么被放进来，再补充核对位次、专业组和调剂风险。`
+        : `这一步更适合做院校对比、顺序微调和风险补充，不建议把整份方案全部推翻重来。`,
+      reportCandidates ? `你这份报告里已经有候选范围，建议先在这些学校里比较，再决定增删。` : '',
+      preferredMajors ? `你之前填过偏好专业：${preferredMajors}，细化时要优先保住这个方向。` : '',
+      avoidMajors ? `规避专业：${avoidMajors}，这一条比学校名次更重要。` : '',
+    ].filter(Boolean).join('\n');
+  }
   if (school) {
     return [
       `先看结论：${school}要不要放进志愿，要按${backgroundLine || '你的分数和位次'}来判断，核心看近三年录取位次、专业组可接受度、城市和就业资源。`,

@@ -1137,13 +1137,18 @@ function buildReportConsultContext(school?: any) {
   const rec = result.value?.recommendations || {};
   const brief = ['rush', 'stable', 'safe']
     .map(key => {
-      const names = ((rec[key] || []) as any[]).slice(0, 5).map(item => item.universityName).filter(Boolean).join('、');
       const label = key === 'rush' ? '冲刺' : key === 'safe' ? '保底' : '稳妥';
-      return names ? `${label}：${names}` : '';
+      const lines = ((rec[key] || []) as any[])
+        .slice(0, 5)
+        .map((item: any) => summarizeConsultSchool(item, key))
+        .filter(Boolean);
+      return lines.length ? `${label}候选：\n${lines.join('\n')}` : '';
     })
     .filter(Boolean)
     .join('\n');
   return [
+    '咨询来源：志愿报告继续追问',
+    '回答任务：基于现有志愿报告做解释、比较、细化和微调，不要脱离原报告重新推翻方案。',
     currentReportId() ? `志愿报告ID：${currentReportId()}` : '',
     input.province ? `考生省份：${input.province}` : '',
     input.subjectType ? `选科/科类：${input.subjectType}` : '',
@@ -1156,7 +1161,7 @@ function buildReportConsultContext(school?: any) {
     Array.isArray(input.avoidMajors) && input.avoidMajors.length ? `规避专业：${input.avoidMajors.join('、')}` : '',
     input.familyExpectation ? `家庭/个人期待：${String(input.familyExpectation).slice(0, 220)}` : '',
     result.value?.summary ? `报告结论：${result.value.summary}` : '',
-    brief ? `报告候选：\n${brief}` : '',
+    brief ? `报告候选明细：\n${brief}` : '',
     school?.universityName ? `关注院校：${school.universityName}` : '',
     [school?.province, school?.city].filter(Boolean).length ? `院校城市：${[school?.province, school?.city].filter(Boolean).join(' · ')}` : '',
     school?.type ? `院校类型：${school.type}` : '',
@@ -1166,6 +1171,20 @@ function buildReportConsultContext(school?: any) {
     school?.warningTags?.length ? `报告风险标签：${school.warningTags.join('、')}` : '',
     school?.preferenceTags?.length ? `报告偏好命中：${school.preferenceTags.join('、')}` : '',
   ].filter(Boolean).join('\n');
+}
+
+function summarizeConsultSchool(item: any, bucket?: string) {
+  const name = item?.universityName || item?.name;
+  if (!name) return '';
+  const tags = [
+    item?.majorName ? `专业${item.majorName}` : '',
+    item?.minScore ? `最低${item.minScore}分` : '',
+    item?.minRank ? `位次${item.minRank}` : '',
+    item?.subjectRequirement ? `选科${item.subjectRequirement}` : '',
+    item?.warningTags?.length ? `风险${item.warningTags.slice(0, 2).join('、')}` : '',
+  ].filter(Boolean).join('，');
+  const reason = String(item?.reason || '').trim().slice(0, 48);
+  return `- ${name}${bucket ? `｜${bucketLabel(bucket)}` : ''}${tags ? `｜${tags}` : ''}${reason ? `｜理由：${reason}` : ''}`;
 }
 
 function openUniversity(item: any) {
