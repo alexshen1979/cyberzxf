@@ -15,119 +15,6 @@
       </view>
     </view>
 
-    <view class="intro-overlay" v-if="introOpen" @touchmove.stop.prevent>
-      <view class="intro-shell">
-        <view class="intro-topbar">
-          <view>
-            <text class="intro-kicker">先别急着填表</text>
-            <text class="intro-subkicker">先用 4 张画面，感受这份报告会怎么帮你把焦虑变清楚。</text>
-          </view>
-          <text class="intro-skip" @click="finishIntroSlides">跳过</text>
-        </view>
-
-        <swiper class="intro-swiper" :current="introCurrent" @change="handleIntroSlideChange">
-          <swiper-item>
-            <view class="intro-slide hero">
-              <text class="intro-slide-eyebrow">第 1 幕</text>
-              <text class="intro-slide-title">{{ introProvince }} {{ introSampleScore }} 分，先别被想象吓住</text>
-              <text class="intro-slide-desc">{{ introEmotionLead }}</text>
-              <view class="intro-score-band">
-                <text class="intro-score-value">{{ introSampleScore }}</text>
-                <view class="intro-score-copy">
-                  <text>{{ introProvince }}考生视角</text>
-                  <text>{{ introSubjectType }} · {{ introTargetBatch }}</text>
-                </view>
-              </view>
-              <view class="intro-school-pills" v-if="introSchoolNames.length">
-                <text class="intro-pill" v-for="name in introSchoolNames" :key="name">{{ name }}</text>
-              </view>
-              <view class="intro-empty-note" v-else-if="introLoading">
-                正在按你的省份拉取同分段候选学校...
-              </view>
-              <text class="intro-emotion-line">很多时候压垮人的，不是分数本身，而是不知道这个分数还有没有路。</text>
-            </view>
-          </swiper-item>
-
-          <swiper-item>
-            <view class="intro-slide schools">
-              <text class="intro-slide-eyebrow">第 2 幕</text>
-              <text class="intro-slide-title">学校不是一团雾，我们会先把它们排成队</text>
-              <text class="intro-slide-desc">先拆成冲、稳、保，再把城市、层次和风险一起展开给你看。</text>
-              <view class="intro-school-cards" v-if="introSchools.length">
-                <view class="intro-school-card" v-for="item in introSchools" :key="`${item.universityName}-${item.bucket}`">
-                  <view class="intro-school-head">
-                    <text class="intro-school-name">{{ item.universityName }}</text>
-                    <text class="intro-school-bucket" :class="item.bucket">{{ introBucketLabel(item.bucket) }}</text>
-                  </view>
-                  <text class="intro-school-meta">{{ introSchoolMeta(item) }}</text>
-                  <text class="intro-school-reason">{{ introSchoolReason(item) }}</text>
-                </view>
-              </view>
-              <view class="intro-empty-note" v-else>
-                {{ introLoading ? '正在整理院校候选...' : '系统会先帮你筛出最值得认真看的学校。' }}
-              </view>
-            </view>
-          </swiper-item>
-
-          <swiper-item>
-            <view class="intro-slide majors">
-              <text class="intro-slide-eyebrow">第 3 幕</text>
-              <text class="intro-slide-title">真正决定你以后怎么走的，常常不只是学校名字</text>
-              <text class="intro-slide-desc">专业方向、城市机会、调剂风险，都会一起算，不让你只盯着一个校名。</text>
-              <view class="intro-major-grid" v-if="introMajorHighlights.length">
-                <view class="intro-major-chip" v-for="major in introMajorHighlights" :key="major">
-                  <text>{{ major }}</text>
-                </view>
-              </view>
-              <view class="intro-empty-note" v-else>
-                {{ introLoading ? '正在整理同分段常见专业方向...' : '报告会把专业、城市和风险放在一起看。' }}
-              </view>
-              <view class="intro-major-note">
-                <text>学校决定起点，专业影响路径，城市会放大你未来的选择空间。</text>
-              </view>
-            </view>
-          </swiper-item>
-
-          <swiper-item>
-            <view class="intro-slide report">
-              <text class="intro-slide-eyebrow">第 4 幕</text>
-              <text class="intro-slide-title">最后给你的，不会是一张冷冰冰的学校名单</text>
-              <text class="intro-slide-desc">{{ introReportSummary }}</text>
-              <view class="intro-report-stats">
-                <view class="intro-stat-card">
-                  <text class="intro-stat-label">可冲击</text>
-                  <text class="intro-stat-value">{{ introStats.rush }}</text>
-                </view>
-                <view class="intro-stat-card">
-                  <text class="intro-stat-label">较稳妥</text>
-                  <text class="intro-stat-value">{{ introStats.stable }}</text>
-                </view>
-                <view class="intro-stat-card">
-                  <text class="intro-stat-label">可保底</text>
-                  <text class="intro-stat-value">{{ introStats.safe }}</text>
-                </view>
-              </view>
-              <view class="intro-report-list">
-                <text>冲稳保结构一眼看清</text>
-                <text>专业和城市建议一起给</text>
-                <text>调剂、选科、退档风险提前提醒</text>
-                <text>完整报告还能保存、继续追问</text>
-              </view>
-            </view>
-          </swiper-item>
-        </swiper>
-
-        <view class="intro-footer">
-          <view class="intro-dots">
-            <text v-for="index in introSlideCount" :key="index" :class="{ active: introCurrent === index - 1 }"></text>
-          </view>
-          <view class="intro-primary-btn" @click="nextIntroSlide">
-            {{ introCurrent >= introSlideCount - 1 ? '开始填写' : '继续看' }}
-          </view>
-        </view>
-      </view>
-    </view>
-
     <view class="mock-card">
       <view class="form-step">
         <view class="step-row">
@@ -411,6 +298,15 @@
             <text v-if="tutorialFocusVisible('score')" class="tutorial-hit-label">{{ currentTutorialStep.hint }}</text>
           </view>
           <text class="rank-lookup-tip" :class="rankLookupState">{{ rankLookupMessage }}</text>
+          <view v-if="undergraduateSwitchHint" class="batch-warning-card">
+            <view class="batch-warning-copy">
+              <text class="batch-warning-title">当前更适合先看专科/高职方案</text>
+              <text class="batch-warning-desc">{{ undergraduateSwitchHint }}</text>
+            </view>
+            <view class="batch-warning-action" @click="switchToJuniorCollege">
+              一键切到专科
+            </view>
+          </view>
         </view>
 
         <view v-else class="score-section art-score-section" :class="tutorialTargetClass('score')">
@@ -738,27 +634,6 @@ const adjustmentOptions = [
   { label: '看专业组', value: 'depends' },
   { label: '不接受', value: 'reject' },
 ] as const;
-const introSlidesStorageKey = 'volunteer_home_intro_seen_v1';
-const introScoreExamples: Record<string, number> = {
-  北京: 561,
-  上海: 501,
-  江苏: 518,
-  浙江: 592,
-  山东: 546,
-  广东: 534,
-  河北: 531,
-  福建: 521,
-  湖北: 523,
-  湖南: 512,
-  河南: 548,
-  四川: 531,
-  安徽: 522,
-  江西: 519,
-  辽宁: 517,
-  重庆: 512,
-  广西: 505,
-  贵州: 498,
-};
 const tutorialStorageKey = 'volunteer_home_tutorial_seen_v1';
 const pendingSubmitAfterLoginStorageKey = 'volunteer_pending_submit_after_login';
 const tutorialSteps = [
@@ -862,10 +737,6 @@ const rankManuallyEdited = ref(false);
 const rankLookupMessage = ref('填写分数后自动匹配一分一段位次');
 const recommendationPreview = ref<any>(null);
 const recommendationPreviewLoading = ref(false);
-const introOpen = ref(false);
-const introCurrent = ref(0);
-const introLoading = ref(false);
-const introPreview = ref<any>(null);
 const artSupport = ref<Array<{
   province: string;
   year: number;
@@ -879,7 +750,6 @@ const reportCost = ref(38);
 const publicFreeGift = ref(100);
 const provinceAutoLocated = ref(false);
 const provinceLocationTried = ref(false);
-const introAutoChecked = ref(false);
 const tutorialOpen = ref(false);
 const tutorialStep = ref(0);
 const tutorialAutoChecked = ref(false);
@@ -889,7 +759,6 @@ let rankLookupTimer: ReturnType<typeof setTimeout> | null = null;
 let rankLookupSeq = 0;
 let recommendationPreviewTimer: ReturnType<typeof setTimeout> | null = null;
 let recommendationPreviewSeq = 0;
-let introPreviewSeq = 0;
 let preferredMajorTimer: ReturnType<typeof setTimeout> | null = null;
 let avoidMajorTimer: ReturnType<typeof setTimeout> | null = null;
 let tutorialAutoAdvanceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -909,91 +778,6 @@ const tutorialProgressText = computed(() => `${tutorialStep.value + 1}/${tutoria
 const submitTutorialHint = computed(() => '点击开启智能推荐');
 
 const pointsPillText = computed(() => userStore.isLogin ? `${userStore.pointsBalance} 点` : `登录即送${publicFreeGift.value}点`);
-const introSlideCount = 4;
-
-const introProvince = computed(() => {
-  const fromForm = normalizeProvinceName(form.province);
-  const fromUser = normalizeProvinceName((userStore.userInfo as any)?.province);
-  const fromCache = normalizeProvinceName(uni.getStorageSync(locatedProvinceStorageKey));
-  return fromForm || fromUser || fromCache || '江苏';
-});
-
-const introSampleScore = computed(() => {
-  const currentScore = Number(form.score);
-  if (Number.isFinite(currentScore) && currentScore > 0) return currentScore;
-  return introScoreExamples[introProvince.value] || 528;
-});
-
-const introSubjectType = computed(() => {
-  if (comprehensiveProvinces.includes(introProvince.value)) return '综合改革';
-  if (legacyProvinces.includes(introProvince.value)) return '理科';
-  return '物理类';
-});
-
-const introTargetBatch = computed(() => {
-  if (legacyProvinces.includes(introProvince.value)) return '本科一批';
-  if (['山东', '浙江'].includes(introProvince.value)) return '普通类一段';
-  if (introProvince.value === '上海') return '本科普通批';
-  return '本科批';
-});
-
-const introEmotionLead = computed(() => {
-  return `如果你在${introProvince.value}考到 ${introSampleScore.value} 分，最需要的不是更多建议，而是先知道自己大概站在哪一档。`;
-});
-
-const introStats = computed(() => {
-  const stats = introPreview.value?.recommendationStats || {};
-  return {
-    rush: Number(stats.rush || 0),
-    stable: Number(stats.stable || 0),
-    safe: Number(stats.safe || 0),
-  };
-});
-
-const introSchools = computed(() => {
-  const recommendations = introPreview.value?.recommendations || {};
-  const orderedBuckets = ['stable', 'rush', 'safe'];
-  const seen = new Set<string>();
-  const list: Array<any> = [];
-  orderedBuckets.forEach((bucket) => {
-    ((recommendations[bucket] || []) as any[]).forEach((item) => {
-      const key = String(item?.universityId || item?.universityName || '');
-      if (!key || seen.has(key) || list.length >= 3) return;
-      seen.add(key);
-      list.push(Object.assign({}, item, { bucket }));
-    });
-  });
-  return list;
-});
-
-const introSchoolNames = computed(() => introSchools.value.map(item => item.universityName).filter(Boolean).slice(0, 3));
-
-const introMajorHighlights = computed(() => {
-  const recommendations = introPreview.value?.recommendations || {};
-  const result: string[] = [];
-  const seen = new Set<string>();
-  ['stable', 'rush', 'safe'].forEach((bucket) => {
-    ((recommendations[bucket] || []) as any[]).forEach((item) => {
-      const candidates = [
-        item?.majorName,
-        ...((item?.optionLines || []) as any[]).map(line => line?.majorName || line?.title),
-      ];
-      candidates.forEach((name) => {
-        const text = String(name || '').trim();
-        if (!text || seen.has(text) || text.includes('录取线') || result.length >= 6) return;
-        seen.add(text);
-        result.push(text);
-      });
-    });
-  });
-  return result;
-});
-
-const introReportSummary = computed(() => {
-  const summary = String(introPreview.value?.summary || '').trim();
-  if (summary) return summary;
-  return `系统会先按 ${introProvince.value} 的规则，把你这个分数附近的候选学校拆成冲、稳、保，再补上专业和风险提醒。`;
-});
 
 const engagementInline = computed(() => {
   if (!userStore.isLogin) return `可先填写，生成时登录即送 ${publicFreeGift.value} 点`;
@@ -1132,6 +916,14 @@ const recommendationCountHint = computed(() => {
   return `报告默认展示每档前 ${recommendationCounts.value.displayLimit} 个，报告页可继续查看更多候选。`;
 });
 
+const undergraduateSwitchHint = computed(() => {
+  if (examCategory.value !== 'normal' || admissionLevel.value !== '本科') return '';
+  const summary = String(recommendationPreview.value?.summary || '');
+  if (!summary.includes('本次不再强行补本科冲稳保候选')) return '';
+  const scorePosition = String(recommendationPreview.value?.scorePosition || '').trim();
+  return scorePosition || '当前分数明显低于本科主数据带，建议先切到专科/高职批次查看更接近现实的方案。';
+});
+
 const fillMode = computed(() => {
   if (!form.province) {
     return {
@@ -1262,77 +1054,6 @@ function riskPreferenceLabel(value?: string) {
   if (value === 'conservative') return '稳妥优先';
   if (value === 'aggressive') return '适度进攻';
   return '稳中带冲';
-}
-
-function introBucketLabel(bucket?: string) {
-  if (bucket === 'rush') return '可冲';
-  if (bucket === 'safe') return '可保';
-  return '较稳';
-}
-
-function introSchoolMeta(item: any) {
-  return [item?.city || item?.province, item?.type, item?.level].filter(Boolean).slice(0, 3).join(' · ') || '同分段候选院校';
-}
-
-function introSchoolReason(item: any) {
-  const reason = String(item?.reason || '').trim();
-  if (reason) return reason;
-  return '会结合录取线、城市和专业方向，判断它为什么值得你认真看。';
-}
-
-function handleIntroSlideChange(event: any) {
-  introCurrent.value = Number(event?.detail?.current || 0);
-}
-
-function nextIntroSlide() {
-  if (introCurrent.value >= introSlideCount - 1) {
-    finishIntroSlides();
-    return;
-  }
-  introCurrent.value += 1;
-}
-
-function finishIntroSlides() {
-  introOpen.value = false;
-  uni.setStorageSync(introSlidesStorageKey, '1');
-}
-
-async function maybeOpenIntroSlides() {
-  if (introAutoChecked.value) return;
-  introAutoChecked.value = true;
-  if (uni.getStorageSync(introSlidesStorageKey)) return;
-
-  introOpen.value = true;
-  introCurrent.value = 0;
-  await loadIntroPreview();
-}
-
-async function loadIntroPreview() {
-  const seq = ++introPreviewSeq;
-  introLoading.value = true;
-  try {
-    const res = await api.volunteer.preview({
-      examCategory: 'normal',
-      province: introProvince.value,
-      year: form.year || fallbackDataYear,
-      subjectType: introSubjectType.value,
-      score: introSampleScore.value,
-      targetBatch: introTargetBatch.value,
-      riskPreference: 'balanced',
-      recommendationLimit: 6,
-    });
-    if (seq === introPreviewSeq) {
-      introPreview.value = res.data || null;
-    }
-  } catch {
-    if (seq === introPreviewSeq) {
-      introPreview.value = null;
-    }
-  } finally {
-    if (seq === introPreviewSeq) {
-      introLoading.value = false;
-    }
-  }
 }
 
 function tutorialTargetClass(key: typeof tutorialSteps[number]['key']) {
@@ -2218,6 +1939,11 @@ function handlePointsPill() {
   goRecharge();
 }
 
+function switchToJuniorCollege() {
+  setAdmissionLevel('专科');
+  uni.showToast({ title: '已切到专科批次', icon: 'none' });
+}
+
 function goRecharge() {
   uni.navigateTo({ url: '/pages/recharge/index' });
 }
@@ -2352,7 +2078,6 @@ onShow(() => {
   loadArtSupport();
   loadRegions();
   loadReports();
-  maybeOpenIntroSlides();
   continueSubmitAfterLogin();
 });
 
@@ -2515,345 +2240,47 @@ watch(
   font-weight: 900;
 }
 
-.intro-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9901;
-  padding: calc(26rpx + env(safe-area-inset-top)) 24rpx calc(24rpx + env(safe-area-inset-bottom));
-  box-sizing: border-box;
-  background:
-    radial-gradient(circle at top left, rgba(250, 204, 21, 0.20), transparent 30%),
-    radial-gradient(circle at top right, rgba(14, 165, 233, 0.18), transparent 34%),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(17, 24, 39, 0.98) 100%);
-  backdrop-filter: blur(14rpx);
-}
-
-.intro-shell {
-  height: 100%;
+.batch-warning-card {
   display: flex;
-  flex-direction: column;
-  border-radius: 32rpx;
-  padding: 28rpx 24rpx 24rpx;
-  box-sizing: border-box;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.94) 100%);
-  border: 1rpx solid rgba(148, 163, 184, 0.18);
-  box-shadow: 0 32rpx 84rpx rgba(15, 23, 42, 0.36);
-}
-
-.intro-topbar {
-  display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16rpx;
-}
-
-.intro-kicker {
-  display: block;
-  color: #f8fafc;
-  font-size: 34rpx;
-  font-weight: 900;
-  line-height: 1.2;
-}
-
-.intro-subkicker {
-  display: block;
-  margin-top: 10rpx;
-  color: rgba(226, 232, 240, 0.84);
-  font-size: 24rpx;
-  line-height: 1.45;
-}
-
-.intro-skip {
-  flex-shrink: 0;
-  color: rgba(226, 232, 240, 0.72);
-  font-size: 24rpx;
-  font-weight: 800;
-}
-
-.intro-swiper {
-  flex: 1;
-  min-height: 0;
-  margin-top: 20rpx;
-}
-
-.intro-slide {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  border-radius: 28rpx;
-  padding: 26rpx 24rpx;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.intro-slide.hero {
-  background: linear-gradient(160deg, rgba(124, 58, 237, 0.28) 0%, rgba(15, 118, 110, 0.24) 52%, rgba(249, 115, 22, 0.18) 100%);
-}
-
-.intro-slide.schools {
-  background: linear-gradient(160deg, rgba(14, 165, 233, 0.20) 0%, rgba(30, 64, 175, 0.16) 100%);
-}
-
-.intro-slide.majors {
-  background: linear-gradient(160deg, rgba(16, 185, 129, 0.22) 0%, rgba(13, 148, 136, 0.12) 100%);
-}
-
-.intro-slide.report {
-  background: linear-gradient(160deg, rgba(249, 115, 22, 0.20) 0%, rgba(190, 24, 93, 0.16) 100%);
-}
-
-.intro-slide-eyebrow {
-  display: inline-flex;
-  align-self: flex-start;
-  padding: 10rpx 16rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fef3c7;
-  font-size: 21rpx;
-  font-weight: 900;
-  letter-spacing: 1rpx;
-}
-
-.intro-slide-title {
-  display: block;
+  gap: 20rpx;
   margin-top: 18rpx;
-  color: #fff;
-  font-size: 44rpx;
-  font-weight: 900;
-  line-height: 1.18;
-}
-
-.intro-slide-desc {
-  display: block;
-  margin-top: 14rpx;
-  color: rgba(241, 245, 249, 0.86);
-  font-size: 27rpx;
-  line-height: 1.5;
-}
-
-.intro-score-band {
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
-  margin-top: 24rpx;
-  padding: 20rpx 22rpx;
-  border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1rpx solid rgba(255, 255, 255, 0.10);
-}
-
-.intro-score-value {
-  color: #fde68a;
-  font-size: 72rpx;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.intro-score-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-  color: rgba(241, 245, 249, 0.84);
-  font-size: 24rpx;
-  line-height: 1.35;
-}
-
-.intro-school-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-  margin-top: 22rpx;
-}
-
-.intro-pill {
-  padding: 12rpx 18rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.10);
-  color: #fff;
-  font-size: 24rpx;
-  font-weight: 800;
-}
-
-.intro-emotion-line,
-.intro-empty-note {
-  margin-top: auto;
-  color: rgba(226, 232, 240, 0.78);
-  font-size: 24rpx;
-  line-height: 1.5;
-}
-
-.intro-school-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 14rpx;
-  margin-top: 22rpx;
-}
-
-.intro-school-card {
   padding: 18rpx 20rpx;
-  border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1rpx solid rgba(255, 255, 255, 0.10);
+  border-radius: 20rpx;
+  background: linear-gradient(135deg, #fff7ed 0%, #fffbeb 100%);
+  border: 1rpx solid rgba(245, 158, 11, 0.24);
 }
 
-.intro-school-head {
+.batch-warning-copy {
+  min-width: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
+  flex-direction: column;
+  gap: 6rpx;
 }
 
-.intro-school-name {
-  color: #fff;
-  font-size: 29rpx;
-  font-weight: 900;
-  line-height: 1.24;
-}
-
-.intro-school-bucket {
-  flex-shrink: 0;
-  padding: 8rpx 14rpx;
-  border-radius: 999rpx;
-  color: #fff;
-  font-size: 20rpx;
-  font-weight: 900;
-}
-
-.intro-school-bucket.rush {
-  background: rgba(245, 158, 11, 0.84);
-}
-
-.intro-school-bucket.stable {
-  background: rgba(16, 185, 129, 0.82);
-}
-
-.intro-school-bucket.safe {
-  background: rgba(59, 130, 246, 0.82);
-}
-
-.intro-school-meta {
-  display: block;
-  margin-top: 10rpx;
-  color: rgba(226, 232, 240, 0.78);
-  font-size: 22rpx;
-  line-height: 1.35;
-}
-
-.intro-school-reason {
-  display: block;
-  margin-top: 10rpx;
-  color: rgba(248, 250, 252, 0.90);
+.batch-warning-title {
+  color: #9a3412;
   font-size: 24rpx;
-  line-height: 1.46;
-}
-
-.intro-major-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-  margin-top: 24rpx;
-}
-
-.intro-major-chip {
-  padding: 14rpx 18rpx;
-  border-radius: 18rpx;
-  background: rgba(255, 255, 255, 0.10);
-  border: 1rpx solid rgba(255, 255, 255, 0.08);
-  color: #ecfeff;
-  font-size: 24rpx;
-  font-weight: 800;
+  font-weight: 900;
   line-height: 1.3;
 }
 
-.intro-major-note {
-  margin-top: auto;
-  padding: 18rpx 20rpx;
-  border-radius: 20rpx;
-  background: rgba(15, 23, 42, 0.18);
-  color: rgba(236, 253, 245, 0.92);
-  font-size: 24rpx;
-  line-height: 1.48;
-}
-
-.intro-report-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12rpx;
-  margin-top: 24rpx;
-}
-
-.intro-stat-card {
-  padding: 18rpx 16rpx;
-  border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.09);
-  text-align: center;
-}
-
-.intro-stat-label {
-  display: block;
-  color: rgba(254, 242, 242, 0.78);
-  font-size: 22rpx;
-  font-weight: 700;
-}
-
-.intro-stat-value {
-  display: block;
-  margin-top: 8rpx;
-  color: #fff;
-  font-size: 42rpx;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.intro-report-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-  margin-top: 24rpx;
-  padding: 22rpx 20rpx;
-  border-radius: 22rpx;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 247, 237, 0.94);
-  font-size: 24rpx;
+.batch-warning-desc {
+  color: #7c2d12;
+  font-size: 21rpx;
   line-height: 1.45;
 }
 
-.intro-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16rpx;
-  margin-top: 18rpx;
-}
-
-.intro-dots {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-}
-
-.intro-dots text {
-  width: 18rpx;
-  height: 18rpx;
+.batch-warning-action {
+  flex-shrink: 0;
+  padding: 14rpx 20rpx;
   border-radius: 999rpx;
-  background: rgba(148, 163, 184, 0.38);
-}
-
-.intro-dots text.active {
-  width: 42rpx;
-  background: #fde68a;
-}
-
-.intro-primary-btn {
-  min-width: 188rpx;
-  padding: 18rpx 24rpx;
-  border-radius: 999rpx;
-  background: linear-gradient(135deg, #f59e0b 0%, #fb7185 100%);
+  background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
   color: #fff;
-  font-size: 26rpx;
+  font-size: 22rpx;
   font-weight: 900;
   text-align: center;
-  box-shadow: 0 18rpx 32rpx rgba(245, 158, 11, 0.28);
 }
 
 .points-pill {
